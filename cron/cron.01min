@@ -1,0 +1,5 @@
+#!/bin/sh
+# Zeitraffer zur eingestellten Uhrzeit, Archiv-Bereinigung taeglich 03:35.
+if [ -f REPLACELBPHTMLDIR/cam_cron.php ]; then
+  /usr/bin/php REPLACELBPHTMLDIR/cam_cron.php >/dev/null 2>&1
+fi
