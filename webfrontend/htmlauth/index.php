@@ -1,6 +1,6 @@
 <?php
 /**
- * ACTi Kamera - Admin-Oberflaeche (v1.1.0)
+ * ACTi Kamera - Admin-Oberflaeche
  * Reiter: Einstellungen | Einbindung in Loxone | Aufnahmen | Test | Protokoll
  *
  * WICHTIG: LBWeb::lbheader() setzt SDK-GLOBALS (u.a. $cfg als stdClass) und
@@ -158,381 +158,343 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 .acw, .acw * { text-shadow: none !important; }
 .acw h2 { color: #6dac20; margin: 18px 0 6px; font-size: 1.15em; }
 
-/* Gleich grosse Schaltflaechen mit gleichem Abstand, egal ob Link oder Formular */
-.acw .ac-h3 { color: #4f7d17; font-size: 1.0em; font-weight: 700; margin: 16px 0 2px; }
-.acw .ac-knopfreihe { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 4px; align-items: stretch; }
-.acw .ac-knopfreihe form { margin: 0; display: flex; }
-.acw .ac-knopfreihe .ac-btn { flex: 0 0 auto; min-width: 250px; text-align: center;
+/* Gleich grosse Schaltflaechen mit gleichem Abstand, egal ob Link <?php echo cam_t('TEXT.ODER'); ?> Formular */
+.acw .sm-h3 { color: #4f7d17; font-size: 1.0em; font-weight: 700; margin: 16px 0 2px; }
+.acw .sm-knopfreihe { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 4px; align-items: stretch; }
+.acw .sm-knopfreihe form { margin: 0; display: flex; }
+.acw .sm-knopfreihe .sm-btn { flex: 0 0 auto; min-width: 250px; text-align: center;
     display: inline-flex; align-items: center; justify-content: center; line-height: 1.25; }
-.acw .ac-legende { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 2px; font-size: 0.86em; color: #555; }
-.acw .ac-legende span { display: inline-flex; align-items: center; gap: 6px; }
-.acw .ac-punkt { width: 13px; height: 13px; border-radius: 3px; display: inline-block; }
-.acw .ac-btn.ac-b-lesen { background: #6dac20; }
-.acw .ac-btn.ac-b-technik { background: #546e7a; }
-.acw .ac-btn.ac-b-aktion { background: #e0620d; }
-.acw .ac-punkt.ac-b-lesen { background: #6dac20; }
-.acw .ac-punkt.ac-b-technik { background: #546e7a; }
-.acw .ac-punkt.ac-b-aktion { background: #e0620d; }
+.acw .sm-legende { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 2px; font-size: 0.86em; color: #555; }
+.acw .sm-legende span { display: inline-flex; align-items: center; gap: 6px; }
+.acw .sm-punkt { width: 13px; height: 13px; border-radius: 3px; display: inline-block; }
+.acw .sm-btn.sm-b-lesen { background: #6dac20; }
+.acw .sm-btn.sm-b-technik { background: #546e7a; }
+.acw .sm-btn.sm-b-aktion { background: #e0620d; }
+.acw .sm-punkt.sm-b-lesen { background: #6dac20; }
+.acw .sm-punkt.sm-b-technik { background: #546e7a; }
+.acw .sm-punkt.sm-b-aktion { background: #e0620d; }
 .acw label { display: block; font-weight: 600; margin: 8px 0 2px; }
 .acw input[type=text], .acw input[type=password], .acw input[type=number], .acw select {
     width: 100%; padding: 7px 9px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; background: #fff; }
-.acw .ac-row { display: flex; gap: 14px; flex-wrap: wrap; }
-.acw .ac-row > div { flex: 1 1 210px; }
-.acw .ac-small { color: #666; font-size: 0.88em; line-height: 1.45; }
-.acw .ac-mono { font-family: monospace; background: #f4f4f4; padding: 1px 5px; border-radius: 4px; }
-.acw .ac-btn { background: #6dac20; color: #fff !important; border: 0; border-radius: 8px; padding: 9px 18px;
+.acw .sm-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.acw .sm-row > div { flex: 1 1 210px; }
+.acw .sm-small { color: #666; font-size: 0.88em; line-height: 1.45; }
+.acw .sm-mono { font-family: monospace; background: #f4f4f4; padding: 1px 5px; border-radius: 4px; }
+.acw .sm-btn { background: #6dac20; color: #fff !important; border: 0; border-radius: 8px; padding: 9px 18px;
     cursor: pointer; text-decoration: none; font-size: 0.95em; text-shadow: none !important; }
-.acw .ac-alert { border-radius: 8px; padding: 10px 14px; margin: 12px 0; }
-.acw .ac-ok { background: #e8f5e9; border: 1px solid #6dac20; }
-.acw .ac-warn { background: #fff8e1; border: 1px solid #ffb300; }
-.acw .ac-err { background: #ffebee; border: 1px solid #c62828; }
-.acw .ac-info { background: #eef4fb; border: 1px solid #90a4ae; }
-.acw .ac-tabs { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 2px solid #6dac20; flex-wrap: wrap; }
-.acw .ac-tab { background: #eee; border: 1px solid #ccc; border-bottom: 0; border-radius: 8px 8px 0 0; padding: 9px 18px;
+.acw .sm-alert { border-radius: 8px; padding: 10px 14px; margin: 12px 0; }
+.acw .sm-ok { background: #e8f5e9; border: 1px solid #6dac20; }
+.acw .sm-warn { background: #fff8e1; border: 1px solid #ffb300; }
+.acw .sm-err { background: #ffebee; border: 1px solid #c62828; }
+.acw .sm-info { background: #eef4fb; border: 1px solid #90a4ae; }
+.acw .sm-tabs { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 2px solid #6dac20; flex-wrap: wrap; }
+.acw .sm-tab { background: #eee; border: 1px solid #ccc; border-bottom: 0; border-radius: 8px 8px 0 0; padding: 9px 18px;
     cursor: pointer; color: #444 !important; text-shadow: none !important; }
-.acw .ac-tab.ac-active { background: #6dac20; color: #fff !important; border-color: #6dac20; font-weight: 600; }
-.acw .ac-pane { display: none; padding-top: 4px; }
-.acw .ac-pane.ac-active { display: block; }
-.acw .ac-tbl { border-collapse: collapse; margin: 6px 0 10px; }
-.acw .ac-tbl th, .acw .ac-tbl td { border: 1px solid #ddd; padding: 5px 9px; text-align: left; vertical-align: top; }
-.acw .ac-tbl th { background: #f4f4f4; }
-.acw .ac-log { background: #263238; color: #cfd8dc; font-family: monospace; font-size: 0.82em;
+.acw .sm-tab.sm-active { background: #6dac20; color: #fff !important; border-color: #6dac20; font-weight: 600; }
+.acw .sm-pane { display: none; padding-top: 4px; }
+.acw .sm-pane.sm-active { display: block; }
+.acw .sm-tbl { border-collapse: collapse; margin: 6px 0 10px; }
+.acw .sm-tbl th, .acw .sm-tbl td { border: 1px solid #ddd; padding: 5px 9px; text-align: left; vertical-align: top; }
+.acw .sm-tbl th { background: #f4f4f4; }
+.acw .sm-log { background: #263238; color: #cfd8dc; font-family: monospace; font-size: 0.82em;
     padding: 10px; border-radius: 8px; max-height: 460px; overflow: auto; white-space: pre-wrap; box-shadow: none; }
-.acw .ac-step { border-left: 4px solid #6dac20; padding: 4px 0 4px 12px; margin: 12px 0; }
-.acw .ac-gal { display: flex; flex-wrap: wrap; gap: 8px; }
-.acw .ac-gal figure { margin: 0; width: 190px; }
-.acw .ac-gal img { width: 100%; border-radius: 6px; border: 1px solid #ccc; }
-.acw .ac-gal figcaption { font-size: 0.78em; color: #666; word-break: break-all; }
+.acw .sm-step { border-left: 4px solid #6dac20; padding: 4px 0 4px 12px; margin: 12px 0; }
+.acw .sm-gal { display: flex; flex-wrap: wrap; gap: 8px; }
+.acw .sm-gal figure { margin: 0; width: 190px; }
+.acw .sm-gal img { width: 100%; border-radius: 6px; border: 1px solid #ccc; }
+.acw .sm-gal figcaption { font-size: 0.78em; color: #666; word-break: break-all; }
 </style>
 <div class="acw">
-<h1 style="color:#6dac20;text-shadow:none;">ACTi Kamera</h1>
-<div class="ac-small">Holt Bilder von einer ACTi-Netzwerkkamera und stellt sie Loxone bereit &mdash;
-<b>ohne Zugangsdaten in der Loxone-Projektdatei</b>. Benutzer und Passwort stehen ausschlie&szlig;lich hier.</div>
+<h1 style="color:#6dac20;text-shadow:none;"><?php echo cam_t('TEXT.ACTI_KAMERA'); ?></h1>
+<div class="sm-small"><?php echo cam_t('TEXT.HOLT_BILDER_VON_EINER_ACTI_NETZWER'); ?>
+<b><?php echo cam_t('TEXT.OHNE_ZUGANGSDATEN_IN_DER_LOXONE_PR'); ?></b><?php echo cam_t('TEXT.BENUTZER_UND_PASSWORT_STEHEN_AUSSC'); ?></div>
 
-<?php if ($ac_saved) { ?><div class="ac-alert ac-ok"><b>Konfiguration gespeichert.</b></div><?php } ?>
-<?php if ($ac_err !== '') { ?><div class="ac-alert ac-err"><?= ac_e($ac_err) ?></div><?php } ?>
-<?php if ($ac_note !== '') { ?><div class="ac-alert <?= strpos($ac_note, 'fehlgeschlagen') !== false ? 'ac-err' : 'ac-ok' ?>"><?= ac_e($ac_note) ?></div><?php } ?>
+<?php if ($ac_saved) { ?><div class="sm-alert sm-ok"><b><?php echo cam_t('TEXT.KONFIGURATION_GESPEICHERT'); ?></b></div><?php } ?>
+<?php if ($ac_err !== '') { ?><div class="sm-alert sm-err"><?= ac_e($ac_err) ?></div><?php } ?>
+<?php if ($ac_note !== '') { ?><div class="sm-alert <?= strpos($ac_note, 'fehlgeschlagen') !== false ? 'sm-err' : 'sm-ok' ?>"><?= ac_e($ac_note) ?></div><?php } ?>
 <?php if (trim((string) $ac_cfg['user']) === '' && (string) $ac_cfg['pass'] !== '' && trim((string) $ac_cfg['snapurl']) === '') { ?>
-<div class="ac-alert ac-err"><b>Der Benutzername ist leer</b>, ein Passwort ist aber hinterlegt.
-Die Kamera antwortet dann mit <span class="ac-mono">ERROR: not authorized</span> (HTTP 401).
-Bitte den Benutzernamen eintragen &mdash; oder oben die vollst&auml;ndige URL hinterlegen.</div>
+<div class="sm-alert sm-err"><b><?php echo cam_t('TEXT.DER_BENUTZERNAME_IST_LEER'); ?></b><?php echo cam_t('TEXT.EIN_PASSWORT_IST_ABER_HINTERLEGT_D'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.ERROR_NOT_AUTHORIZED'); ?></span> <?php echo cam_t('TEXT.HTTP_401_BITTE_DEN_BENUTZERNAMEN_E'); ?></div>
 <?php } ?>
 <?php if (trim((string) $ac_cfg['host']) === '') { ?>
-<div class="ac-alert ac-warn"><b>Noch nicht eingerichtet.</b> Tragen Sie unten Adresse, Benutzer und Passwort der Kamera ein und speichern Sie.</div>
+<div class="sm-alert sm-warn"><b><?php echo cam_t('TEXT.NOCH_NICHT_EINGERICHTET'); ?></b> <?php echo cam_t('TEXT.TRAGEN_SIE_UNTEN_ADRESSE_BENUTZER_'); ?></div>
 <?php } ?>
 
-<div class="ac-tabs">
-    <div class="ac-tab" data-pane="tab-settings">Einstellungen</div>
-    <div class="ac-tab" data-pane="tab-loxone">Einbindung in Loxone</div>
-    <div class="ac-tab" data-pane="tab-shots">Aufnahmen</div>
-    <div class="ac-tab" data-pane="tab-test">Test</div>
-    <div class="ac-tab" data-pane="tab-log">Protokoll</div>
+<div class="sm-tabs">
+    <div class="sm-tab" data-pane="tab-settings"><?php echo cam_t('REITER.EINSTELLUNGEN'); ?></div>
+    <div class="sm-tab" data-pane="tab-loxone"><?php echo cam_t('REITER.LOXONE'); ?></div>
+    <div class="sm-tab" data-pane="tab-shots"><?php echo cam_t('REITER.AUFNAHMEN'); ?></div>
+    <div class="sm-tab" data-pane="tab-test"><?php echo cam_t('REITER.TEST'); ?></div>
+    <div class="sm-tab" data-pane="tab-log"><?php echo cam_t('REITER.LOG'); ?></div>
 </div>
 
-<!-- ================= Einstellungen ================= -->
-<div class="ac-pane" id="tab-settings">
-<form method="post">
+<!-- ================= <?php echo cam_t('TEXT.EINSTELLUNG'); ?>en ================= -->
+<div class="sm-pane" id="tab-settings">
+<form action="index.php" method="post">
 <input data-role="none" type="hidden" name="save" value="1">
 <input data-role="none" type="hidden" name="activetab" value="tab-settings">
 
-<h2>Kamera</h2>
-<div class="ac-row">
+<h2><?php echo cam_t('TEXT.KAMERA'); ?></h2>
+<div class="sm-row">
     <div>
-        <label>Adresse (IP oder Hostname)</label>
+        <label><?php echo cam_t('TEXT.ADRESSE_IP_ODER_HOSTNAME'); ?></label>
         <input data-role="none" type="text" name="host" value="<?= ac_e($ac_cfg['host']) ?>" placeholder="192.168.1.17">
     </div>
     <div>
-        <label>Benutzer</label>
+        <label><?php echo cam_t('TEXT.BENUTZER'); ?></label>
         <input data-role="none" type="text" name="user" value="<?= ac_e($ac_cfg['user']) ?>" placeholder="admin">
     </div>
     <div>
-        <label>Passwort</label>
+        <label><?php echo cam_t('TEXT.PASSWORT'); ?></label>
         <input data-role="none" type="password" name="pass" value="" placeholder="<?= $ac_cfg['pass'] !== '' ? 'gespeichert &mdash; leer lassen = unver&auml;ndert' : 'Passwort der Kamera' ?>">
     </div>
 </div>
-<div class="ac-row" style="margin-top:8px;">
+<div class="sm-row" style="margin-top:8px;">
     <div style="max-width:340px;">
-        <label>Anmeldeverfahren</label>
+        <label><?php echo cam_t('TEXT.ANMELDEVERFAHREN'); ?></label>
         <select data-role="none" name="auth">
-            <option value="auto"<?= $ac_cfg['auth'] === 'auto' ? ' selected' : '' ?>>Automatisch ausprobieren (empfohlen)</option>
-            <option value="url"<?= $ac_cfg['auth'] === 'url' ? ' selected' : '' ?>>Nur USER/PWD in der URL (ACTi-Standard)</option>
-            <option value="basic"<?= $ac_cfg['auth'] === 'basic' ? ' selected' : '' ?>>HTTP Basic</option>
-            <option value="digest"<?= $ac_cfg['auth'] === 'digest' ? ' selected' : '' ?>>HTTP Digest</option>
+            <option value="auto"<?= $ac_cfg['auth'] === 'auto' ? ' selected' : '' ?><?php echo cam_t('TEXT.AUTOMATISCH_AUSPROBIEREN_EMPFOHLEN'); ?></option>
+            <option value="url"<?= $ac_cfg['auth'] === 'url' ? ' selected' : '' ?><?php echo cam_t('TEXT.NUR_USER_PWD_IN_DER_URL_ACTI_STAND'); ?></option>
+            <option value="basic"<?= $ac_cfg['auth'] === 'basic' ? ' selected' : '' ?><?php echo cam_t('TEXT.HTTP_BASIC'); ?></option>
+            <option value="digest"<?= $ac_cfg['auth'] === 'digest' ? ' selected' : '' ?><?php echo cam_t('TEXT.HTTP_DIGEST'); ?></option>
         </select>
     </div>
 </div>
-<div class="ac-small"><b>Bei &bdquo;ERROR: not authorized&ldquo;</b> hier die Verfahren durchprobieren.
-&bdquo;Automatisch&ldquo; testet der Reihe nach URL-Parameter, Basic und Digest und merkt sich den Weg, der
-funktioniert hat. Wichtig: Bei Basic/Digest werden die Zugangsdaten <i>nicht</i> zus&auml;tzlich in die URL
-geschrieben &mdash; manche Kameras weisen genau diese Kombination ab.</div>
-<div class="ac-small">Das Passwort wird nie angezeigt und nie ins Protokoll geschrieben. Die Konfigurationsdatei
-ist nur f&uuml;r den Besitzer lesbar (<span class="ac-mono">chmod 600</span>).
-Feld leer lassen bedeutet: bisheriges Passwort beibehalten.</div>
+<div class="sm-small"><b><?php echo cam_t('TEXT.BEI_ERROR_NOT_AUTHORIZED'); ?></b> <?php echo cam_t('TEXT.HIER_DIE_VERFAHREN_DURCHPROBIEREN_'); ?> <i><?php echo cam_t('TEXT.NICHT'); ?></i> <?php echo cam_t('TEXT.ZUSTZLICH_IN_DIE_URL_GESCHRIEBEN_M'); ?></div>
+<div class="sm-small"><?php echo cam_t('TEXT.DAS_PASSWORT_WIRD_NIE_ANGEZEIGT_UN'); ?><span class="sm-mono"><?php echo cam_t('TEXT.CHMOD_600'); ?></span><?php echo cam_t('TEXT.FELD_LEER_LASSEN_BEDEUTET_BISHERIG'); ?></div>
 
-<div class="ac-row" style="margin-top:10px;">
+<div class="sm-row" style="margin-top:10px;">
     <div style="flex:1 1 100%;">
-        <label>Vollst&auml;ndige Schnappschuss-URL (empfohlen, wenn eine funktionierende vorliegt)</label>
-        <input data-role="none" type="text" name="snapurl" value="<?= ac_e($ac_cfg['snapurl']) ?>" placeholder="http://KAMERA/cgi-bin/encoder?USER=…&amp;PWD=…&amp;SNAPSHOT=N1920x1080,100&amp;DUMMY=n">
-        <div class="ac-small">Ist dieses Feld gef&uuml;llt, nutzt das Plugin <b>genau diese Adresse</b> &mdash;
-        ohne eigenes Zusammenbauen, ohne Umkodieren, ohne Rateversuche. Wer eine Kamera bereits anderswo eingebunden
-        hat (z.&nbsp;B. in einer Visualisierung), kopiert die dort funktionierende URL einfach hier herein.
-        Das ist der sicherste Weg bei <span class="ac-mono">ERROR: not authorized</span>.<br>
-        <b>Hinweis:</b> Diese URL enth&auml;lt das Kamera-Passwort. Sie steht nur in der Plugin-Konfiguration
-        (<span class="ac-mono">chmod 600</span>) und wird in Protokoll und Diagnose maskiert.
-        Nach au&szlig;en gibt das Plugin weiterhin nur <span class="ac-mono">cam.php</span> ohne Zugangsdaten.</div>
+        <label><?php echo cam_t('TEXT.VOLLSTNDIGE_SCHNAPPSCHUSS_URL_EMPF'); ?></label>
+        <input data-role="none" type="text" name="snapurl" value="<?= ac_e($ac_cfg['snapurl']) ?>" placeholder="<?php echo cam_t('TEXT.HTTP'); ?>KAMERA/cgi-bin/encoder?<?php echo cam_t('TEXT.USER_PWD'); ?>SNAPSHOT=N1920x1080,100<?php echo cam_t('TEXT.DUMMY_N'); ?>">
+        <div class="sm-small"><?php echo cam_t('TEXT.IST_DIESES_FELD_GEFLLT_NUTZT_DAS_P'); ?> <b><?php echo cam_t('TEXT.GENAU_DIESE_ADRESSE'); ?></b> <?php echo cam_t('TEXT.OHNE_EIGENES_ZUSAMMENBAUEN_OHNE_UM'); ?> <span class="sm-mono">ERROR: not authorized</span>.<br>
+        <b><?php echo cam_t('TEXT.HINWEIS'); ?></b> <?php echo cam_t('TEXT.DIESE_URL_ENTHLT_DAS_KAMERA_PASSWO'); ?><span class="sm-mono">chmod 600</span><?php echo cam_t('TEXT.UND_WIRD_IN_PROTOKOLL_UND_DIAGNOSE'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CAM_PHP'); ?></span> <?php echo cam_t('TEXT.OHNE_ZUGANGSDATEN'); ?></div>
     </div>
     <div style="flex:1 1 100%;">
-        <label>Schnappschuss-Befehl &mdash; nur der Teil hinter <span class="ac-mono">USER=…&amp;PWD=…&amp;</span> (wird ignoriert, wenn oben eine URL steht)</label>
+        <label><?php echo cam_t('TEXT.SCHNAPPSCHUSS_BEFEHL_NUR_DER_TEIL_'); ?> <span class="sm-mono">USER=…&amp;PWD=…&amp;</span> <?php echo cam_t('TEXT.WIRD_IGNORIERT_WENN_OBEN_EINE_URL_'); ?></label>
         <input data-role="none" type="text" name="snapcmd" value="<?= ac_e($ac_cfg['snapcmd']) ?>" placeholder="SNAPSHOT=N1920x1080,100&amp;DUMMY=n">
-        <div class="ac-small">Das ist der Teil hinter <span class="ac-mono">USER=…&amp;PWD=…&amp;</span>.
-        Der Vorgabewert stammt aus einer real funktionierenden ACTi-Konfiguration &mdash; inklusive Bildqualit&auml;t
-        (<span class="ac-mono">,100</span>) und dem abschliessenden <span class="ac-mono">&amp;DUMMY=n</span>,
-        das manche Firmware erwartet. Wer eine funktionierende URL hat (z.&nbsp;B. aus einer bestehenden
-        Kamera-Einbindung), kopiert hier einfach den Teil dahinter herein.</div>
+        <div class="sm-small"><?php echo cam_t('TEXT.DAS_IST_DER_TEIL_HINTER'); ?> <span class="sm-mono">USER=…&amp;PWD=…&amp;</span><?php echo cam_t('TEXT.DER_VORGABEWERT_STAMMT_AUS_EINER_R'); ?><span class="sm-mono">,100</span><?php echo cam_t('TEXT.UND_DEM_ABSCHLIESSENDEN'); ?> <span class="sm-mono">&amp;DUMMY=n</span><?php echo cam_t('TEXT.DAS_MANCHE_FIRMWARE_ERWARTET_WER_E'); ?></div>
     </div>
     <div>
-        <label>Aufl&ouml;sung (nur als Ersatz)</label>
+        <label><?php echo cam_t('TEXT.AUFLSUNG_NUR_ALS_ERSATZ'); ?></label>
         <input data-role="none" type="text" name="resolution" value="<?= ac_e($ac_cfg['resolution']) ?>" placeholder="z. B. N1280x720">
     </div>
     <div>
-        <label>Zeitlimit je Bild (Sekunden)</label>
+        <label><?php echo cam_t('TEXT.ZEITLIMIT_JE_BILD_SEKUNDEN'); ?></label>
         <input data-role="none" type="number" name="timeout" value="<?= (int) $ac_cfg['timeout'] ?>" min="2" max="30">
     </div>
     <div>
-        <label>Kanal</label>
+        <label><?php echo cam_t('TEXT.KANAL'); ?></label>
         <input data-role="none" type="number" name="channel" value="<?= (int) $ac_cfg['channel'] ?>" min="1" max="16">
     </div>
 </div>
-<div class="ac-small">Aufl&ouml;sung leer lassen heisst: die Kamera liefert ihre eingestellte Gr&ouml;&szlig;e.
-Bei ACTi lautet die Schreibweise <span class="ac-mono">N1280x720</span> (N = normal).</div>
+<div class="sm-small"><?php echo cam_t('TEXT.AUFLSUNG_LEER_LASSEN_HEISST_DIE_KA'); ?> <span class="sm-mono">N1280x720</span> <?php echo cam_t('TEXT.N_NORMAL'); ?></div>
 
-<h2>Aufnahmen</h2>
-<div class="ac-row">
+<h2><?php echo cam_t('TEXT.AUFNAHMEN'); ?></h2>
+<div class="sm-row">
     <div>
-        <label>Aufbewahrung (Tage)</label>
+        <label><?php echo cam_t('TEXT.AUFBEWAHRUNG_TAGE'); ?></label>
         <input data-role="none" type="number" name="keep_days" value="<?= (int) $ac_cfg['keep_days'] ?>" min="1" max="3650">
     </div>
     <div>
-        <label>Cliplänge (Sekunden)</label>
+        <label><?php echo cam_t('TEXT.CLIPLAENGE_SEKUNDEN'); ?></label>
         <input data-role="none" type="number" name="clip_seconds" value="<?= (int) $ac_cfg['clip_seconds'] ?>" min="2" max="60">
     </div>
     <div>
-        <label>Bilder je Sekunde im Clip</label>
+        <label><?php echo cam_t('TEXT.BILDER_JE_SEKUNDE_IM_CLIP'); ?></label>
         <input data-role="none" type="number" name="clip_fps" value="<?= (int) $ac_cfg['clip_fps'] ?>" min="1" max="5">
     </div>
 </div>
-<div class="ac-small">Ein &bdquo;Clip&ldquo; ist eine Bildserie &mdash; damit braucht das Plugin kein ffmpeg und keine
-Zusatzpakete. F&uuml;r die Frage &bdquo;wer stand vor der T&uuml;r?&ldquo; reichen 2 Bilder je Sekunde v&ouml;llig.
-&Auml;ltere Aufnahmen l&ouml;scht das Plugin automatisch.</div>
+<div class="sm-small"><?php echo cam_t('TEXT.EIN_CLIP_IST_EINE_BILDSERIE_DAMIT_'); ?></div>
 
-<div class="ac-row" style="margin-top:10px;">
+<div class="sm-row" style="margin-top:10px;">
     <div>
-        <label>H&ouml;chstzahl Dateien je Archiv</label>
+        <label><?php echo cam_t('TEXT.HCHSTZAHL_DATEIEN_JE_ARCHIV'); ?></label>
         <input data-role="none" type="number" name="keep_max" value="<?= (int) $ac_cfg['keep_max'] ?>" min="0" max="100000">
     </div>
 </div>
-<div class="ac-small">Die Bereinigung l&auml;uft t&auml;glich um <b>03:35 Uhr</b> und greift auf Bilder, Bildserien und
-Zeitraffer. <b>0 oder leer = unbegrenzt</b> &mdash; bei Alter <i>und</i> Anzahl. Die jeweils neuesten Dateien bleiben
-immer erhalten, damit der Speicher nicht vollläuft.</div>
+<div class="sm-small"><?php echo cam_t('TEXT.DIE_BEREINIGUNG_LUFT_TGLICH_UM'); ?> <b><?php echo cam_t('TEXT.03_35_UHR'); ?></b> <?php echo cam_t('TEXT.UND_GREIFT_AUF_BILDER_BILDSERIEN_U'); ?> <b><?php echo cam_t('TEXT.0_ODER_LEER_UNBEGRENZT'); ?></b> <?php echo cam_t('TEXT.BEI_ALTER'); ?> <i>und</i> <?php echo cam_t('TEXT.ANZAHL_DIE_JEWEILS_NEUESTEN_DATEIE'); ?></div>
 
-<h2>Zeitraffer</h2>
+<h2><?php echo cam_t('TEXT.ZEITRAFFER'); ?></h2>
 <label style="display:inline-flex;align-items:center;gap:6px;">
-    <input data-role="none" type="checkbox" name="timelapse" <?= !empty($ac_cfg['timelapse']) ? 'checked' : '' ?>> T&auml;glich ein Zeitrafferbild aufnehmen
+    <input data-role="none" type="checkbox" name="<?php echo cam_t('TEXT.TIMELAPSE'); ?>" <?= !empty($ac_cfg['timelapse']) ? 'checked' : '' ?><?php echo cam_t('TEXT.TGLICH_EIN_ZEITRAFFERBILD_AUFNEHME'); ?>
 </label>
-<div class="ac-row" style="margin-top:6px;">
+<div class="sm-row" style="margin-top:6px;">
     <div style="max-width:220px;">
-        <label>Uhrzeit (HH:MM)</label>
+        <label><?php echo cam_t('TEXT.UHRZEIT_HH_MM'); ?></label>
         <input data-role="none" type="text" name="timelapse_time" value="<?= ac_e($ac_cfg['timelapse_time']) ?>" placeholder="12:00">
     </div>
 </div>
-<div class="ac-small">Die Bilder landen im Unterordner <span class="ac-mono">timelapse</span>, der Dateiname ist das Datum.
-Ist <span class="ac-mono">ffmpeg</span> auf dem LoxBerry vorhanden, wird nach jeder Aufnahme
-<span class="ac-mono">zeitraffer.mp4</span> aus allen Bildern neu erzeugt &mdash; abrufbar unter
-<span class="ac-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?>/zeitraffer.mp4</span>.
-Fehlt ffmpeg, bleiben die Einzelbilder erhalten und alles andere funktioniert weiter
-(nachinstallieren: <span class="ac-mono">sudo apt-get install -y ffmpeg</span>).</div>
+<div class="sm-small"><?php echo cam_t('TEXT.DIE_BILDER_LANDEN_IM_UNTERORDNER'); ?> <span class="sm-mono">timelapse</span><?php echo cam_t('TEXT.DER_DATEINAME_IST_DAS_DATUM_IST'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.FFMPEG'); ?></span> <?php echo cam_t('TEXT.AUF_DEM_LOXBERRY_VORHANDEN_WIRD_NA'); ?>
+<span class="sm-mono"><?php echo cam_t('TEXT.ZEITRAFFER_MP4'); ?></span> <?php echo cam_t('TEXT.AUS_ALLEN_BILDERN_NEU_ERZEUGT_ABRU'); ?>
+<span class="sm-mono">http://<?= ac_e($ac_host) ?><?php echo cam_t('TEXT.PLUGINS'); ?><?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.ZEITRAFFER_MP4_2'); ?></span><?php echo cam_t('TEXT.FEHLT_FFMPEG_BLEIBEN_DIE_EINZELBIL'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.SUDO_APT_GET_INSTALL_Y_FFMPEG'); ?></span>).</div>
 
-<h2>KI-Objekterkennung (optional)</h2>
-<div class="ac-row">
+<h2><?php echo cam_t('TEXT.KI_OBJEKTERKENNUNG_OPTIONAL'); ?></h2>
+<div class="sm-row">
     <div>
-        <label>Erkennungs-Endpunkt</label>
+        <label><?php echo cam_t('TEXT.ERKENNUNGS_ENDPUNKT'); ?></label>
         <input data-role="none" type="text" name="ai_url" value="<?= ac_e($ac_cfg['ai_url']) ?>" placeholder="http://192.0.2.10:32168/v1/vision/detection">
     </div>
     <div style="max-width:220px;">
-        <label>Mindest-Konfidenz (%)</label>
+        <label><?php echo cam_t('TEXT.MINDEST_KONFIDENZ'); ?></label>
         <input data-role="none" type="number" name="ai_min" value="<?= (int) $ac_cfg['ai_min'] ?>" min="1" max="99">
     </div>
 </div>
-<div class="ac-small">Ben&ouml;tigt einen Erkennungsdienst auf st&auml;rkerer Hardware, z.&nbsp;B.
-<b>CodeProject.AI Server</b> (Port 32168) oder <b>DeepStack</b>. Der LoxBerry selbst ist daf&uuml;r zu schwach.
-Erkannte Objekte (z.&nbsp;B. <span class="ac-mono">person</span>, <span class="ac-mono">car</span>) erscheinen im JSON,
-in den Webhooks, per MQTT und als Zeile <span class="ac-mono">ERKANNT=</span> in der Loxone-Ausgabe;
-zus&auml;tzlich gibt es <span class="ac-mono">PERSON=1</span> als fertigen Schalter.
-Leer lassen schaltet die Erkennung ab.</div>
+<div class="sm-small"><?php echo cam_t('TEXT.BENTIGT_EINEN_ERKENNUNGSDIENST_AUF'); ?>
+<b><?php echo cam_t('TEXT.CODEPROJECT_AI_SERVER'); ?></b> <?php echo cam_t('TEXT.PORT_32168_ODER'); ?> <b><?php echo cam_t('TEXT.DEEPSTACK'); ?></b><?php echo cam_t('TEXT.DER_LOXBERRY_SELBST_IST_DAFR_ZU_SC'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.PERSON'); ?></span>, <span class="sm-mono">car</span><?php echo cam_t('TEXT.ERSCHEINEN_IM_JSON_IN_DEN_WEBHOOKS'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.ERKANNT'); ?></span> <?php echo cam_t('TEXT.IN_DER_LOXONE_AUSGABE_ZUSTZLICH_GI'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.PERSON_1'); ?></span> <?php echo cam_t('TEXT.ALS_FERTIGEN_SCHALTER_LEER_LASSEN_'); ?></div>
 
-<h2>Webhooks (optional)</h2>
-<div class="ac-row">
+<h2><?php echo cam_t('TEXT.WEBHOOKS_OPTIONAL'); ?></h2>
+<div class="sm-row">
     <div>
-        <label>Webhook 1 &mdash; POST mit JSON</label>
+        <label><?php echo cam_t('TEXT.WEBHOOK_1_POST_MIT_JSON'); ?></label>
         <input data-role="none" type="text" name="webhook1" value="<?= ac_e($ac_cfg['webhook1']) ?>" placeholder="https://…">
     </div>
     <div>
-        <label>Webhook 2 &mdash; GET mit Parametern</label>
+        <label><?php echo cam_t('TEXT.WEBHOOK_2_GET_MIT_PARAMETERN'); ?></label>
         <input data-role="none" type="text" name="webhook2" value="<?= ac_e($ac_cfg['webhook2']) ?>" placeholder="https://…">
     </div>
 </div>
-<div class="ac-small">Beide werden nach jeder Aufnahme ausgel&ouml;st. Webhook&nbsp;1 sendet
-<span class="ac-mono">{bild, datei, anlass, objekte, zeit}</span> als JSON, Webhook&nbsp;2 h&auml;ngt
-<span class="ac-mono">?bild=…&amp;anlass=…&amp;objekte=…</span> an die Adresse an.</div>
+<div class="sm-small"><?php echo cam_t('TEXT.BEIDE_WERDEN_NACH_JEDER_AUFNAHME_A'); ?>
+<span class="sm-mono"><?php echo cam_t('TEXT.BILD_DATEI_ANLASS_OBJEKTE_ZEIT'); ?></span> <?php echo cam_t('TEXT.ALS_JSON_WEBHOOK2_HNGT'); ?>
+<span class="sm-mono"><?php echo cam_t('TEXT.BILD_ANLASS_OBJEKTE'); ?></span> <?php echo cam_t('TEXT.AN_DIE_ADRESSE_AN'); ?></div>
 
-<h2>Benachrichtigung</h2>
+<h2><?php echo cam_t('TEXT.BENACHRICHTIGUNG'); ?></h2>
 <label style="display:inline-flex;align-items:center;gap:6px;">
-    <input data-role="none" type="checkbox" name="notify_push" <?= !empty($ac_notify['push']) ? 'checked' : '' ?>> Push-Freigabe an Loxone melden
+    <input data-role="none" type="checkbox" name="notify_push" <?= !empty($ac_notify['push']) ? 'checked' : '' ?><?php echo cam_t('TEXT.PUSH_FREIGABE_AN_LOXONE_MELDEN'); ?>
 </label>
-<div class="ac-row" style="margin-top:6px;">
+<div class="sm-row" style="margin-top:6px;">
     <div style="max-width:260px;">
-        <label>Meldefenster nach einer Aufnahme (Minuten)</label>
+        <label><?php echo cam_t('TEXT.MELDEFENSTER_NACH_EINER_AUFNAHME_M'); ?></label>
         <input data-role="none" type="number" name="push_minutes" value="<?= (int) $ac_notify['push_minutes'] ?>" min="1" max="30">
     </div>
 </div>
-<div class="ac-small">Nach jeder Aufnahme steht <span class="ac-mono">PUSHAKTIV=1</span> f&uuml;r diese Zeitspanne.
-Den Push selbst verschickt der Miniserver &mdash; so landet er in der Loxone-App.</div>
+<div class="sm-small"><?php echo cam_t('TEXT.NACH_JEDER_AUFNAHME_STEHT'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.PUSHAKTIV_1'); ?></span> <?php echo cam_t('TEXT.FR_DIESE_ZEITSPANNE_DEN_PUSH_SELBS'); ?></div>
 
-<h2>MQTT (optional)</h2>
+<h2><?php echo cam_t('TEXT.MQTT_OPTIONAL'); ?></h2>
 <label style="display:inline-flex;align-items:center;gap:6px;">
-    <input data-role="none" type="checkbox" name="mqtt_enabled" <?= !empty($ac_cfg['mqtt_enabled']) ? 'checked' : '' ?>> &Uuml;ber das LoxBerry MQTT Gateway ver&ouml;ffentlichen
+    <input data-role="none" type="checkbox" name="mqtt_enabled" <?= !empty($ac_cfg['mqtt_enabled']) ? 'checked' : '' ?><?php echo cam_t('TEXT.UUML_BER_DAS_LOXBERRY_MQTT_GATEWAY'); ?>
 </label>
-<div class="ac-row" style="margin-top:6px;">
+<div class="sm-row" style="margin-top:6px;">
     <div style="max-width:320px;">
-        <label>Topic-Pr&auml;fix</label>
+        <label><?php echo cam_t('TEXT.TOPIC_PRFIX'); ?></label>
         <input data-role="none" type="text" name="mqtt_topic" value="<?= ac_e($ac_cfg['mqtt_topic']) ?>" placeholder="acti">
     </div>
 </div>
-<div class="ac-small">Beispiel: <span class="ac-mono">acti/letztes_bild</span>, <span class="ac-mono">acti/anlass</span>, <span class="ac-mono">acti/zeit</span>.</div>
+<div class="sm-small"><?php echo cam_t('TEXT.BEISPIEL'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.ACTI_LETZTES_BILD'); ?></span>, <span class="sm-mono"><?php echo cam_t('TEXT.ACTI_ANLASS'); ?></span>, <span class="sm-mono"><?php echo cam_t('TEXT.ACTI_ZEIT'); ?></span>.</div>
 
-<h3 class="ac-h3">Live-Bild f&uuml;r Loxone (MJPEG-Weiterleitung)</h3>
-<p class="ac-hint">LoxBerry holt das Bild bei der Kamera und reicht es weiter. In der Loxone-Projektdatei
-tr&auml;gt man dann diese Adressen ein &mdash; ohne Benutzer und Passwort:<br>
-<span class="ac-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?>/cam_stream.php</span> &nbsp;(Livebild, IntVideoUrl)<br>
-<span class="ac-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?>/cam_stream.php?einzeln=1</span> &nbsp;(Einzelbild, IntAlertImage)</p>
-<label>Bilder je Sekunde</label>
+<h3 class="sm-h3"><?php echo cam_t('TEXT.LIVE_BILD_FR_LOXONE_MJPEG_WEITERLE'); ?></h3>
+<p class="sm-hint"><?php echo cam_t('TEXT.LOXBERRY_HOLT_DAS_BILD_BEI_DER_KAM'); ?><br>
+<span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_STREAM_PHP'); ?></span> <?php echo cam_t('TEXT.LIVEBILD_INTVIDEOURL'); ?><br>
+<span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_STREAM_PHP_EINZELN_1'); ?></span> <?php echo cam_t('TEXT.EINZELBILD_INTALERTIMAGE'); ?></p>
+<label><?php echo cam_t('TEXT.BILDER_JE_SEKUNDE'); ?></label>
 <input type="number" step="0.1" min="0.2" max="10" data-role="none" name="stream_fps" value="<?= ac_e((string) $ac_cfg['stream_fps']) ?>">
-<label>H&ouml;chstdauer eines Stroms in Sekunden (Notbremse gegen Dauerlast)</label>
+<label><?php echo cam_t('TEXT.HCHSTDAUER_EINES_STROMS_IN_SEKUNDE'); ?></label>
 <input type="number" min="5" max="21600" data-role="none" name="stream_maxsec" value="<?= ac_e((string) $ac_cfg['stream_maxsec']) ?>">
-<label>Bildquelle</label>
+<label><?php echo cam_t('TEXT.BILDQUELLE'); ?></label>
 <select data-role="none" name="stream_mode">
-<option value="auto"<?= $ac_cfg['stream_mode'] === 'auto' ? ' selected' : '' ?>>Automatisch &mdash; Kamerastrom, sonst RTSP, sonst Schnappsch&uuml;sse</option>
-<option value="mjpeg"<?= $ac_cfg['stream_mode'] === 'mjpeg' ? ' selected' : '' ?>>Nur Kamerastrom (GET_STREAM &mdash; empfohlen)</option>
-<option value="rtsp"<?= $ac_cfg['stream_mode'] === 'rtsp' ? ' selected' : '' ?>>Nur RTSP (fl&uuml;ssiges Video, braucht ffmpeg)</option>
-<option value="jpeg"<?= $ac_cfg['stream_mode'] === 'jpeg' ? ' selected' : '' ?>>Nur Schnappsch&uuml;sse</option>
+<option value="auto"<?= $ac_cfg['stream_mode'] === 'auto' ? ' selected' : '' ?><?php echo cam_t('TEXT.AUTOMATISCH_KAMERASTROM_SONST_RTSP'); ?></option>
+<option value="mjpeg"<?= $ac_cfg['stream_mode'] === 'mjpeg' ? ' selected' : '' ?><?php echo cam_t('TEXT.NUR_KAMERASTROM_GET_STREAM_EMPFOHL'); ?></option>
+<option value="rtsp"<?= $ac_cfg['stream_mode'] === 'rtsp' ? ' selected' : '' ?><?php echo cam_t('TEXT.NUR_RTSP_FLSSIGES_VIDEO_BRAUCHT_FF'); ?></option>
+<option value="jpeg"<?= $ac_cfg['stream_mode'] === 'jpeg' ? ' selected' : '' ?><?php echo cam_t('TEXT.NUR_SCHNAPPSCHSSE'); ?></option>
 </select>
-<p class="ac-hint">ffmpeg auf diesem LoxBerry:
+<p class="sm-hint"><?php echo cam_t('TEXT.FFMPEG_AUF_DIESEM_LOXBERRY'); ?>
 <?php $ac_ff = cam_ffmpeg(); ?>
 <?= $ac_ff !== '' ? '<b style="color:#2e7d32;">vorhanden</b> (' . ac_e($ac_ff) . ')' : '<b style="color:#c62828;">nicht vorhanden</b> &ndash; es werden Schnappsch&uuml;sse verwendet' ?></p>
-<label>Adresse des Kamerastroms (leer = <span class="ac-mono">/cgi-bin/cmd/system?…&amp;GET_STREAM</span>)</label>
+<label><?php echo cam_t('TEXT.ADRESSE_DES_KAMERASTROMS_LEER'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CGI_BIN_CMD_SYSTEM_GET_STREAM'); ?></span>)</label>
 <input type="text" data-role="none" name="mjpeg_url" value="<?= ac_e((string) $ac_cfg['mjpeg_url']) ?>">
-<label>RTSP-Adresse (leer = bei der Kamera erfragen &uuml;ber <span class="ac-mono">GET_STREAM</span>)</label>
+<label><?php echo cam_t('TEXT.RTSP_ADRESSE_LEER_BEI_DER_KAMERA_E'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.GET_STREAM'); ?></span>)</label>
 <input type="text" data-role="none" name="rtsp_url" placeholder="rtsp://&lt;Kamera&gt;:7070//stream2" value="<?= ac_e((string) $ac_cfg['rtsp_url']) ?>">
-<p class="ac-hint">Bleibt das Feld leer, wird <span class="ac-mono">rtsp://&lt;Kamera&gt;:&lt;Port&gt;//stream&lt;Nr&gt;</span> gebildet.
-Benutzer und Passwort setzt das Plugin selbst ein &mdash; sie geh&ouml;ren nicht in dieses Feld.</p>
-<label>RTSP-Port</label>
+<p class="sm-hint"><?php echo cam_t('TEXT.BLEIBT_DAS_FELD_LEER_WIRD'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.RTSP_KAMERA_PORT_STREAMNR'); ?></span> <?php echo cam_t('TEXT.GEBILDET_BENUTZER_UND_PASSWORT_SET'); ?></p>
+<label><?php echo cam_t('TEXT.RTSP_PORT'); ?></label>
 <input type="number" min="1" max="65535" data-role="none" name="rtsp_port" value="<?= ac_e((string) $ac_cfg['rtsp_port']) ?>">
-<label>Welcher Strom</label>
+<label><?php echo cam_t('TEXT.WELCHER_STROM'); ?></label>
 <select data-role="none" name="rtsp_stream">
-<option value="2"<?= ((int) $ac_cfg['rtsp_stream']) !== 1 ? ' selected' : '' ?>>stream2 &mdash; Nebenstrom, kleiner und sparsam (empfohlen)</option>
-<option value="1"<?= ((int) $ac_cfg['rtsp_stream']) === 1 ? ' selected' : '' ?>>stream1 &mdash; Hauptstrom, volle Aufl&ouml;sung</option>
+<option value="2"<?= ((int) $ac_cfg['rtsp_stream']) !== 1 ? ' selected' : '' ?><?php echo cam_t('TEXT.STREAM2_NEBENSTROM_KLEINER_UND_SPA'); ?></option>
+<option value="1"<?= ((int) $ac_cfg['rtsp_stream']) === 1 ? ' selected' : '' ?><?php echo cam_t('TEXT.STREAM1_HAUPTSTROM_VOLLE_AUFLSUNG'); ?></option>
 </select>
 <?php $ac_rr = cam_rtsp_url(true); if ($ac_rr === '') { $ac_rr = ''; } ?>
-<label>Bildg&uuml;te bei RTSP (2 = fein und gro&szlig;, 15 = grob und sparsam)</label>
+<label><?php echo cam_t('TEXT.BILDGTE_BEI_RTSP_2_FEIN_UND_GRO_15'); ?></label>
 <input type="number" min="2" max="15" data-role="none" name="rtsp_quality" value="<?= ac_e((string) $ac_cfg['rtsp_quality']) ?>">
-<label>Token (optional &mdash; dann nur mit <span class="ac-mono">?t=Token</span> abrufbar)</label>
+<label><?php echo cam_t('TEXT.TOKEN_OPTIONAL_DANN_NUR_MIT'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.T_TOKEN'); ?></span> <?php echo cam_t('TEXT.ABRUFBAR'); ?></label>
 <input type="text" data-role="none" name="stream_token" value="<?= ac_e((string) $ac_cfg['stream_token']) ?>">
-<div style="margin-top:16px;"><button data-role="none" class="ac-btn" type="submit">Speichern</button></div>
+<div style="margin-top:16px;"><button data-role="none" class="sm-btn" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button></div>
 </form>
 </div>
 
 <!-- ================= Einbindung in Loxone ================= -->
-<div class="ac-pane" id="tab-loxone">
-<h2>Einbindung in Loxone &mdash; Schritt f&uuml;r Schritt</h2>
-<p>Ziel: Beim Klingeln (Loxone Intercom <i>oder</i> Taster an der Haust&uuml;r) macht die Kamera ein Bild,
-Loxone schickt einen Push, und das Bild ist &uuml;ber eine feste URL abrufbar &mdash;
-<b>ohne Kamera-Passwort in der Projektdatei</b>.</p>
+<div class="sm-pane" id="tab-loxone">
+<h2><?php echo cam_t('TEXT.EINBINDUNG_IN_LOXONE_SCHRITT_FR_SC'); ?></h2>
+<p><?php echo cam_t('TEXT.ZIEL_BEIM_KLINGELN_LOXONE_INTERCOM'); ?> <i>oder</i> <?php echo cam_t('TEXT.TASTER_AN_DER_HAUSTR_MACHT_DIE_KAM'); ?>
+<b><?php echo cam_t('TEXT.OHNE_KAMERA_PASSWORT_IN_DER_PROJEK'); ?></b>.</p>
 
-<div class="ac-step"><b>Schritt 1: Virtueller Ausgang &bdquo;LoxBerry ACTi&ldquo;</b>
-<table class="ac-tbl">
+<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_1_VIRTUELLER_AUSGANG_LOXBE'); ?></b>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('TEXT.EIGENSCHAFT'); ?></th><th><?php echo cam_t('TEXT.WERT'); ?></th></tr>
+<tr><td><?php echo cam_t('TEXT.ADRESSE'); ?></td><td><span class="sm-mono">http://<?= ac_e($ac_host) ?></span></td></tr>
+</table>
+</div>
+
+<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_2_VIRTUELLE_AUSGANGS_BEFEH'); ?></b>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('TEXT.BEFEHL_BEI_EIN'); ?></th><th><?php echo cam_t('TEXT.WIRKUNG'); ?></th></tr>
+<tr><td><span class="sm-mono">/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_FOTO_1ANLASS_KLINGEL'); ?></span></td><td><?php echo cam_t('TEXT.BILD_BEIM_KLINGELN'); ?></td></tr>
+<tr><td><span class="sm-mono">/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_FOTO_1ANLASS_TUER'); ?></span></td><td><?php echo cam_t('TEXT.BILD_BEIM_TRTASTER'); ?></td></tr>
+<tr><td><span class="sm-mono">/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_FOTO_1ANLASS_BEWEGUNG'); ?></span></td><td><?php echo cam_t('TEXT.BILD_BEI_BEWEGUNGSMELDER'); ?></td></tr>
+<tr><td><span class="sm-mono">/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_CLIP_1ANLASS_KLINGEL'); ?></span></td><td><?php echo cam_t('TEXT.BILDSERIE_STATT_EINZELBILD'); ?></td></tr>
+</table>
+<div class="sm-small"><b><?php echo cam_t('TEXT.AUS_DER_PRAXIS'); ?></b> <?php echo cam_t('TEXT.ZWISCHEN_KLINGELSIGNAL_UND_BILD_GE'); ?></div>
+</div>
+
+<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_3_VIRTUELLER_HTTP_EINGANG_'); ?></b> <?php echo cam_t('TEXT.ABFRAGE_60_S'); ?>
+<table class="sm-tbl">
 <tr><th>Eigenschaft</th><th>Wert</th></tr>
-<tr><td>Adresse</td><td><span class="ac-mono">http://<?= ac_e($ac_host) ?></span></td></tr>
+<tr><td>URL</td><td><span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_2'); ?></span></td></tr>
+<tr><td><?php echo cam_t('TEXT.ABFRAGEZYKLUS'); ?></td><td><?php echo cam_t('TEXT.60_SEKUNDEN'); ?></td></tr>
+</table>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('TEXT.BEFEHLSERKENNUNG'); ?></th><th><?php echo cam_t('TEXT.BEDEUTUNG'); ?></th></tr>
+<tr><td><span class="sm-mono"><?php echo cam_t('TEXT.IOK_I_V'); ?></span></td><td><?php echo cam_t('TEXT.1_KAMERA_KONFIGURIERT'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo cam_t('TEXT.IALTER_I_V'); ?></span></td><td><?php echo cam_t('TEXT.MINUTEN_SEIT_DEM_LETZTEN_BILD_1_NO'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo cam_t('TEXT.IBILDER_I_V'); ?></span> / <span class="sm-mono"><?php echo cam_t('TEXT.ICLIPS_I_V'); ?></span></td><td><?php echo cam_t('TEXT.ANZAHL_GESPEICHERTER_AUFNAHMEN'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo cam_t('TEXT.IPUSHAKTIV_I_V'); ?></span></td><td><b><?php echo cam_t('TEXT.1_GERADE_WURDE_EIN_BILD_AUFGENOMME'); ?></b> <?php echo cam_t('TEXT.AUSLSER_FR_DEN_PUSH'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo cam_t('TEXT.IPERSON_I_V'); ?></span></td><td><?php echo cam_t('TEXT.1_AUF_DEM_LETZTEN_BILD_WURDE_EINE'); ?> <b><?php echo cam_t('TEXT.PERSON_2'); ?></b> <?php echo cam_t('TEXT.ERKANNT_KI'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo cam_t('TEXT.IOBJEKTE_I_V'); ?></span> / <span class="sm-mono"><?php echo cam_t('TEXT.IZEITRAFFER_I_V'); ?></span></td><td><?php echo cam_t('TEXT.ANZAHL_ERKANNTER_OBJEKTE_ZEITRAFFE'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo cam_t('TEXT.IPUSH_I_V'); ?></span> / <span class="sm-mono"><?php echo cam_t('TEXT.IPTEST_I_V'); ?></span></td><td><?php echo cam_t('TEXT.FREIGABE_AUS_DER_KONFIGURATION_TES'); ?></td></tr>
 </table>
 </div>
 
-<div class="ac-step"><b>Schritt 2: Virtuelle Ausgangs-Befehle</b>
-<table class="ac-tbl">
-<tr><th>Befehl bei EIN</th><th>Wirkung</th></tr>
-<tr><td><span class="ac-mono">/plugins/<?= ac_e($ac_plugin) ?>/cam.php?foto=1&amp;anlass=klingel</span></td><td>Bild beim Klingeln</td></tr>
-<tr><td><span class="ac-mono">/plugins/<?= ac_e($ac_plugin) ?>/cam.php?foto=1&amp;anlass=tuer</span></td><td>Bild beim T&uuml;rtaster</td></tr>
-<tr><td><span class="ac-mono">/plugins/<?= ac_e($ac_plugin) ?>/cam.php?foto=1&amp;anlass=bewegung</span></td><td>Bild bei Bewegungsmelder</td></tr>
-<tr><td><span class="ac-mono">/plugins/<?= ac_e($ac_plugin) ?>/cam.php?clip=1&amp;anlass=klingel</span></td><td>Bildserie statt Einzelbild</td></tr>
+<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('TEXT.BAUSTEIN'); ?></th><th><?php echo cam_t('TEXT.NAME'); ?></th><th>Einstellung</th><th><?php echo cam_t('TEXT.EINGNGE'); ?></th></tr>
+<tr><td><?php echo cam_t('TEXT.EINSCHALTVERZGERUNG_E1'); ?></td><td><?php echo cam_t('TEXT.KLINGEL_ENTPRELLT'); ?></td><td>3 s</td><td><?php echo cam_t('TEXT.KLINGELTASTER_INTERCOM'); ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.VIRTUELLER_AUSGANG'); ?></td><td><?php echo cam_t('TEXT.BILD_HOLEN'); ?></td><td><?php echo cam_t('TEXT.BEFEHL_AUS_SCHRITT_2'); ?><span class="sm-mono"><?php echo cam_t('TEXT.ANLASS_KLINGEL'); ?></span>)</td><td><?php echo cam_t('TEXT.E1'); ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.SCHWELLWERTSCHALTER_S1'); ?></td><td><?php echo cam_t('TEXT.AUFNAHME_ERFOLGT'); ?></td><td><?php echo cam_t('TEXT.EIN_0_5_AUS_0_4'); ?></td><td><?php echo cam_t('TEXT.PUSHAKTIV'); ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.SCHWELLWERTSCHALTER_S2'); ?></td><td><?php echo cam_t('TEXT.PUSH_FREIGEGEBEN'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo cam_t('TEXT.PUSH'); ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.UND_U1'); ?></td><td><?php echo cam_t('TEXT.BESUCH_MELDEN'); ?></td><td></td><td><?php echo cam_t('TEXT.S1_S2'); ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.ODER_O1'); ?></td><td><?php echo cam_t('TEXT.PUSH_SAMMLER'); ?></td><td><?php echo cam_t('TEXT.EINZIGE_QUELLE_DES_BENACHRICHTIGUN'); ?></td><td>U1</td></tr>
+<tr><td><?php echo cam_t('TEXT.BENACHRICHTIGUNGS_BAUSTEIN'); ?></td><td><?php echo cam_t('TEXT.PUSH_BESUCH_AN_DER_TR'); ?></td><td><?php echo cam_t('TEXT.TEXT_Z_B_JEMAND_HAT_GEKLINGELT_BIL'); ?></td><td><?php echo cam_t('TEXT.O1'); ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.BENACHRICHTIGUNGS_BAUSTEIN_2'); ?></td><td><?php echo cam_t('TEXT.TEST_PUSH'); ?></td><td><?php echo cam_t('TEXT.EIGENER_BAUSTEIN_NUR_FR_DEN_TEST'); ?></td><td><?php echo cam_t('TEXT.SCHWELLWERTSCHALTER_AN_PTEST'); ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.STATUSBAUSTEIN'); ?></td><td><?php echo cam_t('TEXT.KAMERA_KACHEL'); ?></td><td><?php echo cam_t('TEXT.TEXT_LETZTES_BILD_VOR_V1_0_MINUTEN'); ?></td><td><?php echo cam_t('TEXT.I1_ALTER'); ?></td></tr>
 </table>
-<div class="ac-small"><b>Aus der Praxis:</b> Zwischen Klingelsignal und Bild geh&ouml;rt eine Einschaltverz&ouml;gerung von
-2&ndash;3 Sekunden &mdash; sonst steht der Besucher noch nicht im Bild. In Loxone also:
-Klingel &rarr; Einschaltverz&ouml;gerung 3 s &rarr; virtueller Ausgang.</div>
+<div class="sm-small"><b><?php echo cam_t('TEXT.PRAXIS_ERFAHRUNG_ZUM_BENACHRICHTIG'); ?></b> <?php echo cam_t('TEXT.ER_SENDET_NUR_BEI_EINER_01_FLANKE_'); ?></div>
 </div>
 
-<div class="ac-step"><b>Schritt 3: Virtueller HTTP-Eingang &bdquo;ACTi Kamera&ldquo;</b> (Abfrage 60 s)
-<table class="ac-tbl">
-<tr><th>Eigenschaft</th><th>Wert</th></tr>
-<tr><td>URL</td><td><span class="ac-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?>/cam.php</span></td></tr>
-<tr><td>Abfragezyklus</td><td>60 Sekunden</td></tr>
-</table>
-<table class="ac-tbl">
-<tr><th>Befehlserkennung</th><th>Bedeutung</th></tr>
-<tr><td><span class="ac-mono">\iOK=\i\v</span></td><td>1 = Kamera konfiguriert</td></tr>
-<tr><td><span class="ac-mono">\iALTER=\i\v</span></td><td>Minuten seit dem letzten Bild (&minus;1 = noch keins)</td></tr>
-<tr><td><span class="ac-mono">\iBILDER=\i\v</span> / <span class="ac-mono">\iCLIPS=\i\v</span></td><td>Anzahl gespeicherter Aufnahmen</td></tr>
-<tr><td><span class="ac-mono">\iPUSHAKTIV=\i\v</span></td><td><b>1 = gerade wurde ein Bild aufgenommen</b> &mdash; Ausl&ouml;ser f&uuml;r den Push</td></tr>
-<tr><td><span class="ac-mono">\iPERSON=\i\v</span></td><td>1 = auf dem letzten Bild wurde eine <b>Person</b> erkannt (KI)</td></tr>
-<tr><td><span class="ac-mono">\iOBJEKTE=\i\v</span> / <span class="ac-mono">\iZEITRAFFER=\i\v</span></td><td>Anzahl erkannter Objekte / Zeitrafferbilder</td></tr>
-<tr><td><span class="ac-mono">\iPUSH=\i\v</span> / <span class="ac-mono">\iPTEST=\i\v</span></td><td>Freigabe aus der Konfiguration / Test-Push</td></tr>
-</table>
+<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_5_BILD_IN_DER_APP_ANZEIGEN'); ?></b><br>
+<?php echo cam_t('TEXT.DAS_JEWEILS_LETZTE_BILD_LIEGT_UNTE'); ?>
+<span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.LETZTESBILD_JPG'); ?></span>
+<?php echo cam_t('TEXT.ALTERNATIV'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CAM_PHP_LETZTES_1'); ?></span><?php echo cam_t('TEXT.DIESE_ADRESSE_ENTHLT_KEINE_ZUGANGS'); ?>
+<div class="sm-small" style="margin-top:4px;"><b><?php echo cam_t('TEXT.DAMIT_VERSCHWINDET_DAS_KAMERA_PASS'); ?></b>
+<?php echo cam_t('TEXT.BISHER_STAND_DORT_TYPISCHERWEISE'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.HTTP_KAMERA_CGI_BIN_ENCODER_USER_A'); ?></span><?php echo cam_t('TEXT.DIESEN_EINTRAG_KANN_MAN_NACH_DEM_U'); ?></div>
 </div>
 
-<div class="ac-step"><b>Schritt 4: Komplette Baustein-Liste zum 1:1-Nachbauen</b>
-<table class="ac-tbl">
-<tr><th>Baustein</th><th>Name</th><th>Einstellung</th><th>Eing&auml;nge</th></tr>
-<tr><td>Einschaltverz&ouml;gerung E1</td><td>Klingel entprellt</td><td>3 s</td><td>&larr; Klingeltaster / Intercom</td></tr>
-<tr><td>Virtueller Ausgang</td><td>Bild holen</td><td>Befehl aus Schritt 2 (<span class="ac-mono">anlass=klingel</span>)</td><td>&larr; E1</td></tr>
-<tr><td>Schwellwertschalter S1</td><td>Aufnahme erfolgt</td><td>Ein 0,5 / Aus 0,4</td><td>&larr; PUSHAKTIV</td></tr>
-<tr><td>Schwellwertschalter S2</td><td>Push freigegeben</td><td>Ein 0,5 / Aus 0,4</td><td>&larr; PUSH</td></tr>
-<tr><td>UND U1</td><td>Besuch melden</td><td></td><td>S1 &amp; S2</td></tr>
-<tr><td>ODER O1</td><td>Push-Sammler</td><td>einzige Quelle des Benachrichtigungs-Bausteins!</td><td>U1</td></tr>
-<tr><td>Benachrichtigungs-Baustein</td><td>Push &bdquo;Besuch an der T&uuml;r&ldquo;</td><td>Text z. B. &bdquo;Jemand hat geklingelt &mdash; Bild in der App.&ldquo;</td><td>&larr; O1</td></tr>
-<tr><td>Benachrichtigungs-Baustein 2</td><td>Test-Push</td><td>eigener Baustein NUR f&uuml;r den Test</td><td>&larr; Schwellwertschalter an PTEST</td></tr>
-<tr><td>Statusbaustein</td><td>Kamera-Kachel</td><td>Text: &bdquo;Letztes Bild vor &lt;v1.0&gt; Minuten&ldquo;</td><td>I1 &larr; ALTER</td></tr>
-</table>
-<div class="ac-small"><b>Praxis-Erfahrung zum Benachrichtigungs-Baustein:</b> Er sendet nur bei einer 0&rarr;1-Flanke.
-Niemals mehrere Quellen direkt an den Eingang legen &mdash; eine dauerhaft aktive Quelle verschluckt alle weiteren
-Ausl&ouml;ser. Immer erst im ODER sammeln. F&uuml;r den Test einen EIGENEN Baustein verwenden.</div>
-</div>
-
-<div class="ac-step"><b>Schritt 5: Bild in der App anzeigen</b><br>
-Das jeweils letzte Bild liegt unter
-<span class="ac-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?>/letztesbild.jpg</span>
-(alternativ <span class="ac-mono">cam.php?letztes=1</span>). Diese Adresse enth&auml;lt keine Zugangsdaten und
-l&auml;sst sich gefahrlos in einen Loxone-Webseiten-Baustein oder eine Kamera-Kachel eintragen.
-<div class="ac-small" style="margin-top:4px;"><b>Damit verschwindet das Kamera-Passwort aus der Projektdatei:</b>
-Bisher stand dort typischerweise <span class="ac-mono">http://KAMERA/cgi-bin/encoder?USER=admin&amp;PWD=…</span>.
-Diesen Eintrag kann man nach dem Umstellen entfernen.</div>
-</div>
-
-<div class="ac-step"><b>Schritt 6: MQTT-Alternative + JSON</b><br>
-Alle Werte gibt es auch &uuml;ber das LoxBerry MQTT Gateway (Reiter Einstellungen &rarr; MQTT) und als JSON:
-<span class="ac-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?>/cam.php?json=1</span>
+<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_6_MQTT_ALTERNATIVE_JSON'); ?></b><br>
+<?php echo cam_t('TEXT.ALLE_WERTE_GIBT_ES_AUCH_BER_DAS_LO'); ?>
+<span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_JSON_1'); ?></span>
 </div>
 </div>
 
 <!-- ================= Aufnahmen ================= -->
-<div class="ac-pane" id="tab-shots">
-<h2>Letzte Aufnahmen</h2>
+<div class="sm-pane" id="tab-shots">
+<h2><?php echo cam_t('TEXT.LETZTE_AUFNAHMEN'); ?></h2>
 <?php
 $ac_dir = function_exists('cam_datadir') ? cam_datadir() : '';
 $ac_bilder = $ac_dir !== '' ? (glob($ac_dir . '/bilder/*.jpg') ?: array()) : array();
@@ -540,114 +502,108 @@ rsort($ac_bilder);
 $ac_clips = $ac_dir !== '' ? (glob($ac_dir . '/clips/*', GLOB_ONLYDIR) ?: array()) : array();
 rsort($ac_clips);
 ?>
-<div class="ac-small" style="margin-bottom:8px;">Gespeichert: <b><?= count($ac_bilder) ?></b> Bilder,
-<b><?= count($ac_clips) ?></b> Bildserien. Aufbewahrung: <?= (int) $ac_cfg['keep_days'] ?> Tage.
-Ablage: <span class="ac-mono"><?= ac_e($ac_dir) ?></span></div>
+<div class="sm-small" style="margin-bottom:8px;"><?php echo cam_t('TEXT.GESPEICHERT'); ?> <b><?= count($ac_bilder) ?></b> <?php echo cam_t('TEXT.BILDER'); ?>
+<b><?= count($ac_clips) ?></b> <?php echo cam_t('TEXT.BILDSERIEN_AUFBEWAHRUNG'); ?> <?= (int) $ac_cfg['keep_days'] ?> <?php echo cam_t('TEXT.TAGE_ABLAGE'); ?> <span class="sm-mono"><?= ac_e($ac_dir) ?></span></div>
 <?php if ($ac_bilder) { ?>
-<div class="ac-gal">
+<div class="sm-gal">
 <?php foreach (array_slice($ac_bilder, 0, 12) as $ac_f) {
     $ac_n = basename($ac_f); ?>
 <figure>
-    <img src="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?letztes=1&amp;t=<?= (int) filemtime($ac_f) ?>" alt="" style="<?= $ac_f === $ac_bilder[0] ? '' : 'display:none;' ?>">
+    <img src="/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_LETZTES_1T'); ?><?= (int) filemtime($ac_f) ?>" alt="" style="<?= $ac_f === $ac_bilder[0] ? '' : 'display:none;' ?>">
     <figcaption><?= ac_e(substr($ac_n, 6, 2) . '.' . substr($ac_n, 4, 2) . '.' . substr($ac_n, 0, 4) . ' ' . substr($ac_n, 9, 2) . ':' . substr($ac_n, 11, 2) . ':' . substr($ac_n, 13, 2)) ?><br><?= ac_e($ac_n) ?></figcaption>
 </figure>
 <?php } ?>
 </div>
-<div class="ac-small">Angezeigt wird das jeweils neueste Bild; die &uuml;brigen Dateinamen stehen darunter.
-Die vollst&auml;ndige Ablage erreichen Sie &uuml;ber den LoxBerry-Dateimanager.</div>
+<div class="sm-small"><?php echo cam_t('TEXT.ANGEZEIGT_WIRD_DAS_JEWEILS_NEUESTE'); ?></div>
 <?php } else { ?>
-<div class="ac-alert ac-info">Noch keine Aufnahmen vorhanden. Im Reiter <b>Test</b> l&auml;sst sich sofort eine ausl&ouml;sen.</div>
+<div class="sm-alert sm-info"><?php echo cam_t('TEXT.NOCH_KEINE_AUFNAHMEN_VORHANDEN_IM_'); ?> <b><?php echo cam_t('TEXT.TEST'); ?></b> <?php echo cam_t('TEXT.LSST_SICH_SOFORT_EINE_AUSLSEN'); ?></div>
 <?php } ?>
 <?php if ($ac_clips) { ?>
-<h2>Bildserien</h2>
-<table class="ac-tbl"><tr><th>Serie</th><th>Bilder</th><th>Zeitpunkt</th></tr>
+<h2><?php echo cam_t('TEXT.BILDSERIEN'); ?></h2>
+<table class="sm-tbl"><tr><th><?php echo cam_t('TEXT.SERIE'); ?></th><th><?php echo cam_t('TEXT.BILDER_2'); ?></th><th><?php echo cam_t('TEXT.ZEITPUNKT'); ?></th></tr>
 <?php foreach (array_slice($ac_clips, 0, 10) as $ac_c) { ?>
 <tr><td><?= ac_e(basename($ac_c)) ?></td><td><?= count(glob($ac_c . '/*.jpg') ?: array()) ?></td>
 <td><?= ac_e(date('d.m.Y H:i:s', filemtime($ac_c))) ?></td></tr>
 <?php } ?></table>
 <?php } ?>
-<form method="post" style="margin-top:10px;">
+<form action="index.php" method="post" style="margin-top:10px;">
     <input data-role="none" type="hidden" name="cleanupnow" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-shots">
-    <button data-role="none" class="ac-btn" type="submit" style="background:#607d8b;">Alte Aufnahmen jetzt aufr&auml;umen</button>
+    <button data-role="none" class="sm-btn" type="submit" style="background:#607d8b;"><?php echo cam_t('TEXT.ALTE_AUFNAHMEN_JETZT_AUFRUMEN'); ?></button>
 </form>
 </div>
 
 <!-- ================= Test ================= -->
-<div class="ac-pane" id="tab-test">
+<div class="sm-pane" id="tab-test">
 <h2>Test</h2>
-<div class="ac-legende">
-<span><i class="ac-punkt ac-b-lesen"></i> Ansehen &mdash; fragt nur ab, ver&auml;ndert nichts</span>
-<span><i class="ac-punkt ac-b-technik"></i> Technische Auskunft &mdash; f&uuml;r die Fehlersuche</span>
-<span><i class="ac-punkt ac-b-aktion"></i> L&ouml;st etwas aus &mdash; nimmt auf oder verschickt</span>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-lesen"></i> <?php echo cam_t('LEGENDE.LESEN'); ?></span>
+<span><i class="sm-punkt sm-b-technik"></i> <?php echo cam_t('LEGENDE.TECHNIK'); ?></span>
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION_AUFNAHME'); ?></span>
 </div>
 
-<h3 class="ac-h3">Ansehen</h3>
-<div class="ac-knopfreihe">
-<a class="ac-btn ac-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?test=1" target="_blank">Verbindung pr&uuml;fen</a>
-<a class="ac-btn ac-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam_stream.php" target="_blank">Livebild ansehen</a>
-<a class="ac-btn ac-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?letztes=1" target="_blank">Letztes Bild &ouml;ffnen</a>
-<a class="ac-btn ac-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php" target="_blank">Loxone-Zeile abrufen</a>
-<a class="ac-btn ac-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?json=1" target="_blank">JSON-Ansicht</a>
+<h3 class="sm-h3"><?php echo cam_t('TEXT.ANSEHEN'); ?></h3>
+<div class="sm-knopfreihe">
+<a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?test=1" target="_blank"><?php echo cam_t('TEXT.VERBINDUNG_PRFEN_2'); ?></a>
+<a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam_stream.php" target="_blank"><?php echo cam_t('TEXT.LIVEBILD_ANSEHEN'); ?></a>
+<a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?letztes=1" target="_blank"><?php echo cam_t('TEXT.LETZTES_BILD_FFNEN'); ?></a>
+<a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php" target="_blank"><?php echo cam_t('TEXT.LOXONE_ZEILE_ABRUFEN'); ?></a>
+<a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?json=1" target="_blank"><?php echo cam_t('TEXT.JSON_ANSICHT'); ?></a>
 </div>
 
-<h3 class="ac-h3">Technische Auskunft</h3>
-<div class="ac-knopfreihe">
-<a class="ac-btn ac-b-technik" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?diag=1" target="_blank">Diagnose (alle Varianten)</a>
-<a class="ac-btn ac-b-technik" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?sys=1" target="_blank">Kamera-Auskunft</a>
+<h3 class="sm-h3"><?php echo cam_t('TEXT.TECHNISCHE_AUSKUNFT'); ?></h3>
+<div class="sm-knopfreihe">
+<a class="sm-btn sm-b-technik" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?diag=1" target="_blank"><?php echo cam_t('TEXT.DIAGNOSE_ALLE_VARIANTEN'); ?></a>
+<a class="sm-btn sm-b-technik" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?sys=1" target="_blank"><?php echo cam_t('TEXT.KAMERA_AUSKUNFT_2'); ?></a>
 </div>
 
-<h3 class="ac-h3">L&ouml;st etwas aus</h3>
-<div class="ac-knopfreihe">
-<form method="post">
+<h3 class="sm-h3"><?php echo cam_t('TEXT.LST_ETWAS_AUS'); ?></h3>
+<div class="sm-knopfreihe">
+<form action="index.php" method="post">
     <input data-role="none" type="hidden" name="shotnow" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-test">
-    <button data-role="none" class="ac-btn ac-b-aktion" type="submit">Jetzt ein Bild aufnehmen</button>
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.JETZT_EIN_BILD_AUFNEHMEN'); ?></button>
 </form>
-<form method="post">
+<form action="index.php" method="post">
     <input data-role="none" type="hidden" name="timelapsenow" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-test">
-    <button data-role="none" class="ac-btn ac-b-aktion" type="submit">Zeitrafferbild aufnehmen</button>
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.ZEITRAFFERBILD_AUFNEHMEN'); ?></button>
 </form>
-<a class="ac-btn ac-b-aktion" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?ptest=1" target="_blank">Test-Pushnachricht</a>
+<a class="sm-btn sm-b-aktion" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?ptest=1" target="_blank"><?php echo cam_t('TEXT.TEST_PUSHNACHRICHT_2'); ?></a>
 </div>
 
-<div class="ac-small" style="margin-top:14px;">
-&bull; <b>Verbindung pr&uuml;fen</b> holt ein Bild und meldet Gr&ouml;&szlig;e und Antwortzeit &mdash; der schnellste Weg,
-Adresse, Benutzer und Passwort zu kontrollieren.<br>
-&bull; <b>Diagnose</b> probiert alle Kombinationen aus Befehl und Anmeldeverfahren durch und zeigt f&uuml;r jede,
-was die Kamera geantwortet hat. Die erste Zeile mit <span class="ac-mono">OK</span> wird automatisch gemerkt.<br>
-&bull; <b>Kamera-Auskunft</b> fragt die System-Schnittstelle ab (Modell, Firmware, Stromadressen).<br>
-&bull; <b>Test-Pushnachricht</b> setzt <span class="ac-mono">PTEST=1</span> f&uuml;r 5 Minuten; der Push kommt
-&uuml;ber den Test-Benachrichtigungsbaustein in Loxone (Schritt 4).
+<div class="sm-small" style="margin-top:14px;">
+<?php echo cam_t('TEXT.TEXT'); ?> <b><?php echo cam_t('TEXT.VERBINDUNG_PRFEN'); ?></b> <?php echo cam_t('TEXT.HOLT_EIN_BILD_UND_MELDET_GRE_UND_A'); ?><br>
+&bull; <b><?php echo cam_t('TEXT.DIAGNOSE'); ?></b> <?php echo cam_t('TEXT.PROBIERT_ALLE_KOMBINATIONEN_AUS_BE'); ?> <span class="sm-mono">OK</span> <?php echo cam_t('TEXT.WIRD_AUTOMATISCH_GEMERKT'); ?><br>
+&bull; <b><?php echo cam_t('TEXT.KAMERA_AUSKUNFT'); ?></b> <?php echo cam_t('TEXT.FRAGT_DIE_SYSTEM_SCHNITTSTELLE_AB_'); ?><br>
+&bull; <b><?php echo cam_t('TEXT.TEST_PUSHNACHRICHT'); ?></b> <?php echo cam_t('TEXT.SETZT'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.PTEST_1'); ?></span> <?php echo cam_t('TEXT.FR_5_MINUTEN_DER_PUSH_KOMMT_BER_DE'); ?>
 </div>
 
-<h2>Zustand</h2>
-<table class="ac-tbl">
-<tr><th>Wert</th><th>Inhalt</th></tr>
-<tr><td>Kamera konfiguriert</td><td><?= !empty($ac_st['ok']) ? 'ja' : '<b>nein</b>' ?></td></tr>
-<tr><td>Letztes Bild</td><td><?= $ac_st['letztes_bild'] !== '' ? ac_e($ac_st['letztes_bild']) . ' (Anlass: ' . ac_e($ac_st['letzter_anlass']) . ')' : '&ndash;' ?></td></tr>
-<tr><td>Alter</td><td><?= (int) $ac_st['alter_min'] >= 0 ? (int) $ac_st['alter_min'] . ' Minuten' : '&ndash;' ?></td></tr>
-<tr><td>Gespeicherte Aufnahmen</td><td><?= (int) $ac_st['bilder'] ?> Bilder, <?= (int) $ac_st['clips'] ?> Serien, <?= (int) $ac_st['timelapse'] ?> Zeitrafferbilder</td></tr>
-<tr><td>Zuletzt erkannt</td><td><?= !empty($ac_st['objekte']) ? ac_e(implode(', ', $ac_st['objekte'])) : '&ndash; (keine Erkennung eingerichtet oder nichts gefunden)' ?></td></tr>
+<h2><?php echo cam_t('TEXT.ZUSTAND'); ?></h2>
+<table class="sm-tbl">
+<tr><th>Wert</th><th><?php echo cam_t('TEXT.INHALT'); ?></th></tr>
+<tr><td><?php echo cam_t('TEXT.KAMERA_KONFIGURIERT'); ?></td><td><?= !empty($ac_st['ok']) ? 'ja' : '<b>nein</b>' ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.LETZTES_BILD'); ?></td><td><?= $ac_st['letztes_bild'] !== '' ? ac_e($ac_st['letztes_bild']) . ' (Anlass: ' . ac_e($ac_st['letzter_anlass']) . ')' : '&ndash;' ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.ALTER'); ?></td><td><?= (int) $ac_st['alter_min'] >= 0 ? (int) $ac_st['alter_min'] . ' Minuten' : '&ndash;' ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.GESPEICHERTE_AUFNAHMEN'); ?></td><td><?= (int) $ac_st['bilder'] ?> Bilder, <?= (int) $ac_st['clips'] ?> <?php echo cam_t('TEXT.SERIEN'); ?> <?= (int) $ac_st['timelapse'] ?> <?php echo cam_t('TEXT.ZEITRAFFERBILDER'); ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.ZULETZT_ERKANNT'); ?></td><td><?= !empty($ac_st['objekte']) ? ac_e(implode(', ', $ac_st['objekte'])) : '&ndash; (keine Erkennung eingerichtet oder nichts gefunden)' ?></td></tr>
 </table>
 </div>
 
-<!-- ================= Protokoll ================= -->
-<div class="ac-pane" id="tab-log">
+<!-- ================= <?php echo cam_t('TEXT.PROTOKOLL'); ?> ================= -->
+<div class="sm-pane" id="tab-log">
 <h2>Protokoll</h2>
-<div class="ac-small" style="margin-bottom:8px;">Protokolliert werden Aufnahmen, Aufr&auml;uml&auml;ufe und Fehler.
-Passw&ouml;rter werden dabei maskiert. Neueste Eintr&auml;ge oben (max. 300).<br>
-Datei: <span class="ac-mono"><?= ac_e($ac_logfile) ?></span></div>
+<div class="sm-small" style="margin-bottom:8px;"><?php echo cam_t('TEXT.PROTOKOLLIERT_WERDEN_AUFNAHMEN_AUF'); ?><br>
+<?php echo cam_t('TEXT.DATEI'); ?> <span class="sm-mono"><?= ac_e($ac_logfile) ?></span></div>
 <?php if ($ac_loglines) { ?>
-<div class="ac-log"><?= ac_e(implode("\n", $ac_loglines)) ?></div>
+<div class="sm-log"><?= ac_e(implode("\n", $ac_loglines)) ?></div>
 <?php } else { ?>
-<div class="ac-alert ac-info">Noch keine Protokoll-Eintr&auml;ge vorhanden.</div>
+<div class="sm-alert sm-info"><?php echo cam_t('TEXT.NOCH_KEINE_PROTOKOLL_EINTRGE_VORHA'); ?></div>
 <?php } ?>
-<form method="post" style="margin-top:10px;">
+<form action="index.php" method="post" style="margin-top:10px;">
     <input data-role="none" type="hidden" name="clearlog" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-log">
-    <button data-role="none" class="ac-btn" type="submit" style="background:#c62828;">Protokoll leeren</button>
+    <button data-role="none" class="sm-btn" type="submit" style="background:#c62828;"><?php echo cam_t('TEXT.PROTOKOLL_LEEREN'); ?></button>
 </form>
 </div>
 
@@ -655,10 +611,10 @@ Datei: <span class="ac-mono"><?= ac_e($ac_logfile) ?></span></div>
 <script>
 (function () {
     var aktiv = <?= json_encode($ac_tab) ?>;
-    var tabs = document.querySelectorAll('.ac-tab');
+    var tabs = document.querySelectorAll('.sm-tab');
     function zeige(id) {
-        tabs.forEach(function (t) { t.classList.toggle('ac-active', t.dataset.pane === id); });
-        document.querySelectorAll('.ac-pane').forEach(function (p) { p.classList.toggle('ac-active', p.id === id); });
+        tabs.forEach(function (t) { t.classList.toggle('sm-active', t.dataset.pane === id); });
+        document.querySelectorAll('.sm-pane').forEach(function (p) { p.classList.toggle('sm-active', p.id === id); });
     }
     tabs.forEach(function (t) { t.addEventListener('click', function () { zeige(t.dataset.pane); }); });
     zeige(aktiv);
