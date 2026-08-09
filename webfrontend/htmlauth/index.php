@@ -38,7 +38,54 @@ foreach (array(
 }
 
 $ac_saved = false; $ac_note = ''; $ac_err = '';
-$ac_tab = preg_match('/^tab-(settings|loxone|shots|test|log)$/', (string) (isset($_POST['activetab']) ? $_POST['activetab'] : '')) ? $_POST['activetab'] : 'tab-settings';
+
+// ---------- Speichern: nur die MQTT-Werte ----------
+// Bewusst ein eigener Zweig. Der grosse Speichervorgang liest zwar die alte
+// Konfiguration ein, ueberschreibt danach aber JEDES Feld aus dem Formular -
+// wuerde das MQTT-Formular dieselbe Taste druecken, stuenden Kameraadresse
+// und Zugangsdaten anschliessend auf ihren Vorgabewerten.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mqtt'])) {
+    $ac_m = cam_config();
+    $ac_m['mqtt_enabled'] = isset($_POST['mqtt_enabled']) ? 1 : 0;
+    $ac_mt = preg_replace('#[^\w/\-]#', '', (string) (isset($_POST['mqtt_topic']) ? $_POST['mqtt_topic'] : ''));
+    if ($ac_mt === '') {
+        $ac_err = cam_t('MQTT.FEHLER_TOPIC');
+    } else {
+        $ac_m['mqtt_topic'] = $ac_mt;
+        if (cam_config_save($ac_m)) {
+            $ac_saved = true;
+            // Nach dem Umstellen alles einmal frisch senden, damit der Broker
+            // nicht auf Werten unter dem alten Thema sitzenbleibt.
+            cam_mqtt_zustand(true);
+        } else {
+            $ac_err = cam_t('MQTT.FEHLER_SPEICHERN');
+        }
+    }
+    $ac_tab = 'tab-mqtt';
+}
+
+/* Drei Stellen gehoeren immer zusammen: Reiterleiste, Bereich (sm-pane mit
+   gleicher id) und diese Positivliste. Fehlt ein Name hier, ist der Reiter
+   sichtbar und anklickbar - aber nach jedem Absenden springt die Seite
+   zurueck auf Einstellungen. */
+$ac_muster = '/^tab-(settings|mqtt|loxone|shots|test|log)$/';
+$ac_tab = preg_match($ac_muster, (string) (isset($_POST['activetab']) ? $_POST['activetab'] : '')) ? $_POST['activetab'] : 'tab-settings';
+if (isset($_GET['form']) && preg_match($ac_muster, 'tab-' . $_GET['form'])) {
+    $ac_tab = 'tab-' . $_GET['form'];
+}
+
+// ---------- Loxone-Vorlage herunterladen ----------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['download'])) {
+    $ac_host = isset($_SERVER['HTTP_HOST']) ? preg_replace('/[^A-Za-z0-9\.\-:]/', '', $_SERVER['HTTP_HOST']) : '';
+    $ac_v = cam_vorlage($ac_host);
+    header('Content-Type: application/x-download');
+    // Die Anfuehrungszeichen um den Dateinamen sind Pflicht - ohne sie bricht
+    // jeder Name, der ein Leerzeichen enthaelt.
+    header('Content-Disposition: attachment; filename="' . $ac_v[0] . '"');
+    header('Content-Length: ' . strlen($ac_v[1]));
+    echo $ac_v[1];
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clearlog'])) {
     @mkdir(dirname($ac_logfile), 0775, true);
@@ -69,7 +116,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
     $ac_u = trim((string) (isset($_POST['user']) ? $_POST['user'] : ''));
     if ($ac_u !== '') { $ac_new['user'] = $ac_u; }
     // Passwortfeld leer lassen = bisheriges Passwort behalten
-    $ac_pw = (string) (isset($_POST['pass']) ? $_POST['pass'] : '');
+    // trim() ist hier kein Schoenheitsfehler: Passwortverwaltungen im Browser
+    // schreiben gelegentlich ein einzelnes Leerzeichen in ein leer gelassenes
+    // Feld. Ohne trim() wuerde damit das gespeicherte Passwort durch ein
+    // Leerzeichen ersetzt - und die Kamera meldet danach nur noch 401.
+    $ac_pw = trim((string) (isset($_POST['pass']) ? $_POST['pass'] : ''));
     if ($ac_pw !== '') { $ac_new['pass'] = $ac_pw; }
     $ac_new['channel'] = max(1, min(16, (int) (isset($_POST['channel']) ? $_POST['channel'] : 1)));
     $ac_new['resolution'] = preg_replace('/[^A-Za-z0-9x,]/', '', (string) (isset($_POST['resolution']) ? $_POST['resolution'] : ''));
@@ -93,7 +144,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         $ac_su = 'http://' . ltrim($ac_su, '/');
     }
     $ac_new['stream_fps'] = max(0.2, min(10, (float) (isset($_POST['stream_fps']) ? $_POST['stream_fps'] : 2)));
-    $ac_new['stream_maxsec'] = max(5, min(21600, (int) (isset($_POST['stream_maxsec']) ? $_POST['stream_maxsec'] : 900)));
+    // 900 s statt 21600: jeder offene Strom belegt einen PHP-Arbeitsprozess,
+    // und davon hat ein LoxBerry nur eine Handvoll. Siehe cam_stream.php.
+    $ac_new['stream_maxsec'] = max(5, min(900, (int) (isset($_POST['stream_maxsec']) ? $_POST['stream_maxsec'] : 900)));
     $ac_sm = (string) (isset($_POST['stream_mode']) ? $_POST['stream_mode'] : 'auto');
     $ac_new['stream_mode'] = in_array($ac_sm, array('auto', 'mjpeg', 'jpeg', 'rtsp'), true) ? $ac_sm : 'auto';
     $ac_mu = trim((string) (isset($_POST['mjpeg_url']) ? $_POST['mjpeg_url'] : ''));
@@ -189,6 +242,7 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 .acw .sm-info { background: #eef4fb; border: 1px solid #90a4ae; }
 .acw .sm-tabs { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 2px solid #6dac20; flex-wrap: wrap; }
 .acw .sm-tab { background: #eee; border: 1px solid #ccc; border-bottom: 0; border-radius: 8px 8px 0 0; padding: 9px 18px;
+          text-decoration: none; display: inline-block;
     cursor: pointer; color: #444 !important; text-shadow: none !important; }
 .acw .sm-tab.sm-active { background: #6dac20; color: #fff !important; border-color: #6dac20; font-weight: 600; }
 .acw .sm-pane { display: none; padding-top: 4px; }
@@ -219,12 +273,17 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 <div class="sm-alert sm-warn"><b><?php echo cam_t('TEXT.NOCH_NICHT_EINGERICHTET'); ?></b> <?php echo cam_t('TEXT.TRAGEN_SIE_UNTEN_ADRESSE_BENUTZER_'); ?></div>
 <?php } ?>
 
+<!-- Reiterleiste: echte Links, JavaScript faengt den Klick ab. Warum beides:
+     Der Link traegt die Adresse - jeder Reiter ist damit verlinkbar, die
+     Zurueck-Taste tut das Erwartete, und faellt das Skript aus, bleibt die
+     Seite bedienbar. -->
 <div class="sm-tabs">
-    <div class="sm-tab" data-pane="tab-settings"><?php echo cam_t('REITER.EINSTELLUNGEN'); ?></div>
-    <div class="sm-tab" data-pane="tab-loxone"><?php echo cam_t('REITER.LOXONE'); ?></div>
-    <div class="sm-tab" data-pane="tab-shots"><?php echo cam_t('REITER.AUFNAHMEN'); ?></div>
-    <div class="sm-tab" data-pane="tab-test"><?php echo cam_t('REITER.TEST'); ?></div>
-    <div class="sm-tab" data-pane="tab-log"><?php echo cam_t('REITER.LOG'); ?></div>
+    <a class="sm-tab" data-pane="tab-settings" href="index.php?form=settings"><?php echo cam_t('REITER.EINSTELLUNGEN'); ?></a>
+    <a class="sm-tab" data-pane="tab-mqtt"     href="index.php?form=mqtt"><?php echo cam_t('REITER.MQTT'); ?></a>
+    <a class="sm-tab" data-pane="tab-loxone"   href="index.php?form=loxone"><?php echo cam_t('REITER.LOXONE'); ?></a>
+    <a class="sm-tab" data-pane="tab-shots"    href="index.php?form=shots"><?php echo cam_t('REITER.AUFNAHMEN'); ?></a>
+    <a class="sm-tab" data-pane="tab-test"     href="index.php?form=test"><?php echo cam_t('REITER.TEST'); ?></a>
+    <a class="sm-tab" data-pane="tab-log"      href="index.php?form=log"><?php echo cam_t('REITER.LOG'); ?></a>
 </div>
 
 <!-- ================= <?php echo cam_t('TEXT.EINSTELLUNG'); ?>en ================= -->
@@ -388,7 +447,7 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 <label><?php echo cam_t('TEXT.BILDER_JE_SEKUNDE'); ?></label>
 <input type="number" step="0.1" min="0.2" max="10" data-role="none" name="stream_fps" value="<?= ac_e((string) $ac_cfg['stream_fps']) ?>">
 <label><?php echo cam_t('TEXT.HCHSTDAUER_EINES_STROMS_IN_SEKUNDE'); ?></label>
-<input type="number" min="5" max="21600" data-role="none" name="stream_maxsec" value="<?= ac_e((string) $ac_cfg['stream_maxsec']) ?>">
+<input type="number" min="5" max="900" data-role="none" name="stream_maxsec" value="<?= ac_e((string) $ac_cfg['stream_maxsec']) ?>">
 <label><?php echo cam_t('TEXT.BILDQUELLE'); ?></label>
 <select data-role="none" name="stream_mode">
 <option value="auto"<?= $ac_cfg['stream_mode'] === 'auto' ? ' selected' : '' ?><?php echo cam_t('TEXT.AUTOMATISCH_KAMERASTROM_SONST_RTSP'); ?></option>
@@ -417,6 +476,50 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 <label><?php echo cam_t('TEXT.TOKEN_OPTIONAL_DANN_NUR_MIT'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.T_TOKEN'); ?></span> <?php echo cam_t('TEXT.ABRUFBAR'); ?></label>
 <input type="text" data-role="none" name="stream_token" value="<?= ac_e((string) $ac_cfg['stream_token']) ?>">
 <div style="margin-top:16px;"><button data-role="none" class="sm-btn" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button></div>
+</form>
+</div>
+
+<!-- ================= MQTT ================= -->
+<div class="sm-pane" id="tab-mqtt">
+<h2><?php echo cam_t('MQTT.H_TITEL'); ?></h2>
+<?php $ac_mz = cam_mqtt_zustand_pruefen(); ?>
+<?php if (!$ac_mz['gefunden']) { ?>
+<div class="sm-alert sm-err"><?php echo cam_t('MQTT.KEIN_ABSCHNITT'); ?></div>
+<?php } elseif (!$ac_mz['autostart']) { ?>
+<div class="sm-alert sm-err"><?php echo cam_t('MQTT.KEIN_AUTOSTART'); ?></div>
+<?php } else { ?>
+<div class="sm-alert sm-ok"><?= sprintf(cam_t('MQTT.OK'), (int) $ac_mz['udpport']) ?></div>
+<?php } ?>
+
+<div class="sm-step"><?php echo cam_t('MQTT.WARUM'); ?></div>
+
+<h3 class="sm-h3"><?php echo cam_t('MQTT.H_ABO'); ?></h3>
+<div class="sm-small"><?php echo cam_t('MQTT.ABO_TEXT'); ?></div>
+<div class="sm-mono" style="display:block;padding:8px;margin:6px 0;"><?= ac_e($ac_cfg['mqtt_topic']) ?>/#</div>
+<div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_WARNUNG'); ?></div>
+
+<h3 class="sm-h3"><?php echo cam_t('MQTT.H_THEMEN'); ?></h3>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('MQTT.T_THEMA'); ?></th><th><?php echo cam_t('MQTT.T_BEDEUTUNG'); ?></th><th><?php echo cam_t('MQTT.T_WERT'); ?></th></tr>
+<?php $ac_w = cam_werte(); ?>
+<?php foreach (cam_felder() as $ac_n => $ac_d) { ?>
+<tr><td><span class="sm-mono"><?= ac_e($ac_cfg['mqtt_topic']) ?>/<?= ac_e($ac_n) ?></span></td>
+    <td><?php echo cam_t($ac_d[3]); ?></td>
+    <td><?= isset($ac_w[$ac_n]) ? ac_e($ac_w[$ac_n]) : '&mdash;' ?></td></tr>
+<?php } ?>
+</table>
+<div class="sm-small"><?php echo cam_t('MQTT.BILD_THEMEN'); ?></div>
+
+<form action="index.php" method="post">
+<input data-role="none" type="hidden" name="save_mqtt" value="1">
+<input data-role="none" type="hidden" name="activetab" value="tab-mqtt">
+<div class="sm-row"><label><input data-role="none" type="checkbox" name="mqtt_enabled" value="1"<?= !empty($ac_cfg['mqtt_enabled']) ? ' checked' : '' ?>> <?php echo cam_t('MQTT.L_EIN'); ?></label></div>
+<div class="sm-row"><label><?php echo cam_t('MQTT.L_TOPIC'); ?></label>
+<input data-role="none" type="text" name="mqtt_topic" value="<?= ac_e($ac_cfg['mqtt_topic']) ?>" size="24"></div>
+<div class="sm-legende"><span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION_AUFNAHME'); ?></span></div>
+<div class="sm-knopfreihe">
+<button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button>
+</div>
 </form>
 </div>
 
@@ -490,6 +593,19 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 <?php echo cam_t('TEXT.ALLE_WERTE_GIBT_ES_AUCH_BER_DAS_LO'); ?>
 <span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_JSON_1'); ?></span>
 </div>
+
+<h3 class="sm-h3"><?php echo cam_t('LOX.H_VORLAGE'); ?></h3>
+<div class="sm-small"><?php echo cam_t('LOX.VORLAGE_TEXT'); ?></div>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-technik"></i> <?php echo cam_t('LEGENDE.TECHNIK'); ?></span>
+</div>
+<div class="sm-knopfreihe">
+<form action="index.php" method="post" style="margin:0;">
+    <input data-role="none" type="hidden" name="download" value="xml_in">
+    <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
+    <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo cam_t('LOX.K_VORLAGE'); ?></button>
+</form>
+</div>
 </div>
 
 <!-- ================= Aufnahmen ================= -->
@@ -529,13 +645,34 @@ rsort($ac_clips);
 <form action="index.php" method="post" style="margin-top:10px;">
     <input data-role="none" type="hidden" name="cleanupnow" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-shots">
-    <button data-role="none" class="sm-btn" type="submit" style="background:#607d8b;"><?php echo cam_t('TEXT.ALTE_AUFNAHMEN_JETZT_AUFRUMEN'); ?></button>
+    <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo cam_t('TEXT.ALTE_AUFNAHMEN_JETZT_AUFRUMEN'); ?></button>
 </form>
 </div>
 
 <!-- ================= Test ================= -->
 <div class="sm-pane" id="tab-test">
 <h2>Test</h2>
+
+<h3 class="sm-h3"><?php echo cam_t('TEST.H_SELBSTTEST'); ?></h3>
+<div class="sm-small"><?php echo cam_t('TEST.SELBSTTEST_TEXT'); ?></div>
+<?php
+$ac_pr = cam_pruefungen();
+$ac_schlecht = 0;
+foreach ($ac_pr as $ac_z) { if ($ac_z[0] === 0) { $ac_schlecht++; } }
+?>
+<div class="sm-alert <?= $ac_schlecht ? 'sm-err' : 'sm-ok' ?>">
+<?= sprintf(cam_t($ac_schlecht ? 'TEST.SELBSTTEST_FEHL' : 'TEST.SELBSTTEST_OK'),
+            count($ac_pr) - $ac_schlecht, count($ac_pr)) ?>
+</div>
+<table class="sm-tbl">
+<tr><th style="width:34px;"></th><th style="width:34%;"><?php echo cam_t('TEST.T_FRAGE'); ?></th><th><?php echo cam_t('TEST.T_ANTWORT'); ?></th></tr>
+<?php foreach ($ac_pr as $ac_z) { ?>
+<tr><td style="text-align:center;"><?= $ac_z[0] === 1 ? '<b style="color:#1a7f1a;">&#10004;</b>'
+        : ($ac_z[0] === 0 ? '<b style="color:#b00000;">&#10008;</b>' : '<b>i</b>') ?></td>
+    <td><?= $ac_z[1] ?></td><td><?= $ac_z[2] ?></td></tr>
+<?php } ?>
+</table>
+
 <div class="sm-legende">
 <span><i class="sm-punkt sm-b-lesen"></i> <?php echo cam_t('LEGENDE.LESEN'); ?></span>
 <span><i class="sm-punkt sm-b-technik"></i> <?php echo cam_t('LEGENDE.TECHNIK'); ?></span>
@@ -605,6 +742,7 @@ rsort($ac_clips);
     <input data-role="none" type="hidden" name="activetab" value="tab-log">
     <button data-role="none" class="sm-btn" type="submit" style="background:#c62828;"><?php echo cam_t('TEXT.PROTOKOLL_LEEREN'); ?></button>
 </form>
+<?php if (class_exists('LBWeb', false) && method_exists('LBWeb', 'loglist_html')) { echo LBWeb::loglist_html(); } ?>
 </div>
 
 </div>

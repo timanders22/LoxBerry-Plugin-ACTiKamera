@@ -1,58 +1,52 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" version="1.1" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="schale" x1="0.2" y1="0" x2="0.8" y2="1">
-      <stop offset="0"    stop-color="#ffffff"/>
-      <stop offset="0.55" stop-color="#f2f1e7"/>
-      <stop offset="1"    stop-color="#d5d4c7"/>
-    </linearGradient>
-    <linearGradient id="rand" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#e9e8dd"/><stop offset="1" stop-color="#c3c2b5"/>
-    </linearGradient>
-    <radialGradient id="innen" cx="0.4" cy="0.25" r="0.95">
-      <stop offset="0"   stop-color="#3a4249"/>
-      <stop offset="0.6" stop-color="#1b2126"/>
-      <stop offset="1"   stop-color="#080b0d"/>
+    <radialGradient id="bg-grad" cx="50%" cy="50%" r="50%" fx="35%" fy="35%">
+      <stop offset="0%" stop-color="#7dc424" />
+      <stop offset="65%" stop-color="#6dac20" />
+      <stop offset="100%" stop-color="#568819" />
     </radialGradient>
-    <radialGradient id="glas" cx="0.36" cy="0.3" r="0.85">
-      <stop offset="0"    stop-color="#5b7488"/>
-      <stop offset="0.45" stop-color="#243543"/>
-      <stop offset="1"    stop-color="#05080a"/>
-    </radialGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
   </defs>
 
-  <circle cx="256" cy="256" r="248" fill="#6dac20"/>
-  <circle cx="256" cy="256" r="248" fill="none" stroke="#5c9219" stroke-width="10"/>
+  <!-- Outer Badge Ring -->
+  <circle cx="256" cy="256" r="246" fill="url(#bg-grad)" />
+  <circle cx="256" cy="256" r="232" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="3" />
 
-  <!-- Aussenschale: flache Kuppel, an der Decke sitzend -->
-  <path d="M92 296 A164 164 0 0 1 420 296 Z" fill="url(#schale)"/>
-  <ellipse cx="256" cy="296" rx="164" ry="30" fill="url(#rand)"/>
-  <path d="M92 296 A164 164 0 0 1 420 296" fill="none" stroke="#b9b8aa" stroke-width="4"/>
+  <g filter="url(#shadow)" fill="#ffffff">
+    <!-- Dome Camera Mount -->
+    <rect x="181" y="125" width="150" height="18" rx="6" fill="#ffffff" />
+    <rect x="191" y="143" width="130" height="16" rx="4" fill="#ffffff" />
+    
+    <!-- Outer Glass Dome -->
+    <path d="M 198 159 C 198 159, 198 260, 256 260 C 314 260, 314 159, 314 159 Z" fill="#ffffff" />
+    
+    <!-- Inner Dark Lens Housing -->
+    <path d="M 208 159 C 208 159, 208 245, 256 245 C 304 245, 304 159, 304 159 Z" fill="#6dac20" />
+    
+    <!-- Camera Lens -->
+    <circle cx="256" cy="195" r="22" fill="#ffffff" />
+    <circle cx="256" cy="195" r="13" fill="#6dac20" />
+    <circle cx="262" cy="189" r="3" fill="#ffffff" />
+    
+    <!-- IR LEDs around Lens -->
+    <circle cx="280" cy="171" r="3" fill="#ffffff" />
+    <circle cx="232" cy="171" r="3" fill="#ffffff" />
+    <circle cx="280" cy="219" r="3" fill="#ffffff" />
+    <circle cx="232" cy="219" r="3" fill="#ffffff" />
 
-  <!-- Ringnaht zwischen Ober- und Unterteil -->
-  <path d="M104 258 A160 160 0 0 0 408 258" fill="none" stroke="#c0bfb1" stroke-width="6"/>
+    <!-- Vision / Field of View Arcs -->
+    <path d="M 221 250 A 35 15 0 0 0 291 250" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" />
+    <path d="M 198 268 A 58 22 0 0 0 314 268" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.8" />
+    <path d="M 176 286 A 80 28 0 0 0 336 286" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.5" />
 
-  <!-- Schwarze Innenkuppel, nach unten gewoelbt -->
-  <path d="M148 292 A108 108 0 0 0 364 292 Z" fill="url(#innen)"/>
-  <ellipse cx="256" cy="292" rx="108" ry="20" fill="#11161a"/>
-
-  <!-- Objektiv mit Fassung -->
-  <circle cx="256" cy="332" r="58" fill="#151b20"/>
-  <circle cx="256" cy="332" r="47" fill="url(#glas)"/>
-  <circle cx="256" cy="332" r="47" fill="none" stroke="#000000" stroke-width="4" opacity="0.7"/>
-  <circle cx="256" cy="332" r="20" fill="#0b1116"/>
-  <ellipse cx="238" cy="314" rx="15" ry="11" fill="#ffffff" opacity="0.55"/>
-  <ellipse cx="276" cy="350" rx="8"  ry="6"  fill="#8fd0ff" opacity="0.25"/>
-
-  <!-- Infrarot-Kranz um das Objektiv -->
-  <g fill="#aab4bb">
-    <circle cx="256" cy="256" r="0"/>
-    <circle cx="176" cy="318" r="11"/><circle cx="182" cy="356" r="11"/>
-    <circle cx="200" cy="386" r="11"/><circle cx="336" cy="318" r="11"/>
-    <circle cx="330" cy="356" r="11"/><circle cx="312" cy="386" r="11"/>
-    <circle cx="214" cy="290" r="10"/><circle cx="298" cy="290" r="10"/>
+    <!-- Dashed Line -->
+    <path d="M 150 345 L 362 345" stroke="#ffffff" stroke-width="4" stroke-dasharray="6 8" opacity="0.8" />
   </g>
 
-  <!-- Glanz auf der Schale -->
-  <path d="M140 268 A140 140 0 0 1 214 162" fill="none" stroke="#ffffff" stroke-width="12"
-        stroke-linecap="round" opacity="0.55"/>
+  <!-- Typography -->
+  <text x="256" y="380" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-weight="bold" font-size="22" letter-spacing="2">ACTi KAMERA</text>
+  <text x="256" y="425" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-weight="900" font-size="38" letter-spacing="3">LOXBERRY</text>
 </svg>

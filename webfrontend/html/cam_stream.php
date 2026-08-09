@@ -49,9 +49,28 @@ if ($ac_fps <= 0) { $ac_fps = 2.0; }
 if ($ac_fps > 10) { $ac_fps = 10.0; }   // die Kamera liefert Schnappschuesse, kein Video
 $ac_pause = (int) round(1000000 / $ac_fps);
 
+/* Obergrenze fuer die Dauer eines Stroms.
+ *
+ * Frueher waren hier 21600 Sekunden erlaubt - sechs Stunden. Das ist keine
+ * Notbremse, das ist eine Falle: PHP laeuft auf einem LoxBerry mit einer
+ * kleinen Zahl paralleler Arbeitsprozesse. Jeder offene Strom belegt einen
+ * davon. Zwei geoeffnete Loxone-Apps und ein Browserfenster, und die Haelfte
+ * ist weg; sind alle belegt, antwortet die gesamte LoxBerry-Oberflaeche nicht
+ * mehr - auch kein anderes Plugin.
+ *
+ * 900 Sekunden reichen fuer jeden Blick auf die Haustuer. Wer laenger
+ * zusehen will, laedt die Seite neu; das kostet einen Klick statt der
+ * Bedienbarkeit des ganzen Geraets.
+ *
+ * ignore_user_abort(false) und die connection_aborted()-Pruefungen in den
+ * Schleifen geben den Prozess frei, sobald der Abrufer weggeht - das ist die
+ * eigentliche Rettung. Die Obergrenze fasst den Fall, dass jemand die Seite
+ * offen stehen laesst.
+ */
+define('AC_STREAM_MAX', 900);
 $ac_max = isset($_GET['sec']) ? (int) $_GET['sec'] : (int) $ac_cfg['stream_maxsec'];
 if ($ac_max < 5) { $ac_max = 5; }
-if ($ac_max > 21600) { $ac_max = 21600; }
+if ($ac_max > AC_STREAM_MAX) { $ac_max = AC_STREAM_MAX; }
 
 // Der Strom laeuft, bis der Abrufer die Verbindung schliesst oder die Zeit ablaeuft.
 @set_time_limit(0);
@@ -146,7 +165,17 @@ if ($ac_ffmpeg !== '' && $ac_rtsp !== '') {
         . ' -r ' . escapeshellarg((string) $ac_fps)
         . ' -t ' . escapeshellarg((string) $ac_max) . ' - 2>/dev/null';
 
-    $ac_proc = @proc_open($ac_cmd, array(1 => array('pipe', 'w')), $ac_pipes);
+    /* Alle drei Standard-Kanaele angeben, nicht nur die Ausgabe.
+     * Fehlt der Eingang, erbt ffmpeg den des Webservers; fehlt der
+     * Fehlerkanal, kann ein unerwarteter Wortschwall von ffmpeg den
+     * Elternprozess blockieren. Das  2>/dev/null  im Befehl allein genuegt
+     * nicht - es faengt nur, was die Shell weiterreicht. */
+    $ac_desc = array(
+        0 => array('file', '/dev/null', 'r'),
+        1 => array('pipe', 'w'),
+        2 => array('file', '/dev/null', 'w'),
+    );
+    $ac_proc = @proc_open($ac_cmd, $ac_desc, $ac_pipes);
     if (is_resource($ac_proc)) {
         stream_set_blocking($ac_pipes[1], false);
         $ac_puffer = '';

@@ -96,18 +96,9 @@ if (isset($_GET['ptest'])) {
     exit;
 }
 
-function cam_ptest_active()
-{
-    $f = cam_paths()['tmp'] . '/ptest';
-    if (!is_file($f)) {
-        return 0;
-    }
-    if (time() - (int) file_get_contents($f) > 300) {
-        @unlink($f);
-        return 0;
-    }
-    return 1;
-}
+/* cam_ptest_active() ist in cam_lib.php umgezogen: cam_werte() braucht sie,
+   und die wird auch aus cam_cron.php aufgerufen - dort ist cam.php nicht
+   geladen, ein Aufruf haette den Cron mit einem Fatal Error beendet. */
 
 $ergebnis = '';
 if (isset($_GET['foto'])) {
@@ -140,10 +131,10 @@ header('Content-Type: text/plain; charset=utf-8');
 if ($ergebnis !== '') {
     echo $ergebnis . "\n";
 }
-printf("ACTI;OK=%d;ALTER=%d;BILDER=%d;CLIPS=%d;ZEITRAFFER=%d;PERSON=%d;OBJEKTE=%d;PUSH=%d;PUSHAKTIV=%d;PTEST=%d\n",
-    $st['ok'], $st['alter_min'], $st['bilder'], $st['clips'], $st['timelapse'],
-    $st['person'], count($st['objekte']),
-    $st['push'], cam_push_active(), cam_ptest_active());
+// Eine Quelle fuer die Zeile: cam_zeile() baut sie aus cam_felder(), und
+// dieselbe Tabelle erzeugt MQTT-Themen und Importdatei. Zwei Stellen, die
+// dasselbe Format bauen, laufen sonst irgendwann auseinander.
+echo cam_zeile($st) . "\n";
 if ($st['objekte']) {
     echo 'ERKANNT=' . implode(',', $st['objekte']) . "\n";
 }

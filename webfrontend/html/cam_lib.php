@@ -69,7 +69,7 @@ function cam_config()
         'snapcmd' => 'SNAPSHOT=N1920x1080,100&DUMMY=n',  // vollstaendiger CGI-Befehl
         'snapurl' => '',             // komplette funktionierende URL (hat Vorrang)
         'stream_fps' => 2,           // Bilder je Sekunde im MJPEG-Strom
-        'stream_maxsec' => 900,      // Notbremse: laengster Strom in Sekunden
+        'stream_maxsec' => 900,      // Notbremse: laengster Strom in Sekunden (Obergrenze 900)
         'stream_token' => '',        // optionales Kennwort fuer den Stromabruf
         'stream_mode' => 'auto',     // auto | mjpeg | rtsp (ffmpeg) | jpeg (Schnappschussfolge)
         'mjpeg_url' => '',           // leer = /cgi-bin/cmd/system?GET_STREAM der Kamera
@@ -116,6 +116,31 @@ function cam_config_save(array $cfg)
     @chmod($p['config'], 0600);
     @copy($p['config'], $p['backup']);
     @chmod($p['backup'], 0600);
+    return true;
+}
+
+/**
+ * Eine Datei unteilbar schreiben: erst daneben, dann umbenennen.
+ *
+ * WARUM: letztesbild.jpg und letztesbild.json werden von mehreren Ausloesern
+ * beschrieben - Klingel, Bewegung, Handaufnahme, Cron. Loesen zwei davon
+ * gleichzeitig aus, schreiben zwei Prozesse in dieselbe Datei, und wer sie in
+ * diesem Augenblick liest, bekommt ein halbes Bild oder unvollstaendiges JSON.
+ * rename() ist auf demselben Dateisystem unteilbar: der Leser sieht entweder
+ * die alte oder die neue Fassung, nie eine halbe.
+ */
+function cam_schreibe_unteilbar($pfad, $inhalt)
+{
+    if ($inhalt === false || $inhalt === null) { return false; }
+    $neben = $pfad . '.' . getmypid() . '.neu';
+    if (@file_put_contents($neben, $inhalt) !== strlen($inhalt)) {
+        @unlink($neben);
+        return false;
+    }
+    if (!@rename($neben, $pfad)) {
+        @unlink($neben);
+        return false;
+    }
     return true;
 }
 
@@ -328,22 +353,136 @@ function cam_http($url, $timeout = 8, $auth = '')
         curl_close($ch);
         return array($body, $code, $err);
     }
-    $opt = array('timeout' => $timeout, 'ignore_errors' => true, 'user_agent' => 'LoxBerry ACTi-Plugin');
-    if ($auth === 'basic') {
-        $cfg = cam_config();
-        $opt['header'] = 'Authorization: Basic ' . base64_encode($cfg['user'] . ':' . $cfg['pass']);
-    }
-    $ctx = stream_context_create(array('http' => $opt));
-    $body = @file_get_contents($url, false, $ctx);
-    $code = 0;
-    if (isset($http_response_header) && is_array($http_response_header)) {
-        foreach ($http_response_header as $h) {
-            if (preg_match('#^HTTP/\S+\s+(\d{3})#', $h, $m)) {
-                $code = (int) $m[1];
+    /* ---------------- Rueckfall ohne cURL ----------------
+     *
+     * Hier lag ein stiller Fehler: nur 'basic' bekam eine Kopfzeile. Verlangte
+     * die Kamera 'digest', ging die Anfrage OHNE jede Anmeldung hinaus, die
+     * Kamera antwortete mit 401, und im Protokoll stand nur "Verbindung
+     * fehlgeschlagen" - man haette ewig an den Zugangsdaten gesucht, die in
+     * Ordnung waren. Deshalb wird Digest hier vollstaendig nachgebaut.
+     */
+    $cfg = cam_config();
+    $grund = array('timeout' => $timeout, 'ignore_errors' => true,
+                   'user_agent' => 'LoxBerry ACTi-Plugin');
+
+    $anfrage = function ($kopf) use ($url, $grund) {
+        $opt = $grund;
+        if ($kopf !== '') { $opt['header'] = $kopf; }
+        $ctx = stream_context_create(array('http' => $opt));
+        $body = @file_get_contents($url, false, $ctx);
+        $code = 0;
+        $wwwauth = '';
+        if (isset($http_response_header) && is_array($http_response_header)) {
+            foreach ($http_response_header as $h) {
+                if (preg_match('#^HTTP/\S+\s+(\d{3})#', $h, $m)) { $code = (int) $m[1]; }
+                if (stripos($h, 'WWW-Authenticate:') === 0) { $wwwauth = trim(substr($h, 17)); }
             }
         }
+        return array($body, $code, $wwwauth);
+    };
+
+    if ($auth === 'basic') {
+        list($body, $code, ) = $anfrage('Authorization: Basic '
+            . base64_encode($cfg['user'] . ':' . $cfg['pass']));
+        return array($body, $code, $body === false ? 'Verbindung fehlgeschlagen' : '');
     }
+
+    if ($auth === 'digest') {
+        // Erster Anlauf ohne Anmeldung - die Kamera liefert die Vorgabewerte
+        // (realm, nonce, qop) in ihrer 401-Antwort mit.
+        list($body, $code, $wwwauth) = $anfrage('');
+        if ($code !== 401 || stripos($wwwauth, 'Digest') !== 0) {
+            // Kein Digest verlangt (oder gleich durchgelassen) - so lassen.
+            return array($body, $code, $body === false ? 'Verbindung fehlgeschlagen' : '');
+        }
+        $kopf = cam_digest_header($wwwauth, $url, $cfg['user'], $cfg['pass'], 'GET');
+        if ($kopf === '') {
+            return array(false, 401, 'Die Kamera verlangt Digest, die Vorgabe liess sich '
+                                   . 'aber nicht auswerten: ' . $wwwauth);
+        }
+        list($body, $code, ) = $anfrage($kopf);
+        return array($body, $code, $body === false ? 'Verbindung fehlgeschlagen' : '');
+    }
+
+    list($body, $code, ) = $anfrage('');
     return array($body, $code, $body === false ? 'Verbindung fehlgeschlagen' : '');
+}
+
+/**
+ * Baut die Authorization-Kopfzeile fuer HTTP Digest (RFC 2617).
+ *
+ * NACHGEBAUTES PROTOKOLL, ALSO GEGEN DAS ORIGINAL GEMESSEN: Die Funktion
+ * liefert fuer das Rechenbeispiel aus RFC 2617, Abschnitt 3.5, genau den dort
+ * abgedruckten Wert
+ *   6629fae49393a05397450978507c4ef1
+ * Wer hier etwas aendert, prueft das mit cam_digest_selbsttest() nach.
+ *
+ * Unterstuetzt qop=auth und den alten Fall ganz ohne qop. qop=auth-int bleibt
+ * aussen vor - dafuer muesste der Rumpf vorab bekannt sein, und keine Kamera
+ * verlangt es.
+ */
+function cam_digest_header($wwwauth, $url, $user, $pass, $methode = 'GET',
+                           $cnonce = null, $nc = '00000001')
+{
+    $w = array();
+    // Die Werte stehen als  name="wert"  oder unquoted  name=wert  darin.
+    if (preg_match_all('/(\w+)\s*=\s*(?:"([^"]*)"|([^,\s]+))/', $wwwauth, $m, PREG_SET_ORDER)) {
+        foreach ($m as $t) { $w[strtolower($t[1])] = $t[2] !== '' ? $t[2] : $t[3]; }
+    }
+    if (!isset($w['realm']) || !isset($w['nonce'])) { return ''; }
+
+    $pfad = parse_url($url, PHP_URL_PATH);
+    if ($pfad === null || $pfad === false || $pfad === '') { $pfad = '/'; }
+    $frage = parse_url($url, PHP_URL_QUERY);
+    if ($frage !== null && $frage !== false && $frage !== '') { $pfad .= '?' . $frage; }
+
+    $ha1 = md5($user . ':' . $w['realm'] . ':' . $pass);
+    $ha2 = md5($methode . ':' . $pfad);
+
+    // qop kann mehrere Verfahren nennen ("auth,auth-int") - auth waehlen.
+    $qop = '';
+    if (isset($w['qop'])) {
+        foreach (explode(',', $w['qop']) as $q) {
+            if (strtolower(trim($q)) === 'auth') { $qop = 'auth'; break; }
+        }
+    }
+
+    $teile = array(
+        'username="' . $user . '"',
+        'realm="' . $w['realm'] . '"',
+        'nonce="' . $w['nonce'] . '"',
+        'uri="' . $pfad . '"',
+    );
+    if ($qop === 'auth') {
+        if ($cnonce === null) { $cnonce = substr(md5(uniqid('', true)), 0, 8); }
+        $antwort = md5($ha1 . ':' . $w['nonce'] . ':' . $nc . ':' . $cnonce . ':auth:' . $ha2);
+        $teile[] = 'qop=auth';
+        $teile[] = 'nc=' . $nc;
+        $teile[] = 'cnonce="' . $cnonce . '"';
+    } else {
+        $antwort = md5($ha1 . ':' . $w['nonce'] . ':' . $ha2);
+    }
+    $teile[] = 'response="' . $antwort . '"';
+    if (isset($w['opaque'])) { $teile[] = 'opaque="' . $w['opaque'] . '"'; }
+    if (isset($w['algorithm'])) { $teile[] = 'algorithm=' . $w['algorithm']; }
+
+    return 'Authorization: Digest ' . implode(', ', $teile);
+}
+
+/**
+ * Selbsttest gegen das Rechenbeispiel aus RFC 2617, Abschnitt 3.5.
+ * Rueckgabe: array(bestanden, erhaltener Wert, erwarteter Wert)
+ */
+function cam_digest_selbsttest()
+{
+    $wwwauth = 'Digest realm="testrealm@host.com", qop="auth,auth-int", '
+             . 'nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093", '
+             . 'opaque="5ccc069c403ebaf9f0171e9517f40e41"';
+    $kopf = cam_digest_header($wwwauth, 'http://www.nowhere.org/dir/index.html',
+                              'Mufasa', 'Circle Of Life', 'GET', '0a4f113b', '00000001');
+    $soll = '6629fae49393a05397450978507c4ef1';
+    $ist = preg_match('/response="([0-9a-f]{32})"/', $kopf, $m) ? $m[1] : '';
+    return array($ist === $soll, $ist, $soll);
 }
 
 /**
@@ -506,15 +645,21 @@ function cam_snapshot($anlass = 'manuell')
         return array(0, 'Kein Bild erhalten: ' . $err . $hinweis);
     }
     $dir = cam_datadir() . '/bilder';
-    $name = date('Ymd_His') . '_' . preg_replace('/[^a-z0-9]/i', '', $anlass) . '.jpg';
+    // Millisekunden im Namen: Klingel und Bewegung koennen in derselben
+    // Sekunde ausloesen. Bei gleichem Anlass waere der Name sonst identisch
+    // und die zweite Aufnahme ueberschriebe die erste.
+    $ms = explode('.', sprintf('%.3f', microtime(true)));
+    $name = date('Ymd_His') . '-' . (isset($ms[1]) ? $ms[1] : '000')
+          . '_' . preg_replace('/[^a-z0-9]/i', '', $anlass) . '.jpg';
     if (@file_put_contents($dir . '/' . $name, $body) === false) {
         cam_log('FEHLER: Bild konnte nicht gespeichert werden: ' . $dir . '/' . $name);
         return array(0, 'Bild konnte nicht gespeichert werden');
     }
-    // Immer auch als "letztes Bild" ablegen - das holt sich Loxone
+    // Immer auch als "letztes Bild" ablegen - das holt sich Loxone.
+    // Unteilbar, weil mehrere Ausloeser gleichzeitig hier ankommen koennen.
     $p = cam_paths();
-    @file_put_contents($p['web'] . '/letztesbild.jpg', $body);
-    @file_put_contents(cam_datadir() . '/letztesbild.json', json_encode(array(
+    cam_schreibe_unteilbar($p['web'] . '/letztesbild.jpg', $body);
+    cam_schreibe_unteilbar(cam_datadir() . '/letztesbild.json', json_encode(array(
         'datei' => $name, 'anlass' => $anlass, 'zeit' => date('c'), 'bytes' => strlen($body),
     )));
     cam_log('Schnappschuss gespeichert (' . $anlass . '): ' . $name . ', '
@@ -522,7 +667,7 @@ function cam_snapshot($anlass = 'manuell')
     $objekte = cam_ai($dir . '/' . $name);
     if ($objekte) {
         cam_log('Erkannt: ' . implode(', ', $objekte));
-        @file_put_contents(cam_datadir() . '/letztesbild.json', json_encode(array(
+        cam_schreibe_unteilbar(cam_datadir() . '/letztesbild.json', json_encode(array(
             'datei' => $name, 'anlass' => $anlass, 'zeit' => date('c'),
             'bytes' => strlen($body), 'objekte' => $objekte,
         )));
@@ -803,6 +948,26 @@ function cam_state()
 }
 
 /** Push-Fenster: nach einer Aufnahme fuer X Minuten aktiv (0->1-Flanke in Loxone). */
+/**
+ * Laeuft gerade ein Test-Push? (5 Minuten lang nach ?ptest=1)
+ *
+ * Liegt in /tmp - auf einem LoxBerry ist das eine RAM-Scheibe, die Datei
+ * beruehrt die SD-Karte also nicht. Eine Datenbank fuer ein Flag mit einer
+ * Zahl darin waere ein Dienst mehr, der laufen und ausfallen kann.
+ */
+function cam_ptest_active()
+{
+    $f = cam_paths()['tmp'] . '/ptest';
+    if (!is_file($f)) {
+        return 0;
+    }
+    if (time() - (int) @file_get_contents($f) > 300) {
+        @unlink($f);
+        return 0;
+    }
+    return 1;
+}
+
 function cam_push_active()
 {
     $cfg = cam_config();
@@ -818,6 +983,298 @@ function cam_push_active()
 }
 
 /* ---------------- MQTT (LoxBerry MQTT Gateway) ---------------- */
+
+/* ==================================================================
+ * Feldtabelle - EINE Quelle fuer Statuszeile, MQTT-Themen und Vorlage
+ *
+ * Drei Stellen, die dieselben Felder aufzaehlen, laufen frueher oder spaeter
+ * auseinander; dann stimmt die Vorlage nicht mehr zur Wirklichkeit, und der
+ * Anwender sucht den Fehler in Loxone Config.
+ * ================================================================== */
+
+/** name => array(analog, min, max, Sprachschluessel) */
+function cam_felder()
+{
+    return array(
+        'OK'        => array(0, 0, 1, 'FELD.OK'),
+        'ALTER'     => array(1, -1, 100000, 'FELD.ALTER'),
+        'BILDER'    => array(1, 0, 100000, 'FELD.BILDER'),
+        'CLIPS'     => array(1, 0, 100000, 'FELD.CLIPS'),
+        'ZEITRAFFER'=> array(1, 0, 100000, 'FELD.ZEITRAFFER'),
+        'PERSON'    => array(0, 0, 1, 'FELD.PERSON'),
+        'OBJEKTE'   => array(1, 0, 100, 'FELD.OBJEKTE'),
+        'PUSH'      => array(0, 0, 1, 'FELD.PUSH'),
+        'PUSHAKTIV' => array(0, 0, 1, 'FELD.PUSHAKTIV'),
+        'PTEST'     => array(0, 0, 1, 'FELD.PTEST'),
+    );
+}
+
+/** Die Feldwerte aus dem aktuellen Zustand. */
+function cam_werte($st = null)
+{
+    if ($st === null) { $st = cam_state(); }
+    return array(
+        'OK'         => (int) $st['ok'],
+        'ALTER'      => (int) $st['alter_min'],
+        'BILDER'     => (int) $st['bilder'],
+        'CLIPS'      => (int) $st['clips'],
+        'ZEITRAFFER' => (int) $st['timelapse'],
+        'PERSON'     => (int) $st['person'],
+        'OBJEKTE'    => count($st['objekte']),
+        'PUSH'       => (int) $st['push'],
+        'PUSHAKTIV'  => cam_push_active() ? 1 : 0,
+        'PTEST'      => cam_ptest_active() ? 1 : 0,
+    );
+}
+
+/**
+ * Die Statuszeile fuer den Miniserver.
+ *
+ * Jedem Feld geht ein Semikolon voran, und die Befehlserkennungen in der
+ * Vorlage suchen ebenfalls mit fuehrendem Semikolon. Grund: Loxone sucht die
+ * Zeichenkette woertlich und nimmt den ERSTEN Treffer. Ohne Semikolon faende
+ * "PUSH=" auch die Stelle in "PUSHAKTIV=" - solange PUSH vorher in der Zeile
+ * steht, faellt das nicht auf, aber sobald sich die Reihenfolge einmal
+ * aendert, stuende der falsche Wert im Eingang.
+ */
+function cam_zeile($st = null)
+{
+    $teile = array('ACTI');
+    foreach (cam_werte($st) as $k => $v) { $teile[] = $k . '=' . $v; }
+    return implode(';', $teile);
+}
+
+/**
+ * Alle Statuswerte per MQTT veroeffentlichen - aber nur, was sich geaendert hat.
+ *
+ * Wird aus cam_cron.php im Minutentakt aufgerufen. Nur so bekommt Loxone mit,
+ * dass die Kamera seit einer Stunde schweigt (ALTER waechst), ohne dass der
+ * Miniserver dafuer jede Minute nachfragen muss.
+ *
+ * Der Vergleich ist feldweise: der Zaehler BILDER aendert sich bei jeder
+ * Aufnahme und gehoert gesendet, PUSH und OK dagegen stehen tagelang gleich -
+ * die wuerden den Broker sonst hundertmal am Tag mit demselben Wert belegen.
+ */
+function cam_mqtt_zustand($erzwingen = false)
+{
+    $cfg = cam_config();
+    if (empty($cfg['mqtt_enabled'])) { return 0; }
+    $werte = cam_werte();
+    $merker = cam_paths()['tmp'] . '/mqtt_letzte.json';
+    $vorher = @json_decode((string) @file_get_contents($merker), true);
+    if (!is_array($vorher) || $erzwingen) { $vorher = array(); }
+    $neu = array();
+    foreach ($werte as $k => $v) {
+        if (!array_key_exists($k, $vorher) || (string) $vorher[$k] !== (string) $v) { $neu[$k] = $v; }
+    }
+    if (!$neu) { return 0; }
+    cam_mqtt($neu);
+    $js = json_encode($werte);
+    if ($js !== false) { @file_put_contents($merker, $js, LOCK_EX); }
+    return count($neu);
+}
+
+/* ==================================================================
+ * Loxone-Vorlage (XML-Export)
+ *
+ * Geprueefter PHP-Nachbau des LoxoneTemplateBuilder - Attributreihenfolge,
+ * CRLF und der Tabulator vor den Kindelementen entsprechen dem Original.
+ * Uebernommen aus LoxBerry-Plugin-APC-UPS, nur das Kuerzel getauscht.
+ * ================================================================== */
+
+function cam_x($s)
+{
+    return htmlspecialchars((string) $s, ENT_QUOTES | ENT_XML1, 'UTF-8');
+}
+
+function cam_xml_virtual_in_http($kopf, $cmds)
+{
+    $crlf = "\r\n";
+    $o = '<?xml version="1.0" encoding="utf-8"?>' . $crlf;
+    $o .= '<VirtualInHttp ';
+    $o .= 'Title="' . cam_x($kopf['title']) . '" ';
+    $o .= 'Comment="' . cam_x(isset($kopf['comment']) ? $kopf['comment'] : '') . '" ';
+    $o .= 'Address="' . cam_x(isset($kopf['address']) ? $kopf['address'] : '') . '" ';
+    $o .= 'PollingTime="' . cam_x(isset($kopf['polling']) ? $kopf['polling'] : '60') . '"';
+    $o .= '>' . $crlf;
+    foreach ($cmds as $c) {
+        $o .= "\t" . '<VirtualInHttpCmd ';
+        $o .= 'Title="' . cam_x($c['title']) . '" ';
+        $o .= 'Comment="' . cam_x($c['comment']) . '" ';
+        $o .= 'Check="' . cam_x($c['check']) . '" ';
+        $o .= 'Signed="' . ($c['min'] < 0 ? 'true' : 'false') . '" ';
+        $o .= 'Analog="' . (!empty($c['analog']) ? 'true' : 'false') . '" ';
+        $o .= 'SourceValLow="0" ';
+        $o .= 'DestValLow="0" ';
+        $o .= 'SourceValHigh="1" ';
+        $o .= 'DestValHigh="1" ';
+        $o .= 'DefVal="0" ';
+        $o .= 'MinVal="' . (int) $c['min'] . '" ';
+        $o .= 'MaxVal="' . (int) $c['max'] . '"';
+        $o .= '/>' . $crlf;
+    }
+    $o .= '</VirtualInHttp>' . $crlf;
+    return $o;
+}
+
+/** array(Dateiname, Inhalt) der Importdatei fuer Loxone Config. */
+function cam_vorlage($host = '')
+{
+    if ($host === '') { $host = gethostname() ?: 'loxberry'; }
+    $plugindir = getenv('LBPPLUGINDIR') ?: 'actikamera';
+    $cmds = array();
+    foreach (cam_felder() as $name => $d) {
+        list($analog, $min, $max, $schluessel) = $d;
+        $cmds[] = array(
+            'title'   => 'ACTI_' . $name,
+            'comment' => trim(strip_tags(html_entity_decode(cam_t($schluessel), ENT_QUOTES, 'UTF-8'))),
+            'check'   => '\i;' . $name . '=\i\v',
+            'analog'  => $analog, 'min' => $min, 'max' => $max,
+        );
+    }
+    return array('VI_actikamera.xml', cam_xml_virtual_in_http(array(
+        'title'   => 'ACTi Kamera',
+        'address' => 'http://' . $host . '/plugins/' . $plugindir . '/cam.php',
+        'polling' => '60',
+        'comment' => 'Erzeugt vom LoxBerry-Plugin ACTi Kamera (' . date('d.m.Y') . '). '
+                   . 'Loxone Config legt beim Import neu an und ueberschreibt nichts - '
+                   . 'zweimal eingelesen ergibt doppelte Bausteine.',
+    ), $cmds));
+}
+
+/* ==================================================================
+ * Selbstpruefung
+ *
+ * Beantwortet OHNE Loxone: traegt die Einrichtung? Von unten nach oben -
+ * der erste Kreuz-Eintrag ist in aller Regel die Ursache.
+ * ================================================================== */
+
+function cam_pruefungen()
+{
+    $cfg = cam_config();
+    $p = cam_paths();
+    $z = array();
+    $zeile = function ($stand, $frage, $antwort) use (&$z) {
+        $z[] = array((int) $stand, $frage, $antwort);
+    };
+
+    /* Kamera erreichbar? */
+    $host = trim((string) $cfg['host']);
+    $zeile($host !== '' ? 1 : 0, cam_t('TEST.F_HOST'),
+        $host !== '' ? cam_e($host) : cam_t('TEST.A_HOST_FEHLT'));
+
+    /* Zugangsdaten - Form beurteilen, Wert nie zeigen */
+    if ($cfg['user'] === '' && $cfg['pass'] === '') {
+        $zeile(-1, cam_t('TEST.F_ZUGANG'), cam_t('TEST.A_ZUGANG_KEINE'));
+    } elseif ($cfg['pass'] !== '' && $cfg['user'] === '') {
+        $zeile(0, cam_t('TEST.F_ZUGANG'), cam_t('TEST.A_ZUGANG_PW_OHNE_USER'));
+    } else {
+        $zeile(1, cam_t('TEST.F_ZUGANG'),
+            sprintf(cam_t('TEST.A_ZUGANG_OK'), cam_e($cfg['user']), strlen($cfg['pass'])));
+    }
+
+    /* Rechte der Konfiguration */
+    if (is_file($p['config'])) {
+        $rechte = substr(sprintf('%o', fileperms($p['config'])), -3);
+        $zeile($rechte === '600' ? 1 : 0, cam_t('TEST.F_RECHTE'),
+            sprintf(cam_t($rechte === '600' ? 'TEST.A_RECHTE_OK' : 'TEST.A_RECHTE_OFFEN'), $rechte));
+    }
+
+    /* Anmeldeart */
+    if ($cfg['auth'] === 'digest' && !function_exists('curl_init')) {
+        $t = cam_digest_selbsttest();
+        $zeile($t[0] ? 1 : 0, cam_t('TEST.F_DIGEST'),
+            cam_t($t[0] ? 'TEST.A_DIGEST_OK' : 'TEST.A_DIGEST_FEHL'));
+    } else {
+        $zeile(1, cam_t('TEST.F_AUTH'), sprintf(cam_t('TEST.A_AUTH'), cam_e($cfg['auth']),
+            function_exists('curl_init') ? 'cURL' : cam_t('TEST.A_AUTH_STREAM')));
+    }
+
+    /* Letztes Bild */
+    $st = cam_state();
+    if ((int) $st['alter_min'] < 0) {
+        $zeile(0, cam_t('TEST.F_BILD'), cam_t('TEST.A_BILD_KEINS'));
+    } else {
+        $frisch = (int) $st['alter_min'] <= 1440;
+        $zeile($frisch ? 1 : -1, cam_t('TEST.F_BILD'),
+            sprintf(cam_t('TEST.A_BILD_OK'), (int) $st['alter_min'], cam_e($st['letzter_anlass'])));
+    }
+
+    /* Speicherbestand */
+    $zeile(1, cam_t('TEST.F_ARCHIV'),
+        sprintf(cam_t('TEST.A_ARCHIV'), (int) $st['bilder'], (int) $st['clips'],
+                (int) $st['timelapse'], (int) $cfg['keep_days']));
+
+    /* Zeitraffer und Bereinigung - laufen sie? */
+    foreach (array(
+        array('timelapse_am.txt', 'TEST.F_TIMELAPSE', 'TEST.A_TIMELAPSE_OK', 'TEST.A_TIMELAPSE_NIE', !empty($cfg['timelapse'])),
+        array('cleanup_am.txt',   'TEST.F_CLEANUP',   'TEST.A_CLEANUP_OK',   'TEST.A_CLEANUP_NIE',   true),
+    ) as $eintrag) {
+        list($datei, $frage, $ok, $nie, $aktiv) = $eintrag;
+        if (!$aktiv) {
+            $zeile(-1, cam_t($frage), cam_t('TEST.A_TIMELAPSE_AUS'));
+            continue;
+        }
+        $f = $p['tmp'] . '/' . $datei;
+        $letzter = is_file($f) ? trim((string) @file_get_contents($f)) : '';
+        $zeile($letzter !== '' ? 1 : -1, cam_t($frage),
+            $letzter !== '' ? sprintf(cam_t($ok), cam_e($letzter)) : cam_t($nie));
+    }
+
+    /* ffmpeg - fuer Clips und Zeitraffer-Video */
+    $ff = cam_ffmpeg();
+    $zeile($ff !== '' ? 1 : -1, cam_t('TEST.F_FFMPEG'),
+        $ff !== '' ? cam_e($ff) : cam_t('TEST.A_FFMPEG_FEHLT'));
+
+    /* MQTT */
+    $m = cam_mqtt_zustand_pruefen();
+    if (empty($cfg['mqtt_enabled'])) {
+        $zeile(-1, cam_t('TEST.F_MQTT'), cam_t('TEST.A_MQTT_AUS'));
+    } elseif (!$m['gefunden']) {
+        $zeile(0, cam_t('TEST.F_MQTT'), cam_t('TEST.A_MQTT_KEIN_ABSCHNITT'));
+    } elseif (!$m['udpport']) {
+        $zeile(0, cam_t('TEST.F_MQTT'), cam_t('TEST.A_MQTT_KEIN_PORT'));
+    } elseif (!$m['autostart']) {
+        $zeile(0, cam_t('TEST.F_MQTT'), cam_t('TEST.A_MQTT_KEIN_AUTOSTART'));
+    } else {
+        $zeile(1, cam_t('TEST.F_MQTT'),
+            sprintf(cam_t('TEST.A_MQTT_OK'), (int) $m['udpport'], cam_e($cfg['mqtt_topic'])));
+    }
+
+    /* Vorlage wohlgeformt - gehoert hierher, nicht erst in die Pruefung vor
+       dem Ausliefern: eine kaputte Vorlage merkt der Anwender sonst erst in
+       Loxone Config, und dort sucht er den Fehler bei sich. */
+    $v = cam_vorlage();
+    $alt = libxml_use_internal_errors(true);
+    $gut = simplexml_load_string($v[1]) !== false;
+    libxml_clear_errors();
+    libxml_use_internal_errors($alt);
+    $zeile($gut ? 1 : 0, cam_t('TEST.F_VORLAGE'),
+        cam_t($gut ? 'TEST.A_VORLAGE_OK' : 'TEST.A_VORLAGE_KAPUTT'));
+
+    return $z;
+}
+
+function cam_e($s)
+{
+    return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
+}
+
+/** Zustand des MQTT-Gateways von LoxBerry. */
+function cam_mqtt_zustand_pruefen()
+{
+    $p = cam_paths();
+    $aus = array('gefunden' => false, 'udpport' => 0, 'autostart' => false);
+    if ($p['lbhome'] === '') { return $aus; }
+    $f = $p['lbhome'] . '/config/system/general.json';
+    if (!is_file($f)) { return $aus; }
+    $d = json_decode((string) @file_get_contents($f), true);
+    if (!isset($d['Mqtt'])) { return $aus; }
+    $aus['gefunden'] = true;
+    $aus['udpport'] = isset($d['Mqtt']['Udpinport']) ? (int) $d['Mqtt']['Udpinport'] : 0;
+    $aus['autostart'] = !empty($d['Mqtt']['Autostart']);
+    return $aus;
+}
 
 function cam_mqtt($werte)
 {
