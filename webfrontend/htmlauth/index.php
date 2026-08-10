@@ -201,7 +201,7 @@ $ac_host = $_SERVER['HTTP_HOST'] ?: 'loxberry';
 function ac_e($s) { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); }
 
 if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
-    LBWeb::lbheader('ACTi Kamera', 'https://wiki.loxberry.de', '');
+    LBWeb::lbheader('ACTi Kamera', 'https://wiki.loxberry.de', 'help.html');
 } else {
     echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>ACTi Kamera</title></head><body>';
 }
@@ -611,6 +611,9 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 <!-- ================= Aufnahmen ================= -->
 <div class="sm-pane" id="tab-shots">
 <h2><?php echo cam_t('TEXT.LETZTE_AUFNAHMEN'); ?></h2>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-technik"></i> <?php echo cam_t('LEGENDE.TECHNIK'); ?></span>
+</div>
 <?php
 $ac_dir = function_exists('cam_datadir') ? cam_datadir() : '';
 $ac_bilder = $ac_dir !== '' ? (glob($ac_dir . '/bilder/*.jpg') ?: array()) : array();

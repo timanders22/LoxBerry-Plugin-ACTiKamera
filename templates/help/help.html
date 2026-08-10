@@ -1,36 +1,36 @@
-<h2>ACTi Kamera</h2>
+<h2><TMPL_VAR HILFE.K01></h2>
 
-<p>Holt Bilder von einer <b>ACTi-Netzwerkkamera</b> (E-Serie und alle Modelle mit der klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — <b>ohne dass Benutzername und Passwort in der Loxone-Projektdatei stehen müssen</b>.</p>
+<p><TMPL_VAR HILFE.K02></p>
 
-<p>Genau das ist der eigentliche Zweck: Bindet man eine Kamera direkt in Loxone ein, landet die Adresse samt <code>USER=…&amp;PWD=…</code> im Klartext in der Projektdatei — und damit in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxone nur noch <code>cam.php?foto=1</code> auf; die Zugangsdaten bleiben auf dem LoxBerry.</p>
+<p><TMPL_VAR HILFE.K03></p>
 
-<p>Kompatibel mit LoxBerry 3.x und <b>LoxBerry 4</b> (reines PHP, PHP 7.4 und 8.x).</p>
+<p><TMPL_VAR HILFE.K04></p>
 
-<h3>Funktionen</h3>
+<h3><TMPL_VAR HILFE.K05></h3>
 
-<ul><li><b>Schnappschuss auf Zuruf</b> — ausgelöst von Loxone: Klingel, Türtaster, Bewegungsmelder; der Anlass wird mitgespeichert</li><li><b>Bildserie</b> („Clip") über mehrere Sekunden, ohne ffmpeg oder Zusatzpakete</li><li><b>Letztes Bild unter fester Adresse</b> (<code>letztesbild.jpg</code>) für Kamera-Kachel, Webseiten-Baustein oder Push-Anhang — ohne Zugangsdaten in der URL</li><li><b>Push-Auslöser für Loxone</b>: <code>PUSHAKTIV=1</code> für ein einstellbares Zeitfenster nach jeder Aufnahme</li><li><b>Zeitraffer</b>: täglich zur eingestellten Uhrzeit ein Bild in den Unterordner <code>timelapse</code> (Dateiname = Datum); ist <code>ffmpeg</code> vorhanden, wird daraus <code>zeitraffer.mp4</code> neu erzeugt</li><li><b>Archiv-Bereinigung</b> täglich um 03:35 Uhr, nach <b>Alter und Anzahl</b> (jeweils 0 = unbegrenzt) über Bilder, Bildserien und Zeitraffer — die neuesten Dateien bleiben erhalten</li><li><b>KI-Objekterkennung</b> (optional) über CodeProject.AI oder DeepStack: erkannte Objekte erscheinen im JSON, in den Webhooks, per MQTT und als <code>ERKANNT=</code> in der Loxone-Ausgabe; <code>PERSON=1</code> ist der fertige Schalter</li><li><b>Webhooks</b>: Webhook 1 als POST mit JSON, Webhook 2 als GET mit Parametern</li><li><b>MQTT</b> über das LoxBerry MQTT Gateway, <b>JSON</b> für Drittsoftware</li><li>Reiter: Einstellungen, Einbindung in Loxone (Schritt-für-Schritt inkl. kompletter Baustein-Liste), Aufnahmen, Test, Protokoll</li></ul>
+<ul><li><TMPL_VAR HILFE.K06></li><li><TMPL_VAR HILFE.K07></li><li><TMPL_VAR HILFE.K08></li><li><TMPL_VAR HILFE.K09></li><li><TMPL_VAR HILFE.K10></li><li><TMPL_VAR HILFE.K11></li><li><TMPL_VAR HILFE.K12></li><li><TMPL_VAR HILFE.K13></li><li><TMPL_VAR HILFE.K14></li><li><TMPL_VAR HILFE.K15></li></ul>
 
-<h3>Endpunkte</h3>
+<h3><TMPL_VAR HILFE.K16></h3>
 
 <table class="sm-tbl">
-<tr><th>Aufruf</th><th>Zweck</th></tr>
-<tr><td><code>/plugins/actikamera/cam.php</code></td><td>Loxone-Zeile <code>ACTI;OK=..;ALTER=..;PUSHAKTIV=..;…</code></td></tr>
-<tr><td><code>/plugins/actikamera/cam.php?foto=1&amp;anlass=klingel</code></td><td>Bild aufnehmen</td></tr>
-<tr><td><code>/plugins/actikamera/cam.php?clip=1&amp;anlass=klingel</code></td><td>Bildserie aufnehmen</td></tr>
-<tr><td><code>/plugins/actikamera/cam.php?letztes=1</code></td><td>letztes Bild als JPEG</td></tr>
-<tr><td><code>/plugins/actikamera/cam.php?json=1</code></td><td>Zustand als JSON</td></tr>
-<tr><td><code>/plugins/actikamera/cam.php?test=1</code></td><td>Verbindungstest im Klartext</td></tr>
-<tr><td><code>/plugins/actikamera/cam.php?timelapse=1</code></td><td>Zeitrafferbild jetzt aufnehmen</td></tr>
-<tr><td><code>/plugins/actikamera/cam.php?cleanup=1</code></td><td>Archiv jetzt aufräumen</td></tr>
-<tr><td><code>/plugins/actikamera/cam.php?ptest=1</code></td><td>Test-Pushnachricht auslösen</td></tr>
+<tr><th><TMPL_VAR HILFE.K25></th><th><TMPL_VAR HILFE.K26></th></tr>
+<tr><td><TMPL_VAR HILFE.K27></td><td><TMPL_VAR HILFE.K28></td></tr>
+<tr><td><TMPL_VAR HILFE.K29></td><td><TMPL_VAR HILFE.K30></td></tr>
+<tr><td><TMPL_VAR HILFE.K31></td><td><TMPL_VAR HILFE.K32></td></tr>
+<tr><td><TMPL_VAR HILFE.K33></td><td><TMPL_VAR HILFE.K34></td></tr>
+<tr><td><TMPL_VAR HILFE.K35></td><td><TMPL_VAR HILFE.K36></td></tr>
+<tr><td><TMPL_VAR HILFE.K37></td><td><TMPL_VAR HILFE.K38></td></tr>
+<tr><td><TMPL_VAR HILFE.K39></td><td><TMPL_VAR HILFE.K40></td></tr>
+<tr><td><TMPL_VAR HILFE.K41></td><td><TMPL_VAR HILFE.K42></td></tr>
+<tr><td><TMPL_VAR HILFE.K43></td><td><TMPL_VAR HILFE.K44></td></tr>
 </table>
 
-<h3>Sicherheit und Datenschutz</h3>
+<h3><TMPL_VAR HILFE.K17></h3>
 
-<ul><li>Zugangsdaten stehen ausschließlich in <code>config/plugins/actikamera/cam.json</code>; die Datei wird auf <code>chmod 600</code> gesetzt (nur für den Besitzer lesbar)</li><li>Das Passwort wird in der Oberfläche nie angezeigt und im Protokoll maskiert</li><li>Im Plugin sind <b>keine persönlichen Daten</b> enthalten</li><li>Aufnahmen liegen lokal auf dem LoxBerry und werden nach der eingestellten Aufbewahrungszeit gelöscht</li></ul>
+<ul><li><TMPL_VAR HILFE.K18></li><li><TMPL_VAR HILFE.K19></li><li><TMPL_VAR HILFE.K20></li><li><TMPL_VAR HILFE.K21></li></ul>
 
-<h3>Fehlerbehebung: „ERROR: not authorized"</h3>
+<h3><TMPL_VAR HILFE.K22></h3>
 
-<p>Die ACTi-CGI <b>dekodiert ihre Parameter nicht prozentweise</b>. Ein vollständiges <code>rawurlencode()</code> des Passworts macht daraus einen anderen String, und die Kamera lehnt ab — auch wenn dieselben Zugangsdaten im Browser funktionieren. Seit v1.1.0 werden nur noch die Zeichen ersetzt, die die Abfragezeichenkette zerreißen würden (<code>% &amp; = # +</code> und Leerzeichen).</p>
+<p><TMPL_VAR HILFE.K23></p>
 
-<p>Zweite häufige Ursache: Manche Modelle verlangen HTTP-Basic oder Digest und lehnen ab, wenn zusätzlich <code>USER</code>/<code>PWD</code> in der URL stehen. Deshalb gibt es in den Einstellungen das <b>Anmeldeverfahren</b>; auf „Automatisch" probiert das Plugin der Reihe nach URL-Parameter, Basic und Digest durch und merkt sich den Weg, der funktioniert hat.</p>
+<p><TMPL_VAR HILFE.K24></p>
