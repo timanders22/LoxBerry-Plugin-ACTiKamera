@@ -17,9 +17,38 @@
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
 date_default_timezone_set('Europe/Berlin');
 
+
+/* Den LoxBerry-Wurzelordner ohne festen Systempfad bestimmen.
+ *
+ * Vom eigenen Ablageort aufwaerts, bis ein Verzeichnis gefunden ist, das
+ * config/plugins UND webfrontend enthaelt. Das trifft die uebliche
+ * Installation genauso wie eine an einem anderen Ort - und es trifft auch
+ * den Fall, dass das Plugin noch als entpacktes Archiv daliegt (dann findet
+ * es nichts und gibt einen Leerstring zurueck, was der Aufrufer ohnehin
+ * abfangen muss).
+ *
+ * Der Name traegt kein Plugin-Kuerzel und ist deshalb abgesichert: zwei
+ * Bibliotheken landen nie im selben Prozess, aber die Pruefung kostet nichts.
+ */
+if (!function_exists('lb_wurzel_ermitteln')) {
+    function lb_wurzel_ermitteln()
+    {
+        $d = __DIR__;
+        for ($i = 0; $i < 8; $i++) {
+            if (is_dir($d . '/config/plugins') && is_dir($d . '/webfrontend')) {
+                return $d;
+            }
+            $eltern = dirname($d);
+            if ($eltern === $d) { break; }
+            $d = $eltern;
+        }
+        return '';
+    }
+}
+
 function cam_paths()
 {
-    $lbhomedir = getenv('LBHOMEDIR') ?: (is_dir('/opt/loxberry') ? '/opt/loxberry' : '');
+    $lbhomedir = getenv('LBHOMEDIR') ?: lb_wurzel_ermitteln();
     $plugindir = getenv('LBPPLUGINDIR') ?: basename(__DIR__);
     if ($lbhomedir && is_dir($lbhomedir . '/config/plugins/' . $plugindir) === false) {
         $plugindir = 'actikamera';
@@ -1055,6 +1084,21 @@ function cam_zeile($st = null)
  * Aufnahme und gehoert gesendet, PUSH und OK dagegen stehen tagelang gleich -
  * die wuerden den Broker sonst hundertmal am Tag mit demselben Wert belegen.
  */
+/**
+ * Einen Wert fuer den UDP-Eingang des MQTT-Gateways unschaedlich machen.
+ *
+ * Das Gateway liest ZEILENWEISE. Ein Zeilenumbruch im Wert - aus einer
+ * Fehlermeldung des Betriebssystems, einem Geraetenamen oder der Ausgabe
+ * eines Systembefehls - zerlegt die Uebertragung, und aus den Bruchstuecken
+ * bildet das Gateway erfundene Themen. Ein Tabulator schadet ebenso, weil
+ * Leerzeichen Thema und Wert trennt.
+ */
+function cam_mqtt_wert_saeubern($v)
+{
+    $wert = str_replace(array("\r\n", "\r", "\n", "\t"), ' ', (string) $v);
+    return trim(preg_replace('/ {2,}/', ' ', $wert));
+}
+
 function cam_mqtt_zustand($erzwingen = false)
 {
     $cfg = cam_config();
@@ -1303,7 +1347,7 @@ function cam_mqtt($werte)
         return;
     }
     foreach ((array) $werte as $k => $v) {
-        $msg = 'publish ' . $prefix . '/' . $k . ' ' . $v;
+        $msg = 'publish ' . $prefix . '/' . $k . ' ' . cam_mqtt_wert_saeubern($v);
         @socket_sendto($s, $msg, strlen($msg), 0, '127.0.0.1', $udpport);
     }
     socket_close($s);
@@ -1345,7 +1389,7 @@ function cam_t($schluessel)
         // sich aus dem Ablageort dieser Datei.
         $home = getenv('LBHOMEDIR');
         if (!$home || !is_dir($home)) {
-            foreach (array('/opt/loxberry', '/home/loxberry/loxberry') as $k) {
+            foreach (array(lb_wurzel_ermitteln(), '/home/loxberry/loxberry') as $k) {
                 if (is_dir($k)) { $home = $k; break; }
             }
         }
