@@ -1316,7 +1316,7 @@ function cam_mqtt_zustand_pruefen()
     if (!isset($d['Mqtt'])) { return $aus; }
     $aus['gefunden'] = true;
     $aus['udpport'] = isset($d['Mqtt']['Udpinport']) ? (int) $d['Mqtt']['Udpinport'] : 0;
-    $aus['autostart'] = !empty($d['Mqtt']['Autostart']);
+    $aus['autostart'] = !empty($d['Mqtt']['Gatewayautostart']); // 1.9.3: richtiger Schluessel - 'Autostart' gibt es nicht, die Warnung kam deshalb immer
     return $aus;
 }
 
