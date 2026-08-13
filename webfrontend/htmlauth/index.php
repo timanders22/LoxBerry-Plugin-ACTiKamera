@@ -286,6 +286,11 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 .acw .sm-gal figure { margin: 0; width: 190px; }
 .acw .sm-gal img { width: 100%; border-radius: 6px; border: 1px solid #ccc; }
 .acw .sm-gal figcaption { font-size: 0.78em; color: #666; word-break: break-all; }
+
+/* Nachgetragene Definitionen (CSS-Luecken-Durchgang 13.08.2026):
+   benutzt, aber nie definiert - wortgleich aus der Hausstandard-Vorlage
+   bzw. der Referenzimplementierung uebernommen. */
+.sm-hint { font-size: 0.85em; color: #555; margin: 4px 0 0; }
 </style>
 <div class="acw">
 <h1 style="color:#6dac20;text-shadow:none;"><?php echo cam_t('TEXT.ACTI_KAMERA'); ?></h1>
