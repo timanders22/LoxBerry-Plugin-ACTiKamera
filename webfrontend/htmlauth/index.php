@@ -166,8 +166,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         'push' => isset($_POST['notify_push']) ? 1 : 0,
         'push_minutes' => max(1, min(30, (int) (isset($_POST['push_minutes']) ? $_POST['push_minutes'] : 2))),
     );
-    $ac_new['mqtt_enabled'] = isset($_POST['mqtt_enabled']) ? 1 : 0;
-    $ac_new['mqtt_topic'] = preg_replace('#[^\w/\-]#', '', (string) (isset($_POST['mqtt_topic']) ? $_POST['mqtt_topic'] : 'acti')) ?: 'acti';
+    /* mqtt_enabled und mqtt_topic werden hier NICHT mehr angefasst: die
+     * Felder stehen nur noch im Reiter MQTT und haben dort einen eigenen
+     * Handler (save_mqtt). $ac_new kommt aus cam_config(), die Werte
+     * ueberleben also unveraendert. Stuende die Zeile hier weiter, schaltete
+     * jedes Speichern der Einstellungen MQTT stillschweigend ab. */
     $ac_a = (string) (isset($_POST['auth']) ? $_POST['auth'] : 'auto');
     $ac_new['auth'] = in_array($ac_a, array('auto', 'url', 'basic', 'digest'), true) ? $ac_a : 'auto';
     $ac_new['keep_max'] = max(0, min(100000, (int) (isset($_POST['keep_max']) ? $_POST['keep_max'] : 0)));
@@ -462,17 +465,16 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 </div>
 <div class="sm-small"><?php echo cam_t('TEXT.NACH_JEDER_AUFNAHME_STEHT'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.PUSHAKTIV_1'); ?></span> <?php echo cam_t('TEXT.FR_DIESE_ZEITSPANNE_DEN_PUSH_SELBS'); ?></div>
 
-<h2><?php echo cam_t('TEXT.MQTT_OPTIONAL'); ?></h2>
-<label style="display:inline-flex;align-items:center;gap:6px;">
-    <input data-role="none" type="checkbox" name="mqtt_enabled" <?= !empty($ac_cfg['mqtt_enabled']) ? 'checked' : '' ?><?php echo cam_t('TEXT.UUML_BER_DAS_LOXBERRY_MQTT_GATEWAY'); ?>
-</label>
-<div class="sm-row" style="margin-top:6px;">
-    <div style="max-width:320px;">
-        <label><?php echo cam_t('TEXT.TOPIC_PRFIX'); ?></label>
-        <input data-role="none" type="text" name="mqtt_topic" value="<?= ac_e($ac_cfg['mqtt_topic']) ?>" placeholder="acti">
-    </div>
-</div>
-<div class="sm-small"><?php echo cam_t('TEXT.BEISPIEL'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.ACTI_LETZTES_BILD'); ?></span>, <span class="sm-mono"><?php echo cam_t('TEXT.ACTI_ANLASS'); ?></span>, <span class="sm-mono"><?php echo cam_t('TEXT.ACTI_ZEIT'); ?></span>.</div>
+<?php /* Hier standen dieselben MQTT-Felder noch einmal - Feldnamen
+         mqtt_enabled und mqtt_topic gab es damit ZWEIMAL auf der Seite.
+         Sie stehen im Reiter MQTT, dort gehoeren sie hin.
+
+         Der Haken trug hier ausserdem eine verungluckte Uebersetzung: der
+         Sprachschluessel TEXT.UUML_BER_DAS_LOXBERRY_MQTT_GATEWAY beginnt mit
+         "> " - die schliessende Klammer des <input>-Tags war beim
+         automatischen Uebersetzen in die Sprachdatei gewandert. Das ging
+         zufaellig gut, waere aber beim ersten Nachbessern des Textes
+         auseinandergefallen. */ ?>
 
 <h3 class="sm-h3"><?php echo cam_t('TEXT.LIVE_BILD_FR_LOXONE_MJPEG_WEITERLE'); ?></h3>
 <p class="sm-hint"><?php echo cam_t('TEXT.LOXBERRY_HOLT_DAS_BILD_BEI_DER_KAM'); ?><br>
