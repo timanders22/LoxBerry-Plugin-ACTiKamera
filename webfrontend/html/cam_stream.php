@@ -45,7 +45,14 @@ if (isset($_GET['einzeln'])) {
 }
 
 $ac_fps = isset($_GET['fps']) ? (float) $_GET['fps'] : (float) $ac_cfg['stream_fps'];
-if ($ac_fps <= 0) { $ac_fps = 2.0; }
+/* Untergrenze, nicht nur Obergrenze.
+ *
+ * Bis 1.9.7 wurde nur gegen <= 0 und > 10 geprueft. ?fps=0.0001 ueberlebt
+ * beides, und aus 1000000/0.0001 wird usleep(10 000 000 000) - 2,8 Stunden in
+ * EINEM Schlaf, in dem weder connection_aborted() noch die Frist ausgewertet
+ * wird. Das Formular begrenzt auf 0.2; der GET-Weg tat es nicht.
+ */
+if (!is_finite($ac_fps) || $ac_fps < 0.2) { $ac_fps = 2.0; }
 if ($ac_fps > 10) { $ac_fps = 10.0; }   // die Kamera liefert Schnappschuesse, kein Video
 $ac_pause = (int) round(1000000 / $ac_fps);
 
@@ -72,6 +79,14 @@ $ac_max = isset($_GET['sec']) ? (int) $_GET['sec'] : (int) $ac_cfg['stream_maxse
 if ($ac_max < 5) { $ac_max = 5; }
 if ($ac_max > AC_STREAM_MAX) { $ac_max = AC_STREAM_MAX; }
 
+/* EIN Zeitpunkt fuer den ganzen Aufruf, nicht einer je Weg.
+ *
+ * Bis 1.9.7 setzte jeder der drei Wege seine eigene Frist auf "jetzt + max".
+ * Fielen Weg 1 und Weg 2 nacheinander aus, lief ein Aufruf bis zu dreimal so
+ * lange wie zugesagt - 2700 statt 900 Sekunden, und jeder offene Strom belegt
+ * einen PHP-Arbeitsprozess. Eine Grenze steht genau einmal. */
+define('AC_STREAM_ENDE', time() + $ac_max);
+
 // Der Strom laeuft, bis der Abrufer die Verbindung schliesst oder die Zeit ablaeuft.
 @set_time_limit(0);
 ignore_user_abort(false);
@@ -95,13 +110,20 @@ $ac_mjpeg = ($ac_modus === 'auto' || $ac_modus === 'mjpeg') ? cam_mjpeg_url() : 
 if ($ac_mjpeg !== '' && function_exists('curl_init')) {
     $ac_puffer = '';
     $ac_bekommen = 0;
-    $ac_bis = time() + $ac_max;
+    $ac_bis = AC_STREAM_ENDE;
     $ac_letzte = 0.0;
     $ac_mind = 1.0 / $ac_fps;          // Bilder ausduennen, falls gewuenscht
 
     $ch = curl_init($ac_mjpeg);
+    /* Keine Gesamtzeit (der Strom soll ja laufen), aber eine Leerlaufwache:
+       die Abbruchpruefung sitzt in der Schreibfunktion und laeuft nur, WENN
+       Daten eintreffen. Eine Kamera, die verstummt ohne die Verbindung zu
+       schliessen, haelt den Arbeitsprozess sonst unbegrenzt fest - genau der
+       Fall, den der Kommentar oben zu verhindern vorgibt. */
     curl_setopt($ch, CURLOPT_TIMEOUT, 0);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 6);
+    curl_setopt($ch, CURLOPT_LOW_SPEED_LIMIT, 1);
+    curl_setopt($ch, CURLOPT_LOW_SPEED_TIME, 20);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
     curl_setopt($ch, CURLOPT_USERPWD, $ac_cfg['user'] . ':' . $ac_cfg['pass']);
@@ -180,7 +202,7 @@ if ($ac_ffmpeg !== '' && $ac_rtsp !== '') {
         stream_set_blocking($ac_pipes[1], false);
         $ac_puffer = '';
         $ac_bekommen = 0;
-        $ac_bis = time() + $ac_max;
+        $ac_bis = AC_STREAM_ENDE;
 
         while (!connection_aborted() && time() < $ac_bis) {
             $ac_teil = fread($ac_pipes[1], 65536);
@@ -224,11 +246,10 @@ if ($ac_ffmpeg !== '' && $ac_rtsp !== '') {
 // ---------------------------------------------------------------------------
 // Weg 3: Schnappschussfolge - funktioniert immer, wenn das Einzelbild geht.
 // ---------------------------------------------------------------------------
-$ac_start = time();
 $ac_letztes = '';
 $ac_fehler = 0;
 
-while (!connection_aborted() && (time() - $ac_start) < $ac_max) {
+while (!connection_aborted() && time() < AC_STREAM_ENDE) {
     $ac_t0 = microtime(true);
     list($ac_body, $ac_weg, $ac_err) = cam_fetch_jpeg();
 
