@@ -338,6 +338,17 @@ if (is_file($ac_logfile)) {
 $ac_host = $_SERVER['HTTP_HOST'] ?: 'loxberry';
 $ac_token = isset($ac_cfg['aktionstoken']) ? (string) $ac_cfg['aktionstoken'] : '';
 
+/* Ist ein Token fuer den Bildstrom hinterlegt, gilt es fuer JEDE Adresse, die
+   auf cam_stream.php oder das Archiv zeigt - auch fuer die beiden, die weiter
+   unten nur zum Abschreiben nach Loxone angezeigt werden, und fuer den Knopf
+   "Livebild ansehen". Fehlt es dort, weist der eigene Endpunkt die eigene
+   Anleitung ab: Loxone zeigt dann still kein Bild, ohne Fehlermeldung.
+   Zwei Formen, weil eine Adresse schon ein Fragezeichen traegt und die
+   andere nicht. */
+$ac_stok = isset($ac_cfg['stream_token']) ? trim((string) $ac_cfg['stream_token']) : '';
+$ac_bt  = $ac_stok !== '' ? '&amp;t=' . rawurlencode($ac_stok) : '';
+$ac_bt1 = $ac_stok !== '' ? '?t=' . rawurlencode($ac_stok) : '';
+
 
 function ac_e($s) { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); }
 
@@ -658,8 +669,8 @@ foreach ($ac_zeigen as $ac_i):
 
 <h3 class="sm-h3"><?php echo cam_t('TEXT.LIVE_BILD_FR_LOXONE_MJPEG_WEITERLE'); ?></h3>
 <p class="sm-hint"><?php echo cam_t('TEXT.LOXBERRY_HOLT_DAS_BILD_BEI_DER_KAM'); ?><br>
-<span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_STREAM_PHP'); ?></span> <?php echo cam_t('TEXT.LIVEBILD_INTVIDEOURL'); ?><br>
-<span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_STREAM_PHP_EINZELN_1'); ?></span> <?php echo cam_t('TEXT.EINZELBILD_INTALERTIMAGE'); ?></p>
+<span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_STREAM_PHP'); ?><?= $ac_bt1 ?></span> <?php echo cam_t('TEXT.LIVEBILD_INTVIDEOURL'); ?><br>
+<span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_STREAM_PHP_EINZELN_1'); ?><?= $ac_bt ?></span> <?php echo cam_t('TEXT.EINZELBILD_INTALERTIMAGE'); ?></p>
 <label><?php echo cam_t('TEXT.BILDER_JE_SEKUNDE'); ?></label>
 <input type="number" step="0.1" min="0.2" max="10" data-role="none" name="stream_fps" value="<?= ac_e((string) $ac_cfg['stream_fps']) ?>">
 <label><?php echo cam_t('TEXT.HCHSTDAUER_EINES_STROMS_IN_SEKUNDE'); ?></label>
@@ -678,6 +689,7 @@ foreach ($ac_zeigen as $ac_i):
 <?php $ac_rr = cam_rtsp_url(true); if ($ac_rr === '') { $ac_rr = ''; } ?>
 <label><?php echo cam_t('TEXT.TOKEN_OPTIONAL_DANN_NUR_MIT'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.T_TOKEN'); ?></span> <?php echo cam_t('TEXT.ABRUFBAR'); ?></label>
 <input type="text" data-role="none" name="stream_token" value="<?= ac_e((string) $ac_cfg['stream_token']) ?>">
+<p class="sm-hint"><?php echo cam_t('TEXT.TOKEN_HINWEIS_LOXONE'); ?></p>
 <div style="margin-top:16px;"><button data-role="none" class="sm-btn" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button></div>
 </form>
 </div>
@@ -877,10 +889,9 @@ foreach (cam_felder() as $ac_fn => $ac_fd) {
 <span><i class="sm-punkt sm-b-technik"></i> <?php echo cam_t('LEGENDE.TECHNIK'); ?></span>
 </div>
 <?php
-/* Ist ein Stromkennwort hinterlegt, tragen auch die Archivadressen es mit -
-   sonst wiese der eigene Endpunkt die eigene Galerie ab. */
-$ac_bt = trim((string) $ac_cfg['stream_token']) !== ''
-    ? '&amp;t=' . rawurlencode((string) $ac_cfg['stream_token']) : '';
+/* Ist ein Token fuer den Bildstrom hinterlegt, tragen auch die Archivadressen
+   es mit - sonst wiese der eigene Endpunkt die eigene Galerie ab. $ac_bt wird
+   einmal oben gesetzt, gleich nach dem Aktionstoken. */
 $ac_dir = function_exists('cam_datadir') ? cam_datadir() : '';
 ?>
 <div class="sm-small" style="margin-bottom:8px;"><?php echo cam_t('TEXT.TAGE_ABLAGE'); ?>
@@ -972,7 +983,7 @@ foreach ($ac_pr as $ac_z) {
 <h3 class="sm-h3"><?php echo cam_t('TEXT.ANSEHEN'); ?></h3>
 <div class="sm-knopfreihe">
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?test=1&amp;token=<?= ac_e($ac_token) ?>" target="_blank"><?php echo cam_t('TEXT.VERBINDUNG_PRFEN_2'); ?></a>
-<a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam_stream.php" target="_blank"><?php echo cam_t('TEXT.LIVEBILD_ANSEHEN'); ?></a>
+<a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam_stream.php<?= $ac_bt1 ?>" target="_blank"><?php echo cam_t('TEXT.LIVEBILD_ANSEHEN'); ?></a>
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?letztes=1" target="_blank"><?php echo cam_t('TEXT.LETZTES_BILD_FFNEN'); ?></a>
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php" target="_blank"><?php echo cam_t('TEXT.LOXONE_ZEILE_ABRUFEN'); ?></a>
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?json=1" target="_blank"><?php echo cam_t('TEXT.JSON_ANSICHT'); ?></a>
