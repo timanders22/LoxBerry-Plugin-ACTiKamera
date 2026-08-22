@@ -71,33 +71,67 @@ eingetragen und gespeichert ist, führt das Plugin die Kamera mit.
 
 ## Auslösung durch die Kamera selbst
 
-Viele ACTi-Kameras können bei eigener Bewegungserkennung eine Adresse aufrufen
-— im Web-Konfigurator unter *Ereignis → Ereignis-Server → HTTP-Server*, danach
-*Ereignis-Setup*. Dann braucht es keinen Bewegungsmelder an Loxone.
+Viele ACTi-Kameras können bei eigener Bewegungserkennung eine Adresse
+aufrufen. Dann braucht es keinen Bewegungsmelder an Loxone. Eingerichtet
+wird das im Web-Konfigurator an **drei** Stellen — und die Adresse verteilt
+sich dabei auf zwei Felder:
 
-Das Adressfeld der Kamera ist allerdings kurz: **gemessen 64 Zeichen**. Die
-gewöhnliche Adresse über `cam.php` mit dem 32-stelligen Aktionstoken braucht
-110 Zeichen und passt nie hinein. Dafür gibt es einen kurzen Auslöser:
+| Wo | Was hinein gehört | Grenze |
+|---|---|---|
+| *Ereignis → Ereignis-Server → HTTP-Server 1* | nur der Rechner: `192.168.178.14` | 64 Zeichen |
+| *Ereignis → Ereignis-Setup → URL-Befehle senden → [+] bei Befehl 1* | Pfad und Anhang | 255 Zeichen |
+| *Ereignis → Ereignis-Liste → 1* | die Regel: Bewegung → URL-Befehl 1 | — |
 
-    http://192.168.178.14/plugins/actikamera/e.php?t=<12 Zeichen>
-    `-------------------------- 61 Zeichen --------------------------'
+In das zweite Feld gehört nur der Pfad, ohne Rechner und ohne `http://`:
+
+    /plugins/actikamera/e.php?t=<12 Zeichen>
 
 Die fertige Adresse samt Zeichenzahl steht im Reiter *Einbindung in Loxone*.
 Anhängen lässt sich `&a=klingel` für einen anderen Anlass und `&c=1` für eine
-Bildserie.
+Bildserie. Das untere Feld *Befehl als Ereignis wird inaktiv* bleibt leer —
+sonst kommt am Ende jeder Bewegung ein zweites Bild.
 
-Der ACTi-Konfigurator verlangt im selben Dialog **Benutzername**,
+### Max. Verbindungszeit darf nicht 0 sein
+
+**Der wichtigste Satz dieses Abschnitts.** Im Dialog *HTTP-Server 1* steht
+ab Werk eine **Max. Verbindungszeit von 0 Sekunden**. Dabei bricht die Kamera
+jeden ausgehenden Aufruf ab, bevor er das Gerät verlässt — und zwar lautlos:
+ihr eigenes Protokoll verzeichnet ausschließlich eingehende Zugriffe, ein
+gescheiterter Anruf hinterlässt dort keine Spur.
+
+Solange dort 0 steht, bleibt alles wirkungslos: der Testknopf, die
+Bewegungsregel, auch nach einem Neustart. Gemessen: mit 0 kam über drei
+Stunden lang kein einziger Aufruf an, drei Sekunden nach der Umstellung auf
+10 der erste.
+
+Steht dort ein Wert und es passiert trotzdem nichts, hilft das Protokoll des
+Plugins weiter — `e.php` schreibt **jeden** Aufruf mit, auch den abgewiesenen,
+samt Adresse des Anrufers. Steht dort die Adresse der Kamera, kommt sie durch.
+
+### Die übrigen Felder
+
+Der ACTi-Konfigurator verlangt im HTTP-Server-Dialog **Benutzername**,
 **Benutzerpasswort** und einen **Netzwerkport**; ohne sie lässt er das Formular
 nicht speichern. Der Port ist `80`, die Anmeldedaten sind beliebig — der
 Endpunkt wertet sie nicht aus (gemessen mit und ohne Basic-Kopf, als GET und
 als POST). Ein echtes Kennwort gehört trotzdem nicht hinein: die Kamera schickt
 es bei jedem Auslösen als HTTP-Basic über das Netz, und das ist nur Base64.
 
+In der Regel selbst (*Ereignis-Liste → 1*) gehören **Dauer 24:00** und alle
+sieben Wochentage; eine Dauer von 01:00 lässt die Regel nur zwischen
+Mitternacht und ein Uhr greifen. Unter *Antwort an* genügt **URL-Befehl
+senden → URL-Befehl 1**; alles andere bleibt leer.
+
+### Warum ein eigenes Token
+
+Nicht wegen der Länge — die gewöhnliche Adresse über `cam.php` bräuchte mit
+dem 32-stelligen Aktionstoken 89 Zeichen und passt in die 255 mühelos.
+
 **Dieses Token darf ausschließlich aufnehmen.** Es kann das Archiv nicht
 aufräumen und keine Diagnose lesen — wer ein Token in ein fremdes Gerät legt,
 gibt ihm nur, was es braucht. Und jede Kamera hat ihr eigenes: das Token sagt
-dem Plugin selbst, welche gemeint ist, was die vier Zeichen für `&kamera=`
-spart, die sonst über die 64 hinausgeführt hätten.
+dem Plugin selbst, welche gemeint ist, ohne dass ein `&kamera=` in der Adresse
+steht.
 
 ### Mindestpause
 
