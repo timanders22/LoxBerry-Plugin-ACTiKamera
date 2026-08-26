@@ -196,6 +196,38 @@ function cam_paths()
     );
 }
 
+function cam_vorgaben()
+{
+    /* Herausgezogen aus cam_config(): die Vorgaben stehen weiterhin an
+     * EINER Stelle, jetzt aber an einer abrufbaren. Die Sicherung
+     * braucht die Schluesselliste, um Fremdes zu erkennen - ohne sie
+     * koennte sie nur alles durchwinken. */
+    return array(
+    'stream_fps' => 2,           // Bilder je Sekunde im MJPEG-Strom
+    'stream_maxsec' => 900,      // Notbremse: laengster Strom in Sekunden (Obergrenze 900)
+    'stream_token' => '',        // optionales Kennwort fuer den Stromabruf
+    'stream_mode' => 'auto',     // auto | mjpeg | rtsp (ffmpeg) | jpeg (Schnappschussfolge)
+    'keep_days' => 90,           // Aufbewahrung der Aufnahmen in Tagen
+    'clip_seconds' => 10,        // Laenge eines Videoclips
+    'clip_fps' => 2,             // Bilder je Sekunde im Clip
+    'notify' => array(),
+    'mqtt_enabled' => 0,
+    'mqtt_topic' => 'acti',
+    'keep_max' => 0,             // max. Dateien je Archiv (0 = unbegrenzt)
+    'timelapse' => 0,            // Zeitraffer-Aufnahme aktiv
+    'timelapse_time' => '12:00', // taeglich zu dieser Uhrzeit
+    'ai_url' => '',              // z. B. http://192.0.2.10:32168/v1/vision/detection
+    'ai_min' => 50,              // Mindest-Konfidenz in %
+    'webhook1' => '',            // POST mit JSON
+    'webhook2' => '',            // GET mit ?bild=<URL>
+    'aktionstoken' => '',        // Kennwort fuer alles, was etwas ausloest
+    'archiv_pfad' => '',         // leer = data/plugins/<ordner>.archiv
+    'pruef_minuten' => 5,        // Takt der Erreichbarkeitspruefung (0 = aus)
+    'mindestpause' => 0,         // Sekunden zwischen zwei Aufnahmen von aussen (0 = aus)
+    'keep_mb' => 0,              // Hoechstgroesse des Archivs in MB (0 = unbegrenzt)
+);
+}
+
 function cam_config()
 {
     $p = cam_paths();
@@ -220,30 +252,7 @@ function cam_config()
             }
         }
     }
-    $cfg += array(
-        'stream_fps' => 2,           // Bilder je Sekunde im MJPEG-Strom
-        'stream_maxsec' => 900,      // Notbremse: laengster Strom in Sekunden (Obergrenze 900)
-        'stream_token' => '',        // optionales Kennwort fuer den Stromabruf
-        'stream_mode' => 'auto',     // auto | mjpeg | rtsp (ffmpeg) | jpeg (Schnappschussfolge)
-        'keep_days' => 90,           // Aufbewahrung der Aufnahmen in Tagen
-        'clip_seconds' => 10,        // Laenge eines Videoclips
-        'clip_fps' => 2,             // Bilder je Sekunde im Clip
-        'notify' => array(),
-        'mqtt_enabled' => 0,
-        'mqtt_topic' => 'acti',
-        'keep_max' => 0,             // max. Dateien je Archiv (0 = unbegrenzt)
-        'timelapse' => 0,            // Zeitraffer-Aufnahme aktiv
-        'timelapse_time' => '12:00', // taeglich zu dieser Uhrzeit
-        'ai_url' => '',              // z. B. http://192.0.2.10:32168/v1/vision/detection
-        'ai_min' => 50,              // Mindest-Konfidenz in %
-        'webhook1' => '',            // POST mit JSON
-        'webhook2' => '',            // GET mit ?bild=<URL>
-        'aktionstoken' => '',        // Kennwort fuer alles, was etwas ausloest
-        'archiv_pfad' => '',         // leer = data/plugins/<ordner>.archiv
-        'pruef_minuten' => 5,        // Takt der Erreichbarkeitspruefung (0 = aus)
-        'mindestpause' => 0,         // Sekunden zwischen zwei Aufnahmen von aussen (0 = aus)
-        'keep_mb' => 0,              // Hoechstgroesse des Archivs in MB (0 = unbegrenzt)
-    );
+    $cfg += cam_vorgaben();
     if (!is_array($cfg['notify'])) {
         $cfg['notify'] = array();
     }
@@ -2397,7 +2406,8 @@ function cam_e($s)
 function cam_mqtt_zustand_pruefen()
 {
     $p = cam_paths();
-    $aus = array('gefunden' => false, 'udpport' => 0, 'autostart' => false);
+    $aus = array('gefunden' => false, 'udpport' => 0, 'autostart' => false,
+                 'fassung' => 0);
     if ($p['lbhome'] === '') { return $aus; }
     $f = $p['lbhome'] . '/config/system/general.json';
     if (!is_file($f)) { return $aus; }
@@ -2406,6 +2416,13 @@ function cam_mqtt_zustand_pruefen()
     $aus['gefunden'] = true;
     $aus['udpport'] = isset($d['Mqtt']['Udpinport']) ? (int) $d['Mqtt']['Udpinport'] : 0;
     $aus['autostart'] = !empty($d['Mqtt']['Gatewayautostart']); // 1.9.3: richtiger Schluessel - 'Autostart' gibt es nicht, die Warnung kam deshalb immer
+    /* Die FASSUNG des Gateways, ab Werk 1. Sie entscheidet, was der Anwender
+     * eintragen muss: unter V1 jedes Thema von Hand, ab V2 erscheint die
+     * Themengruppe von selbst in den Subscriptions. Ohne diese Zeile
+     * behauptete die Oberflaeche den V1-Satz unbedingt - fuer jeden
+     * V2-Anwender ein Verweis auf einen Eingabeplatz, den es nicht gibt.
+     * 0 heisst "nicht feststellbar" und wird als solches angezeigt. */
+    $aus['fassung'] = isset($d['Mqtt']['Gatewayversion']) ? (int) $d['Mqtt']['Gatewayversion'] : 0;
     return $aus;
 }
 
@@ -2516,4 +2533,43 @@ function cam_t($schluessel)
     }
     list($a, $s) = array_pad(explode('.', $schluessel, 2), 2, '');
     return isset($texte[$a][$s]) ? $texte[$a][$s] : $schluessel;
+}
+
+
+/**
+ * Eine Sicherungsdatei einlesen - und dabei NICHTS durchgehen lassen.
+ *
+ * Der wichtigste Punkt: eine halb gueltige Datei ueberschreibt GAR NICHTS.
+ * Wer eine Sicherung zurueckspielt, will entweder den ganzen Stand oder
+ * gar keinen - eine zur Haelfte uebernommene Konfiguration ist schlimmer
+ * als die alte, und man sieht es ihr nicht an.
+ *
+ * Unbekannte Schluessel sind eine Beanstandung, kein stiller Verlust: sie
+ * stammen aus einer anderen Fassung oder einem anderen Plugin.
+ *
+ * Rueckgabe: array(Konfiguration|null, Beanstandungen[], uebernommene Werte).
+ */
+function cam_sicherung_lesen($roh)
+{
+    $mangel = array();
+    $daten = json_decode((string) $roh, true);
+    if (!is_array($daten)) {
+        return array(null, array(cam_t('TEXT.SICH_KEIN_JSON')), 0);
+    }
+    $neu = cam_vorgaben();
+    $bekannt = array_keys($neu);
+    $anzahl = 0;
+    foreach ($daten as $k => $w) {
+        if (!in_array($k, $bekannt, true)) {
+            $mangel[] = sprintf(cam_t('TEXT.SICH_FREMD'),
+                                 htmlspecialchars((string) $k, ENT_QUOTES, 'UTF-8'));
+            continue;
+        }
+        $neu[$k] = $w;
+        $anzahl++;
+    }
+    if ($anzahl === 0) {
+        $mangel[] = cam_t('TEXT.SICH_LEER');
+    }
+    return array($mangel ? null : $neu, $mangel, $anzahl);
 }

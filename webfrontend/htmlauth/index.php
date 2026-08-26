@@ -357,6 +357,54 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 } else {
     echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>ACTi Kamera</title></head><body>';
 }
+
+/* ---------------- Einstellungen sichern ----------------
+ *
+ * Ausgegeben wird die VOLLE Konfiguration - samt Aktionstoken. Ohne ihn
+ * stuenden nach dem Zurueckspielen alle Felder richtig, und das Plugin
+ * kaeme trotzdem nicht an die Anlage; die Datei waere wertlos. Damit
+ * traegt sie ein Geheimnis, und der Hinweis am Knopf sagt das. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_sichern'])) {
+    $cam_js = json_encode(cam_config(),
+        JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($cam_js !== false) {
+        header('Content-Type: application/json; charset=utf-8');
+        header('Content-Disposition: attachment; filename="actikamera_einstellungen_'
+               . date('Ymd_His') . '.json"');
+        echo $cam_js;
+        exit;
+    }
+    $ac_note = cam_t('TEXT.SICH_SCHREIBFEHLER');
+}
+
+/* ---------------- Einstellungen zurueckspielen ----------------
+ *
+ * is_uploaded_file() ZUERST: ohne diese Pruefung liesse sich jede Datei
+ * des Servers unterschieben. Dann die Groessengrenze - eine Sicherung
+ * dieses Plugins ist wenige Kilobyte gross; alles darueber wird gar
+ * nicht erst gelesen. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_zurueck'])) {
+    if (!isset($_FILES['cam_sicherung']) || !is_array($_FILES['cam_sicherung'])
+        || !isset($_FILES['cam_sicherung']['tmp_name'])
+        || !@is_uploaded_file($_FILES['cam_sicherung']['tmp_name'])) {
+        $ac_note = cam_t('TEXT.SICH_KEINE_DATEI');
+    } elseif ((int) $_FILES['cam_sicherung']['size'] > 262144) {
+        $ac_note = cam_t('TEXT.SICH_ZU_GROSS');
+    } else {
+        list($cam_neu, $cam_mangel, $cam_n) = cam_sicherung_lesen(
+            (string) @file_get_contents($_FILES['cam_sicherung']['tmp_name']));
+        if ($cam_neu === null) {
+            /* ALLE Beanstandungen, nicht nur die erste - und geaendert
+             * wird nichts. */
+            $ac_note = cam_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', $cam_mangel);
+        } elseif (cam_config_save($cam_neu)) {
+            $ac_note = sprintf(cam_t('TEXT.SICH_UEBERNOMMEN'), $cam_n);
+        } else {
+            $ac_note = cam_t('TEXT.SICH_SCHREIBFEHLER');
+        }
+    }
+}
+
 ?>
 <style>
 .acw { max-width: 1100px; margin: 0 auto; padding: 0 10px 40px; font-size: 0.95em; }
@@ -711,7 +759,20 @@ foreach ($ac_zeigen as $ac_i):
 <h3 class="sm-h3"><?php echo cam_t('MQTT.H_ABO'); ?></h3>
 <div class="sm-small"><?php echo cam_t('MQTT.ABO_TEXT'); ?></div>
 <div class="sm-mono" style="display:block;padding:8px;margin:6px 0;"><?= ac_e($ac_cfg['mqtt_topic']) ?>/#</div>
-<div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_WARNUNG'); ?></div>
+<?php
+/* Drei Ausgaenge, nicht einer. Der V1-Satz gilt nur fuer Gateway V1; ab V2
+ * erscheint die Themengruppe von selbst. Ist die Fassung nicht feststellbar,
+ * werden BEIDE Faelle genannt statt einer behauptet. */
+$ac_gwf = (int) $ac_mz['fassung'];
+if ($ac_gwf >= 2) { ?>
+<div class="sm-alert sm-ok"><?php echo cam_t('MQTT.ABO_V2'); ?>
+<span class="sm-mono"><?= sprintf(cam_t('MQTT.ABO_GEMESSEN'), $ac_gwf) ?></span></div>
+<?php } elseif ($ac_gwf === 1) { ?>
+<div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_WARNUNG'); ?>
+<span class="sm-mono"><?= sprintf(cam_t('MQTT.ABO_GEMESSEN'), $ac_gwf) ?></span></div>
+<?php } else { ?>
+<div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_UNBEKANNT'); ?></div>
+<?php } ?>
 
 <h3 class="sm-h3"><?php echo cam_t('MQTT.H_THEMEN'); ?></h3>
 <table class="sm-tbl">
@@ -1047,6 +1108,27 @@ foreach ($ac_pr as $ac_z) {
 <?php if (class_exists('LBWeb', false) && method_exists('LBWeb', 'loglist_html')) { echo LBWeb::loglist_html(); } ?>
 </div>
 
+
+<h2><?= cam_t('TEXT.H_SICHERUNG') ?></h2>
+<div class="sm-hinweis"><?= cam_t('TEXT.SICH_ERKLAERUNG') ?></div>
+<div class="sm-warnung"><?= cam_t('TEXT.SICH_WARNUNG') ?></div>
+<div class="sm-knopfreihe">
+  <!-- ZWEI GETRENNTE Formulare. Das Sichern schickt einen Download und ruft
+       exit auf; das Zurueckspielen braucht enctype="multipart/form-data".
+       Wer beides in ein Formular legt, bekommt entweder keinen Upload oder
+       einen Download, der das Speichern verschluckt. -->
+  <form action="index.php" method="post">
+    <input data-role="none" type="hidden" name="activetab" value="tab-settings">
+    <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
+    <button data-role="none" class="sm-btn sm-b-lesen" type="submit" name="cam_sichern" value="1"><?= cam_t('TEXT.K_SICHERN') ?></button>
+  </form>
+  <form action="index.php" method="post" enctype="multipart/form-data">
+    <input data-role="none" type="hidden" name="activetab" value="tab-settings">
+    <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
+    <input data-role="none" type="file" name="cam_sicherung" accept=".json">
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit" name="cam_zurueck" value="1"><?= cam_t('TEXT.K_ZURUECK') ?></button>
+  </form>
+</div>
 </div>
 <script>
 (function () {
