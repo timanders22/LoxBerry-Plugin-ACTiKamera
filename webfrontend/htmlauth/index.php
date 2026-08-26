@@ -140,6 +140,23 @@ if (isset($_GET['form']) && preg_match($ac_muster, 'tab-' . $_GET['form'])) {
     $ac_tab = 'tab-' . $_GET['form'];
 }
 
+/* ==================================================================
+ * DIE HANDLER STEHEN VOR lbheader() - DAS IST BAUVORSCHRIFT
+ * ==================================================================
+ *
+ * Stand der Kopf davor, war er beim Aufruf von header() schon
+ * geschrieben - "Cannot modify header information", und der Knopf
+ * "Einstellungen sichern" lieferte eine Seite mit angehaengtem JSON
+ * statt einer Datei.
+ *
+ * Am PHP-CLI ist das unsichtbar: header() ist dort wirkungslos und
+ * headers_sent() immer falsch. Und wer OHNE gueltiges Formularmerkmal
+ * misst, wird vom Wachposten abgewiesen, bevor der Handler anlaeuft.
+ * Beides hat den Fehler lange verdeckt.
+ *
+ * Reihenfolge: Bibliothek, Konfiguration, Wachposten, Reiterwahl,
+ * ALLE Handler samt Downloads, dann erst lbheader(), dann HTML.
+ * ================================================================== */
 // ---------- Loxone-Vorlage herunterladen ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['download'])) {
     $ac_host = isset($_SERVER['HTTP_HOST']) ? preg_replace('/[^A-Za-z0-9\.\-:]/', '', $_SERVER['HTTP_HOST']) : '';
@@ -352,11 +369,6 @@ $ac_bt1 = $ac_stok !== '' ? '?t=' . rawurlencode($ac_stok) : '';
 
 function ac_e($s) { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); }
 
-if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
-    LBWeb::lbheader('ACTi Kamera', 'https://wiki.loxberry.de', 'help.html');
-} else {
-    echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>ACTi Kamera</title></head><body>';
-}
 
 /* ---------------- Einstellungen sichern ----------------
  *
@@ -403,6 +415,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_zurueck'])) {
             $ac_note = cam_t('TEXT.SICH_SCHREIBFEHLER');
         }
     }
+}
+
+
+if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
+    LBWeb::lbheader('ACTi Kamera', 'https://wiki.loxberry.de', 'help.html');
+} else {
+    echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>ACTi Kamera</title></head><body>';
 }
 
 ?>
