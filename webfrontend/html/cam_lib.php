@@ -176,7 +176,7 @@ function cam_paths()
                vollstaendig abraeumt - dort liegen nur fluechtige Sachen.
                'archiv' liegt DANEBEN und ueberlebt, wie die Zweitschrift der
                Konfiguration eine Ebene darueber. */
-            'data' => $lbhomedir . '/data/plugins/' . $plugindir,
+            'datadir' => $lbhomedir . '/data/plugins/' . $plugindir,
             'archiv' => $lbhomedir . '/data/plugins/' . $plugindir . '.archiv',
             'web' => $lbhomedir . '/webfrontend/html/plugins/' . $plugindir,
             'tmp' => '/tmp/actikamera',
@@ -188,7 +188,7 @@ function cam_paths()
         'config' => $base . '/config/cam.json',
         'backup' => $base . '/config/cam.backup.json',
         'log' => sys_get_temp_dir() . '/actikamera/cam.log',
-        'data' => sys_get_temp_dir() . '/actikamera/data',
+        'datadir' => sys_get_temp_dir() . '/actikamera/data',
         'archiv' => sys_get_temp_dir() . '/actikamera/archiv',
         'web' => __DIR__,
         'tmp' => sys_get_temp_dir() . '/actikamera',
