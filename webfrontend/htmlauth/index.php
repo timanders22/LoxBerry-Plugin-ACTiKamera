@@ -223,7 +223,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
     /* Eine Schleife ueber alle Kameras statt eines Blocks je Kamera.
        Kamera 1 traegt die Feldnamen ohne Nummer - so, wie sie seit jeher
        heissen. */
-    $ac_mangel = array();
+    $ac_fehler = array();
     $ac_namen = array();
     for ($ac_i = 1; $ac_i <= CAM_MAX; $ac_i++) {
         $ac_s = $ac_i > 1 ? (string) $ac_i : '';
@@ -252,7 +252,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
            nichts uebernimmt, hat hier schon einmal Schaden angerichtet. */
         $ac_nm = trim(preg_replace('/[\x00-\x1F\x7F"<>]/', '', (string) $ac_f('name')));
         if ($ac_nm !== '' && in_array(strtolower($ac_nm), $ac_namen, true)) {
-            $ac_mangel[] = sprintf(cam_t('TEXT.NAME_DOPPELT'), $ac_i, $ac_nm);
+            $ac_fehler[] = sprintf(cam_t('TEXT.NAME_DOPPELT'), $ac_i, $ac_nm);
         } else {
             $ac_new['name' . $ac_s] = $ac_nm;
             if ($ac_nm !== '') { $ac_namen[] = strtolower($ac_nm); }
@@ -285,13 +285,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
            stillschweigend geleert - bis 1.9.8 verschwand sie wortlos. */
         $ac_mu = trim((string) $ac_f('mjpeg_url'));
         if ($ac_mu !== '' && !preg_match('#^https?://#i', $ac_mu)) {
-            $ac_mangel[] = sprintf(cam_t('TEXT.ADRESSE_VERWORFEN'), $ac_i, 'http://', ac_e($ac_mu));
+            $ac_fehler[] = sprintf(cam_t('TEXT.ADRESSE_VERWORFEN'), $ac_i, 'http://', ac_e($ac_mu));
         } else {
             $ac_new['mjpeg_url' . $ac_s] = $ac_mu;
         }
         $ac_ru = trim((string) $ac_f('rtsp_url'));
         if ($ac_ru !== '' && !preg_match('#^rtsp://#i', $ac_ru)) {
-            $ac_mangel[] = sprintf(cam_t('TEXT.ADRESSE_VERWORFEN'), $ac_i, 'rtsp://', ac_e($ac_ru));
+            $ac_fehler[] = sprintf(cam_t('TEXT.ADRESSE_VERWORFEN'), $ac_i, 'rtsp://', ac_e($ac_ru));
         } else {
             $ac_new['rtsp_url' . $ac_s] = $ac_ru;
         }
@@ -333,8 +333,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         /* Beanstandungen werden GEMELDET, nicht verschwiegen - und sie
            verhindern das Speichern nicht. Alle auf einmal, damit niemand einen
            Fehler nach dem anderen korrigiert. */
-        if ($ac_mangel) {
-            $ac_err = implode(' ', $ac_mangel);
+        if ($ac_fehler) {
+            $ac_err = implode(' ', $ac_fehler);
         }
     } else {
         $ac_err = 'Konfiguration konnte nicht gespeichert werden.';
@@ -365,9 +365,6 @@ $ac_token = isset($ac_cfg['aktionstoken']) ? (string) $ac_cfg['aktionstoken'] : 
 $ac_stok = isset($ac_cfg['stream_token']) ? trim((string) $ac_cfg['stream_token']) : '';
 $ac_bt  = $ac_stok !== '' ? '&amp;t=' . rawurlencode($ac_stok) : '';
 $ac_bt1 = $ac_stok !== '' ? '?t=' . rawurlencode($ac_stok) : '';
-
-
-function ac_e($s) { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); }
 
 
 /* ---------------- Einstellungen sichern ----------------
@@ -403,12 +400,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_zurueck'])) {
     } elseif ((int) $_FILES['cam_sicherung']['size'] > 262144) {
         $ac_note = cam_t('TEXT.SICH_ZU_GROSS');
     } else {
-        list($cam_neu, $cam_mangel, $cam_n) = cam_sicherung_lesen(
+        list($cam_neu, $cam_fehler, $cam_n) = cam_sicherung_lesen(
             (string) @file_get_contents($_FILES['cam_sicherung']['tmp_name']));
         if ($cam_neu === null) {
             /* ALLE Beanstandungen, nicht nur die erste - und geaendert
              * wird nichts. */
-            $ac_note = cam_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', $cam_mangel);
+            $ac_note = cam_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', $cam_fehler);
         } elseif (cam_config_save($cam_neu)) {
             $ac_note = sprintf(cam_t('TEXT.SICH_UEBERNOMMEN'), $cam_n);
         } else {
