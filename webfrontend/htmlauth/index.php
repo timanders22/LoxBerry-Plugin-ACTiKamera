@@ -9,7 +9,10 @@
  */
 
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
-ini_set('display_errors', '1');
+/* display_errors wird NICHT erzwungen. Bis 1.9.16 stand hier
+   ini_set('display_errors', '1'); damit landete bei jedem Fehler der
+   absolute Serverpfad im Browser. Was der Betreiber sehen will, stellt er
+   in seiner php.ini ein. */
 
 /* Den LoxBerry-Wurzelordner ohne festen Systempfad bestimmen.
  *
@@ -54,14 +57,38 @@ if ($ac_lbhome) {
     $ac_logfile = sys_get_temp_dir() . '/actikamera/cam.log';
 }
 
-foreach (array(
+$ac_kandidaten = array(
     dirname(dirname(dirname(__DIR__))) . '/html/plugins/' . $ac_plugin . '/cam_lib.php',
     dirname(__DIR__) . '/html/cam_lib.php',
-) as $ac_cand) {
+);
+foreach ($ac_kandidaten as $ac_cand) {
     if (is_file($ac_cand)) { require_once $ac_cand; break; }
+}
+/* Findet keiner etwas, wird hier abgebrochen und gesagt, WO gesucht wurde.
+ * Bis 1.9.16 lief die Datei weiter: die function_exists-Wachen weiter unten
+ * versprachen ein sanftes Scheitern, das es nicht gab - die Seite starb an
+ * einem ungesicherten Uebersetzungsaufruf mit Stapelabzug und Serverpfaden. */
+if (!function_exists('cam_t')) {
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<h2>ACTi Kamera</h2><p><b>Fehler:</b> cam_lib.php nicht gefunden.</p>'
+       . '<p>Gesucht wurde in:</p><ul>';
+    foreach ($ac_kandidaten as $ac_cand) {
+        echo '<li>' . htmlspecialchars($ac_cand, ENT_QUOTES, 'UTF-8') . '</li>';
+    }
+    echo '</ul>';
+    exit;
+}
+
+/** Einen POST-Wert holen - erst is_string, dann alles andere. */
+function ac_post($name, $vorgabe = '')
+{
+    return (isset($_POST[$name]) && is_string($_POST[$name])) ? $_POST[$name] : $vorgabe;
 }
 
 $ac_saved = false; $ac_note = ''; $ac_err = '';
+/* Ob eine Meldung rot oder gruen erscheint, entscheidet dieser Schalter -
+   nicht die Suche nach einem deutschen Wort im Text (bis 1.9.16). */
+$ac_note_rot = false;
 
 /* Aktionstoken beim ersten Aufruf erzeugen.
  *
@@ -98,9 +125,18 @@ if (function_exists('cam_config') && function_exists('cam_token_erzeugen')) {
  */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && function_exists('cam_formtoken')) {
     $ac_fsoll = cam_formtoken();
-    $ac_fist = isset($_POST['formtoken']) ? (string) $_POST['formtoken'] : '';
+    /* is_string ZUERST: ?formtoken[]=x waere sonst eine Umwandlung von Feld
+       nach Zeichenkette - unter PHP 8 eine Warnung mitten in der Antwort. */
+    $ac_fist = (isset($_POST['formtoken']) && is_string($_POST['formtoken']))
+               ? $_POST['formtoken'] : '';
     if ($ac_fsoll === '' || $ac_fist === '' || !hash_equals($ac_fsoll, $ac_fist)) {
+        /* Den aktiven Reiter behalten - sonst landet der Bediener nach einer
+           Abweisung auf Einstellungen und sucht die Meldung dort, wo er gar
+           nicht war. Danach laeuft KEIN Zweig mehr an. */
+        $ac_behalten = (isset($_POST['activetab']) && is_string($_POST['activetab']))
+                       ? $_POST['activetab'] : null;
         $_POST = array();
+        if ($ac_behalten !== null) { $_POST['activetab'] = $ac_behalten; }
         $ac_err = cam_t('TEXT.FORMULAR_ABGEWIESEN');
     }
 }
@@ -113,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && function_exists('cam_formtoken')) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mqtt'])) {
     $ac_m = cam_config();
     $ac_m['mqtt_enabled'] = isset($_POST['mqtt_enabled']) ? 1 : 0;
-    $ac_mt = preg_replace('#[^\w/\-]#', '', (string) (isset($_POST['mqtt_topic']) ? $_POST['mqtt_topic'] : ''));
+    $ac_mt = preg_replace('#[^\w/\-]#', '', ac_post('mqtt_topic'));
     if ($ac_mt === '') {
         $ac_err = cam_t('MQTT.FEHLER_TOPIC');
     } else {
@@ -197,16 +233,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clearlog'])) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['shotnow']) && function_exists('cam_snapshot')) {
     list($ac_ok, $ac_info) = cam_snapshot('test');
-    $ac_note = $ac_ok ? ('Bild aufgenommen: ' . $ac_info) : ('Aufnahme fehlgeschlagen: ' . $ac_info);
+    $ac_note = sprintf(cam_t($ac_ok ? 'TEXT.M_BILD_OK' : 'TEXT.M_BILD_FEHL'), ac_e($ac_info));
+    $ac_note_rot = !$ac_ok;
     $ac_tab = 'tab-test';
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['timelapsenow']) && function_exists('cam_timelapse')) {
     list($ac_ok, $ac_info) = cam_timelapse();
-    $ac_note = $ac_ok ? ('Zeitrafferbild aufgenommen: ' . $ac_info) : ('Aufnahme fehlgeschlagen: ' . $ac_info);
+    $ac_note = sprintf(cam_t($ac_ok ? 'TEXT.M_ZEITRAFFER_OK' : 'TEXT.M_BILD_FEHL'), ac_e($ac_info));
+    $ac_note_rot = !$ac_ok;
     $ac_tab = 'tab-test';
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cleanupnow']) && function_exists('cam_cleanup')) {
-    $ac_note = 'Aufraeumen erledigt: ' . cam_cleanup() . ' alte Aufnahmen entfernt.';
+    $ac_note = sprintf(cam_t('TEXT.M_AUFGERAEUMT'), (int) cam_cleanup());
     $ac_tab = 'tab-shots';
 }
 
@@ -227,8 +265,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
     $ac_namen = array();
     for ($ac_i = 1; $ac_i <= CAM_MAX; $ac_i++) {
         $ac_s = $ac_i > 1 ? (string) $ac_i : '';
+        /* is_string ZUERST - ein Feld statt einer Zeichenkette (?host[]=x)
+           gaebe unter PHP 8 sonst eine Warnung mitten in der Seite. */
         $ac_f = function ($feld) use ($ac_s) {
-            return isset($_POST[$feld . $ac_s]) ? $_POST[$feld . $ac_s] : '';
+            $k = $feld . $ac_s;
+            return (isset($_POST[$k]) && is_string($_POST[$k])) ? $_POST[$k] : '';
         };
 
         $ac_new['host' . $ac_s] = trim((string) $ac_f('host'));
@@ -252,13 +293,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
            nichts uebernimmt, hat hier schon einmal Schaden angerichtet. */
         $ac_nm = trim(preg_replace('/[\x00-\x1F\x7F"<>]/', '', (string) $ac_f('name')));
         if ($ac_nm !== '' && in_array(strtolower($ac_nm), $ac_namen, true)) {
-            $ac_fehler[] = sprintf(cam_t('TEXT.NAME_DOPPELT'), $ac_i, $ac_nm);
+            $ac_fehler[] = sprintf(cam_t('TEXT.NAME_DOPPELT'), $ac_i, ac_e($ac_nm));
         } else {
             $ac_new['name' . $ac_s] = $ac_nm;
             if ($ac_nm !== '') { $ac_namen[] = strtolower($ac_nm); }
         }
 
-        $ac_new['channel' . $ac_s] = max(1, min(16, (int) ($ac_f('channel') !== '' ? $ac_f('channel') : 1)));
+        $ac_new['channel' . $ac_s] = max(cam_min('channel'), min(cam_max('channel'), (int) ($ac_f('channel') !== '' ? $ac_f('channel') : 1)));
         $ac_res = preg_replace('/[^A-Za-z0-9x,]/', '', (string) $ac_f('resolution'));
         if (stripos($ac_res, 'http') === 0) { $ac_res = ''; }
         $ac_new['resolution' . $ac_s] = $ac_res;
@@ -269,7 +310,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         if ($ac_su === '' && stripos($ac_cmd, '://') !== false) {
             $ac_su = $ac_cmd;
             $ac_cmd = '';
-            $ac_note = 'Die eingefuegte Adresse wurde als vollstaendige Schnappschuss-URL uebernommen.';
+            $ac_note = cam_t('TEXT.M_ADRESSE_UEBERNOMMEN');
         }
         if ($ac_su !== '' && !preg_match('#^https?://#i', $ac_su)) {
             $ac_su = 'http://' . ltrim($ac_su, '/');
@@ -279,7 +320,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
 
         $ac_a = (string) $ac_f('auth');
         $ac_new['auth' . $ac_s] = in_array($ac_a, array('auto', 'url', 'basic', 'digest'), true) ? $ac_a : 'auto';
-        $ac_new['timeout' . $ac_s] = max(2, min(30, (int) ($ac_f('timeout') !== '' ? $ac_f('timeout') : 8)));
+        $ac_new['timeout' . $ac_s] = max(cam_min('timeout'), min(cam_max('timeout'), (int) ($ac_f('timeout') !== '' ? $ac_f('timeout') : 8)));
 
         /* Eine Adresse, die dem Muster nicht entspricht, wird gemeldet statt
            stillschweigend geleert - bis 1.9.8 verschwand sie wortlos. */
@@ -296,36 +337,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
             $ac_new['rtsp_url' . $ac_s] = $ac_ru;
         }
         $ac_new['rtsp_stream' . $ac_s] = ((int) ($ac_f('rtsp_stream') !== '' ? $ac_f('rtsp_stream') : 2)) === 1 ? 1 : 2;
-        $ac_new['rtsp_port' . $ac_s] = max(1, min(65535, (int) ($ac_f('rtsp_port') !== '' ? $ac_f('rtsp_port') : 7070)));
-        $ac_new['rtsp_quality' . $ac_s] = max(2, min(15, (int) ($ac_f('rtsp_quality') !== '' ? $ac_f('rtsp_quality') : 5)));
+        $ac_new['rtsp_port' . $ac_s] = max(cam_min('rtsp_port'), min(cam_max('rtsp_port'), (int) ($ac_f('rtsp_port') !== '' ? $ac_f('rtsp_port') : 7070)));
+        $ac_new['rtsp_quality' . $ac_s] = max(cam_min('rtsp_quality'), min(cam_max('rtsp_quality'), (int) ($ac_f('rtsp_quality') !== '' ? $ac_f('rtsp_quality') : 5)));
     }
-    $ac_new['stream_fps'] = max(0.2, min(10, (float) (isset($_POST['stream_fps']) ? $_POST['stream_fps'] : 2)));
+    $ac_new['stream_fps'] = max(cam_min('stream_fps'), min(cam_max('stream_fps'), (float) (isset($_POST['stream_fps']) ? $_POST['stream_fps'] : 2)));
     // 900 s statt 21600: jeder offene Strom belegt einen PHP-Arbeitsprozess,
     // und davon hat ein LoxBerry nur eine Handvoll. Siehe cam_stream.php.
-    $ac_new['stream_maxsec'] = max(5, min(900, (int) (isset($_POST['stream_maxsec']) ? $_POST['stream_maxsec'] : 900)));
+    $ac_new['stream_maxsec'] = max(cam_min('stream_maxsec'), min(cam_max('stream_maxsec'), (int) (isset($_POST['stream_maxsec']) ? $_POST['stream_maxsec'] : 900)));
     $ac_sm = (string) (isset($_POST['stream_mode']) ? $_POST['stream_mode'] : 'auto');
     $ac_new['stream_mode'] = in_array($ac_sm, array('auto', 'mjpeg', 'jpeg', 'rtsp'), true) ? $ac_sm : 'auto';
     $ac_new['stream_token'] = preg_replace('/[^A-Za-z0-9_\-]/', '', (string) (isset($_POST['stream_token']) ? $_POST['stream_token'] : ''));
-    $ac_new['clip_seconds'] = max(2, min(60, (int) (isset($_POST['clip_seconds']) ? $_POST['clip_seconds'] : 10)));
-    $ac_new['clip_fps'] = max(1, min(5, (int) (isset($_POST['clip_fps']) ? $_POST['clip_fps'] : 2)));
+    $ac_new['clip_seconds'] = max(cam_min('clip_seconds'), min(cam_max('clip_seconds'), (int) (isset($_POST['clip_seconds']) ? $_POST['clip_seconds'] : 10)));
+    $ac_new['clip_fps'] = max(cam_min('clip_fps'), min(cam_max('clip_fps'), (int) (isset($_POST['clip_fps']) ? $_POST['clip_fps'] : 2)));
     $ac_new['notify'] = array(
         'push' => isset($_POST['notify_push']) ? 1 : 0,
-        'push_minutes' => max(1, min(30, (int) (isset($_POST['push_minutes']) ? $_POST['push_minutes'] : 2))),
+        'push_minutes' => max(cam_min('push_minutes'), min(cam_max('push_minutes'), (int) (isset($_POST['push_minutes']) ? $_POST['push_minutes'] : 2))),
     );
     /* mqtt_enabled und mqtt_topic werden hier NICHT mehr angefasst: die
      * Felder stehen nur noch im Reiter MQTT und haben dort einen eigenen
      * Handler (save_mqtt). $ac_new kommt aus cam_config(), die Werte
      * ueberleben also unveraendert. Stuende die Zeile hier weiter, schaltete
      * jedes Speichern der Einstellungen MQTT stillschweigend ab. */
-    $ac_new['keep_max'] = max(0, min(100000, (int) (isset($_POST['keep_max']) ? $_POST['keep_max'] : 0)));
-    $ac_new['keep_mb'] = max(0, min(1000000, (int) (isset($_POST['keep_mb']) ? $_POST['keep_mb'] : 0)));
-    $ac_new['keep_days'] = max(0, min(3650, (int) (isset($_POST['keep_days']) ? $_POST['keep_days'] : 90)));
-    $ac_new['pruef_minuten'] = max(0, min(1440, (int) (isset($_POST['pruef_minuten']) ? $_POST['pruef_minuten'] : 5)));
-    $ac_new['mindestpause'] = max(0, min(3600, (int) (isset($_POST['mindestpause']) ? $_POST['mindestpause'] : 0)));
+    $ac_new['keep_max'] = max(cam_min('keep_max'), min(cam_max('keep_max'), (int) (isset($_POST['keep_max']) ? $_POST['keep_max'] : 0)));
+    $ac_new['keep_mb'] = max(cam_min('keep_mb'), min(cam_max('keep_mb'), (int) (isset($_POST['keep_mb']) ? $_POST['keep_mb'] : 0)));
+    $ac_new['keep_days'] = max(cam_min('keep_days'), min(cam_max('keep_days'), (int) (isset($_POST['keep_days']) ? $_POST['keep_days'] : 90)));
+    $ac_new['pruef_minuten'] = max(cam_min('pruef_minuten'), min(cam_max('pruef_minuten'), (int) (isset($_POST['pruef_minuten']) ? $_POST['pruef_minuten'] : 5)));
+    $ac_new['mindestpause'] = max(cam_min('mindestpause'), min(cam_max('mindestpause'), (int) (isset($_POST['mindestpause']) ? $_POST['mindestpause'] : 0)));
     $ac_new['timelapse'] = isset($_POST['timelapse']) ? 1 : 0;
     $ac_new['timelapse_time'] = preg_match('/^\d{1,2}:\d{2}$/', (string) (isset($_POST['timelapse_time']) ? $_POST['timelapse_time'] : '')) ? $_POST['timelapse_time'] : '12:00';
     $ac_new['ai_url'] = trim((string) (isset($_POST['ai_url']) ? $_POST['ai_url'] : ''));
-    $ac_new['ai_min'] = max(1, min(99, (int) (isset($_POST['ai_min']) ? $_POST['ai_min'] : 50)));
+    $ac_new['ai_min'] = max(cam_min('ai_min'), min(cam_max('ai_min'), (int) (isset($_POST['ai_min']) ? $_POST['ai_min'] : 50)));
     $ac_new['webhook1'] = trim((string) (isset($_POST['webhook1']) ? $_POST['webhook1'] : ''));
     $ac_new['webhook2'] = trim((string) (isset($_POST['webhook2']) ? $_POST['webhook2'] : ''));
     if (cam_config_save($ac_new)) {
@@ -337,7 +378,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
             $ac_err = implode(' ', $ac_fehler);
         }
     } else {
-        $ac_err = 'Konfiguration konnte nicht gespeichert werden.';
+        $ac_err = cam_t('TEXT.M_NICHT_GESPEICHERT');
     }
 }
 
@@ -352,7 +393,8 @@ $ac_loglines = array();
 if (is_file($ac_logfile)) {
     $ac_loglines = array_slice(array_reverse(file($ac_logfile, FILE_IGNORE_NEW_LINES) ?: array()), 0, 300);
 }
-$ac_host = $_SERVER['HTTP_HOST'] ?: 'loxberry';
+$ac_host = (isset($_SERVER['HTTP_HOST']) && $_SERVER['HTTP_HOST'] !== '')
+           ? $_SERVER['HTTP_HOST'] : 'loxberry';
 $ac_token = isset($ac_cfg['aktionstoken']) ? (string) $ac_cfg['aktionstoken'] : '';
 
 /* Ist ein Token fuer den Bildstrom hinterlegt, gilt es fuer JEDE Adresse, die
@@ -384,6 +426,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_sichern'])) {
         exit;
     }
     $ac_note = cam_t('TEXT.SICH_SCHREIBFEHLER');
+    $ac_note_rot = true;
 }
 
 /* ---------------- Einstellungen zurueckspielen ----------------
@@ -397,25 +440,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_zurueck'])) {
         || !isset($_FILES['cam_sicherung']['tmp_name'])
         || !@is_uploaded_file($_FILES['cam_sicherung']['tmp_name'])) {
         $ac_note = cam_t('TEXT.SICH_KEINE_DATEI');
+        $ac_note_rot = true;
     } elseif ((int) $_FILES['cam_sicherung']['size'] > 262144) {
         $ac_note = cam_t('TEXT.SICH_ZU_GROSS');
+        $ac_note_rot = true;
     } else {
         list($cam_neu, $cam_fehler, $cam_n) = cam_sicherung_lesen(
             (string) @file_get_contents($_FILES['cam_sicherung']['tmp_name']));
         if ($cam_neu === null) {
             /* ALLE Beanstandungen, nicht nur die erste - und geaendert
              * wird nichts. */
-            $ac_note = cam_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', $cam_fehler);
+            $ac_note = cam_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', array_map('ac_e', $cam_fehler));
+            $ac_note_rot = true;
         } elseif (cam_config_save($cam_neu)) {
             $ac_note = sprintf(cam_t('TEXT.SICH_UEBERNOMMEN'), $cam_n);
         } else {
             $ac_note = cam_t('TEXT.SICH_SCHREIBFEHLER');
+            $ac_note_rot = true;
         }
     }
 }
 
 
-if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
+/* Einmal feststellen, Kopf UND Fuss daran haengen. function_exists() kennt
+   keine Methodenschreibweise und war immer falsch; class_exists() ohne das
+   zweite Argument stiesse ausserdem den Autolader an. */
+$ac_rahmen = class_exists('LBWeb', false);
+if ($ac_rahmen) {
     LBWeb::lbheader('ACTi Kamera', 'https://wiki.loxberry.de', 'help.html');
 } else {
     echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>ACTi Kamera</title></head><body>';
@@ -427,7 +478,10 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 .acw, .acw * { text-shadow: none !important; }
 .acw h2 { color: #6dac20; margin: 18px 0 6px; font-size: 1.15em; }
 
-/* Gleich grosse Schaltflaechen mit gleichem Abstand, egal ob Link <?php echo cam_t('TEXT.ODER'); ?> Formular */
+/* Gleich grosse Schaltflaechen mit gleichem Abstand, ob Link oder Formular.
+   Hier stand bis 1.9.16 ein Uebersetzungsaufruf mitten im CSS-Kommentar:
+   der Schluesselpruefer hielt den Schluessel fuer benutzt, und ein Wert mit
+   Stern-Schraegstrich haette den ganzen Stilblock beendet. */
 .acw .sm-h3 { color: #4f7d17; font-size: 1.0em; font-weight: 700; margin: 16px 0 2px; }
 .acw .sm-knopfreihe { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 4px; align-items: stretch; }
 .acw .sm-knopfreihe form { margin: 0; display: flex; }
@@ -442,6 +496,25 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 .acw .sm-punkt.sm-b-lesen { background: #6dac20; }
 .acw .sm-punkt.sm-b-technik { background: #546e7a; }
 .acw .sm-punkt.sm-b-aktion { background: #e0620d; }
+/* Je Knopfgruppe eine eigene Hover- und Fokusfarbe, mit !important.
+   Die Rahmen-CSS von jQuery Mobile setzt sonst ihre eigene, und bei einer
+   hellen Vorgabe steht Weiss auf Weiss - der Knopf verschwindet unter dem
+   Zeiger. Bis 1.9.16 gab es in dieser Datei keine einzige :hover-Regel. */
+.acw .sm-btn:hover, .acw .sm-btn:focus { color: #fff !important; text-shadow: none !important;
+    box-shadow: none !important; outline: 2px solid #33691e; outline-offset: 1px; }
+.acw .sm-btn.sm-b-lesen:hover, .acw .sm-btn.sm-b-lesen:focus { background: #5c9219 !important; }
+.acw .sm-btn.sm-b-technik:hover, .acw .sm-btn.sm-b-technik:focus { background: #435862 !important; }
+.acw .sm-btn.sm-b-aktion:hover, .acw .sm-btn.sm-b-aktion:focus { background: #b94e0a !important; }
+/* Hinweis und Warnung. Beide gehoeren zum Hausstandard, und sie heissen SO.
+   Bis 1.9.16 benutzte das HTML sm-hinweis und sm-warnung, waehrend dieser
+   Block nur sm-hint und sm-warn kannte: der einzige Warnkasten des Plugins -
+   der Satz, dass die Sicherungsdatei ein Geheimnis traegt - stand als nackter
+   Fliesstext da. hausstandard_pruefen.py meldet das als Zusatzzeile, waehrend
+   alle elf Spalten gross bleiben. */
+.acw .sm-hinweis { border: 1px solid #cfe3b0; background: #f2f8ea; border-radius: 6px;
+    padding: 10px 12px; margin: 12px 0; font-size: 0.9em; }
+.acw .sm-warnung { border: 1px solid #f0c9a0; background: #fdf4ec; border-radius: 6px;
+    padding: 10px 12px; margin: 12px 0; font-size: 0.9em; }
 .acw label { display: block; font-weight: 600; margin: 8px 0 2px; }
 .acw input[type=text], .acw input[type=password], .acw input[type=number], .acw select {
     width: 100%; padding: 7px 9px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; background: #fff; }
@@ -481,12 +554,19 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
 </style>
 <div class="acw">
 <h1 style="color:#6dac20;text-shadow:none;"><?php echo cam_t('TEXT.ACTI_KAMERA'); ?></h1>
-<div class="sm-small"><?php echo cam_t('TEXT.HOLT_BILDER_VON_EINER_ACTI_NETZWER'); ?>
+<div class="sm-small"><?php echo cam_t('TEXT.HOLT_BILDER_VON_EINER_ACTI_NETZWER'); ?> 
 <b><?php echo cam_t('TEXT.OHNE_ZUGANGSDATEN_IN_DER_LOXONE_PR'); ?></b><?php echo cam_t('TEXT.BENUTZER_UND_PASSWORT_STEHEN_AUSSC'); ?></div>
 
 <?php if ($ac_saved) { ?><div class="sm-alert sm-ok"><b><?php echo cam_t('TEXT.KONFIGURATION_GESPEICHERT'); ?></b></div><?php } ?>
-<?php if ($ac_err !== '') { ?><div class="sm-alert sm-err"><?= ac_e($ac_err) ?></div><?php } ?>
-<?php if ($ac_note !== '') { ?><div class="sm-alert <?= strpos($ac_note, 'fehlgeschlagen') !== false ? 'sm-err' : 'sm-ok' ?>"><?= ac_e($ac_note) ?></div><?php } ?>
+<?php /* Meldungen gehen ROH hinaus - die Sprachdatei ist plugin-eigen und
+        traegt Auszeichnung (<b>nicht</b>). Maskiert wird das EINGESETZTE
+        ARGUMENT an seiner Quelle, nicht die fertige Meldung; bis 1.9.16 lief
+        beides durch ac_e() und der Anwender las die Tags als Text.
+        Die Farbe entscheidet ein Schalter, keine Wortsuche: bis 1.9.16
+        stand hier strpos($ac_note, 'fehlgeschlagen') - jede Rueckweisung
+        erschien gruen, und in der englischen Fassung ausnahmslos jede. */ ?>
+<?php if ($ac_err !== '') { ?><div class="sm-alert sm-err"><?= $ac_err ?></div><?php } ?>
+<?php if ($ac_note !== '') { ?><div class="sm-alert <?= $ac_note_rot ? 'sm-err' : 'sm-ok' ?>"><?= $ac_note ?></div><?php } ?>
 <?php if (trim((string) $ac_cfg['user']) === '' && (string) $ac_cfg['pass'] !== '' && trim((string) $ac_cfg['snapurl']) === '') { ?>
 <div class="sm-alert sm-err"><b><?php echo cam_t('TEXT.DER_BENUTZERNAME_IST_LEER'); ?></b><?php echo cam_t('TEXT.EIN_PASSWORT_IST_ABER_HINTERLEGT_D'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.ERROR_NOT_AUTHORIZED'); ?></span> <?php echo cam_t('TEXT.HTTP_401_BITTE_DEN_BENUTZERNAMEN_E'); ?></div>
 <?php } ?>
@@ -507,7 +587,7 @@ if (function_exists('LBWeb::lbheader') || class_exists('LBWeb')) {
     <a class="sm-tab<?= $ac_tab === 'tab-log' ? ' sm-active' : '' ?>" data-pane="tab-log"      href="index.php?form=log"><?php echo cam_t('REITER.LOG'); ?></a>
 </div>
 
-<!-- ================= <?php echo cam_t('TEXT.EINSTELLUNG'); ?>en ================= -->
+<!-- ================= Einstellungen ================= -->
 <div class="sm-pane<?= $ac_tab === 'tab-settings' ? ' sm-active' : '' ?>" id="tab-settings">
 <form action="index.php" method="post">
 <input data-role="none" type="hidden" name="save" value="1">
@@ -545,7 +625,7 @@ foreach ($ac_zeigen as $ac_i):
     </div>
     <div>
         <label><?php echo cam_t('TEXT.PASSWORT'); ?></label>
-        <input data-role="none" type="password" name="pass<?= $ac_s ?>" value="" placeholder="<?= $ac_k['pass'] !== '' ? 'gespeichert &mdash; leer lassen = unver&auml;ndert' : 'Passwort der Kamera' ?>">
+        <input data-role="none" type="password" name="pass<?= $ac_s ?>" value="" placeholder="<?= ac_e($ac_k['pass'] !== '' ? cam_t('TEXT.P_PASS_GESETZT') : cam_t('TEXT.P_PASS_LEER')) ?>">
     </div>
 </div>
 <div class="sm-row" style="margin-top:8px;">
@@ -582,7 +662,7 @@ foreach ($ac_zeigen as $ac_i):
     </div>
     <div>
         <label><?php echo cam_t('TEXT.AUFLSUNG_NUR_ALS_ERSATZ'); ?></label>
-        <input data-role="none" type="text" name="resolution<?= $ac_s ?>" value="<?= ac_e($ac_k['resolution']) ?>" placeholder="z. B. N1280x720">
+        <input data-role="none" type="text" name="resolution<?= $ac_s ?>" value="<?= ac_e($ac_k['resolution']) ?>" placeholder="<?php echo ac_e(cam_t('TEXT.P_AUFLOESUNG')); ?>">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.ZEITLIMIT_JE_BILD_SEKUNDEN'); ?></label>
@@ -600,7 +680,7 @@ foreach ($ac_zeigen as $ac_i):
     </div>
     <div style="flex:1 1 100%;">
         <label><?php echo cam_t('TEXT.RTSP_ADRESSE_LEER_BEI_DER_KAMERA_E'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.GET_STREAM'); ?></span>)</label>
-        <input type="text" data-role="none" name="rtsp_url<?= $ac_s ?>" placeholder="rtsp://&lt;Kamera&gt;:7070//stream2" value="<?= ac_e((string) $ac_k['rtsp_url']) ?>">
+        <input type="text" data-role="none" name="rtsp_url<?= $ac_s ?>" placeholder="<?php echo ac_e(cam_t('TEXT.P_RTSP')); ?>" value="<?= ac_e((string) $ac_k['rtsp_url']) ?>">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.RTSP_PORT'); ?></label>
@@ -675,8 +755,8 @@ foreach ($ac_zeigen as $ac_i):
         <input data-role="none" type="text" name="timelapse_time" value="<?= ac_e($ac_cfg['timelapse_time']) ?>" placeholder="12:00">
     </div>
 </div>
-<div class="sm-small"><?php echo cam_t('TEXT.DIE_BILDER_LANDEN_IM_UNTERORDNER'); ?> <span class="sm-mono">timelapse</span><?php echo cam_t('TEXT.DER_DATEINAME_IST_DAS_DATUM_IST'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.FFMPEG'); ?></span> <?php echo cam_t('TEXT.AUF_DEM_LOXBERRY_VORHANDEN_WIRD_NA'); ?>
-<span class="sm-mono"><?php echo cam_t('TEXT.ZEITRAFFER_MP4'); ?></span> <?php echo cam_t('TEXT.AUS_ALLEN_BILDERN_NEU_ERZEUGT_ABRU'); ?>
+<div class="sm-small"><?php echo cam_t('TEXT.DIE_BILDER_LANDEN_IM_UNTERORDNER'); ?> <span class="sm-mono">timelapse</span><?php echo cam_t('TEXT.DER_DATEINAME_IST_DAS_DATUM_IST'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.FFMPEG'); ?></span> <?php echo cam_t('TEXT.AUF_DEM_LOXBERRY_VORHANDEN_WIRD_NA'); ?> 
+<span class="sm-mono"><?php echo cam_t('TEXT.ZEITRAFFER_MP4'); ?></span> <?php echo cam_t('TEXT.AUS_ALLEN_BILDERN_NEU_ERZEUGT_ABRU'); ?> 
 <span class="sm-mono">http://<?= ac_e($ac_host) ?><?php echo cam_t('TEXT.PLUGINS'); ?><?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.ZEITRAFFER_MP4_2'); ?></span><?php echo cam_t('TEXT.FEHLT_FFMPEG_BLEIBEN_DIE_EINZELBIL'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.SUDO_APT_GET_INSTALL_Y_FFMPEG'); ?></span>).</div>
 
 <h2><?php echo cam_t('TEXT.KI_OBJEKTERKENNUNG_OPTIONAL'); ?></h2>
@@ -690,7 +770,7 @@ foreach ($ac_zeigen as $ac_i):
         <input data-role="none" type="number" name="ai_min" value="<?= (int) $ac_cfg['ai_min'] ?>" min="1" max="99">
     </div>
 </div>
-<div class="sm-small"><?php echo cam_t('TEXT.BENTIGT_EINEN_ERKENNUNGSDIENST_AUF'); ?>
+<div class="sm-small"><?php echo cam_t('TEXT.BENTIGT_EINEN_ERKENNUNGSDIENST_AUF'); ?> 
 <b><?php echo cam_t('TEXT.CODEPROJECT_AI_SERVER'); ?></b> <?php echo cam_t('TEXT.PORT_32168_ODER'); ?> <b><?php echo cam_t('TEXT.DEEPSTACK'); ?></b><?php echo cam_t('TEXT.DER_LOXBERRY_SELBST_IST_DAFR_ZU_SC'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.PERSON'); ?></span>, <span class="sm-mono">car</span><?php echo cam_t('TEXT.ERSCHEINEN_IM_JSON_IN_DEN_WEBHOOKS'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.ERKANNT'); ?></span> <?php echo cam_t('TEXT.IN_DER_LOXONE_AUSGABE_ZUSTZLICH_GI'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.PERSON_1'); ?></span> <?php echo cam_t('TEXT.ALS_FERTIGEN_SCHALTER_LEER_LASSEN_'); ?></div>
 
 <h2><?php echo cam_t('TEXT.WEBHOOKS_OPTIONAL'); ?></h2>
@@ -704,9 +784,9 @@ foreach ($ac_zeigen as $ac_i):
         <input data-role="none" type="text" name="webhook2" value="<?= ac_e($ac_cfg['webhook2']) ?>" placeholder="https://…">
     </div>
 </div>
-<div class="sm-small"><?php echo cam_t('TEXT.BEIDE_WERDEN_NACH_JEDER_AUFNAHME_A'); ?>
-<span class="sm-mono"><?php echo cam_t('TEXT.BILD_DATEI_ANLASS_OBJEKTE_ZEIT'); ?></span> <?php echo cam_t('TEXT.ALS_JSON_WEBHOOK2_HNGT'); ?>
-<span class="sm-mono"><?php echo cam_t('TEXT.BILD_ANLASS_OBJEKTE'); ?></span> <?php echo cam_t('TEXT.AN_DIE_ADRESSE_AN'); ?></div>
+<div class="sm-small"><?php echo cam_t('TEXT.BEIDE_WERDEN_NACH_JEDER_AUFNAHME_A'); ?> 
+<span class="sm-mono"><?= ac_e('{' . implode(', ', cam_webhook_felder()) . '}') ?></span> <?php echo cam_t('TEXT.ALS_JSON_WEBHOOK2_HNGT'); ?> 
+<span class="sm-mono"><?= ac_e('?' . implode('=…&', cam_webhook2_parameter()) . '=…') ?></span> <?php echo cam_t('TEXT.AN_DIE_ADRESSE_AN'); ?></div>
 
 <h2><?php echo cam_t('TEXT.BENACHRICHTIGUNG'); ?></h2>
 <label style="display:inline-flex;align-items:center;gap:6px;">
@@ -746,16 +826,42 @@ foreach ($ac_zeigen as $ac_i):
 <option value="rtsp"<?= $ac_cfg['stream_mode'] === 'rtsp' ? ' selected' : '' ?>><?php echo cam_t('TEXT.NUR_RTSP_FLSSIGES_VIDEO_BRAUCHT_FF'); ?></option>
 <option value="jpeg"<?= $ac_cfg['stream_mode'] === 'jpeg' ? ' selected' : '' ?>><?php echo cam_t('TEXT.NUR_SCHNAPPSCHSSE'); ?></option>
 </select>
+<div class="sm-warnung"><?php echo cam_t('TEXT.RTSP_KENNWORT_WARNUNG'); ?></div>
 <p class="sm-hint"><?php echo cam_t('TEXT.FFMPEG_AUF_DIESEM_LOXBERRY'); ?>
 <?php $ac_ff = cam_ffmpeg(); ?>
-<?= $ac_ff !== '' ? '<b style="color:#2e7d32;">vorhanden</b> (' . ac_e($ac_ff) . ')' : '<b style="color:#c62828;">nicht vorhanden</b> &ndash; es werden Schnappsch&uuml;sse verwendet' ?></p>
+<?= $ac_ff !== '' ? '<b style="color:#2e7d32;">' . cam_t('TEXT.VORHANDEN') . '</b> (' . ac_e($ac_ff) . ')' : '<b style="color:#c62828;">' . cam_t('TEXT.NICHT_VORHANDEN') . '</b> &ndash; ' . cam_t('TEXT.L_OHNE_FFMPEG') ?></p>
 <p class="sm-hint"><?php echo cam_t('TEXT.BLEIBT_DAS_FELD_LEER_WIRD'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.RTSP_KAMERA_PORT_STREAMNR'); ?></span> <?php echo cam_t('TEXT.GEBILDET_BENUTZER_UND_PASSWORT_SET'); ?></p>
 <?php $ac_rr = cam_rtsp_url(true); if ($ac_rr === '') { $ac_rr = ''; } ?>
 <label><?php echo cam_t('TEXT.TOKEN_OPTIONAL_DANN_NUR_MIT'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.T_TOKEN'); ?></span> <?php echo cam_t('TEXT.ABRUFBAR'); ?></label>
 <input type="text" data-role="none" name="stream_token" value="<?= ac_e((string) $ac_cfg['stream_token']) ?>">
 <p class="sm-hint"><?php echo cam_t('TEXT.TOKEN_HINWEIS_LOXONE'); ?></p>
-<div style="margin-top:16px;"><button data-role="none" class="sm-btn" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button></div>
+<div style="margin-top:16px;"><button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button></div>
 </form>
+
+<h2><?= cam_t('TEXT.H_SICHERUNG') ?></h2>
+<div class="sm-hinweis"><?= cam_t('TEXT.SICH_ERKLAERUNG') ?></div>
+<div class="sm-warnung"><?= cam_t('TEXT.SICH_WARNUNG') ?></div>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-lesen"></i> <?php echo cam_t('LEGENDE.LESEN'); ?></span>
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span>
+</div>
+<div class="sm-knopfreihe">
+  <!-- ZWEI GETRENNTE Formulare. Das Sichern schickt einen Download und ruft
+       exit auf; das Zurueckspielen braucht enctype="multipart/form-data".
+       Wer beides in ein Formular legt, bekommt entweder keinen Upload oder
+       einen Download, der das Speichern verschluckt. -->
+  <form action="index.php" method="post">
+    <input data-role="none" type="hidden" name="activetab" value="tab-settings">
+    <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
+    <button data-role="none" class="sm-btn sm-b-lesen" type="submit" name="cam_sichern" value="1"><?= cam_t('TEXT.K_SICHERN') ?></button>
+  </form>
+  <form action="index.php" method="post" enctype="multipart/form-data">
+    <input data-role="none" type="hidden" name="activetab" value="tab-settings">
+    <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
+    <input data-role="none" type="file" name="cam_sicherung" accept=".json">
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit" name="cam_zurueck" value="1"><?= cam_t('TEXT.K_ZURUECK') ?></button>
+  </form>
+</div>
 </div>
 
 <!-- ================= MQTT ================= -->
@@ -781,10 +887,10 @@ foreach ($ac_zeigen as $ac_i):
  * werden BEIDE Faelle genannt statt einer behauptet. */
 $ac_gwf = (int) $ac_mz['fassung'];
 if ($ac_gwf >= 2) { ?>
-<div class="sm-alert sm-ok"><?php echo cam_t('MQTT.ABO_V2'); ?>
+<div class="sm-alert sm-ok"><?php echo cam_t('MQTT.ABO_V2'); ?> 
 <span class="sm-mono"><?= sprintf(cam_t('MQTT.ABO_GEMESSEN'), $ac_gwf) ?></span></div>
 <?php } elseif ($ac_gwf === 1) { ?>
-<div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_WARNUNG'); ?>
+<div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_WARNUNG'); ?> 
 <span class="sm-mono"><?= sprintf(cam_t('MQTT.ABO_GEMESSEN'), $ac_gwf) ?></span></div>
 <?php } else { ?>
 <div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_UNBEKANNT'); ?></div>
@@ -819,7 +925,7 @@ if ($ac_gwf >= 2) { ?>
 <!-- ================= Einbindung in Loxone ================= -->
 <div class="sm-pane<?= $ac_tab === 'tab-loxone' ? ' sm-active' : '' ?>" id="tab-loxone">
 <h2><?php echo cam_t('TEXT.EINBINDUNG_IN_LOXONE_SCHRITT_FR_SC'); ?></h2>
-<p><?php echo cam_t('TEXT.ZIEL_BEIM_KLINGELN_LOXONE_INTERCOM'); ?> <i>oder</i> <?php echo cam_t('TEXT.TASTER_AN_DER_HAUSTR_MACHT_DIE_KAM'); ?>
+<p><?php echo cam_t('TEXT.ZIEL_BEIM_KLINGELN_LOXONE_INTERCOM'); ?> <i><?php echo cam_t('TEXT.ODER'); ?></i> <?php echo cam_t('TEXT.TASTER_AN_DER_HAUSTR_MACHT_DIE_KAM'); ?> 
 <b><?php echo cam_t('TEXT.OHNE_KAMERA_PASSWORT_IN_DER_PROJEK'); ?></b>.</p>
 
 <div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_1_VIRTUELLER_AUSGANG_LOXBE'); ?></b>
@@ -869,7 +975,7 @@ foreach (cam_ausgangsbefehle() as $ac_bf) { ?>
 
 <div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_3_VIRTUELLER_HTTP_EINGANG_'); ?></b> <?php echo cam_t('TEXT.ABFRAGE_60_S'); ?>
 <table class="sm-tbl">
-<tr><th>Eigenschaft</th><th>Wert</th></tr>
+<tr><th><?php echo cam_t('TEXT.EIGENSCHAFT'); ?></th><th><?php echo cam_t('TEXT.WERT'); ?></th></tr>
 <tr><td>URL</td><td><span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_2'); ?></span></td></tr>
 <tr><td><?php echo cam_t('TEXT.ABFRAGEZYKLUS'); ?></td><td><?php echo cam_t('TEXT.60_SEKUNDEN'); ?></td></tr>
 </table>
@@ -889,11 +995,11 @@ foreach (cam_felder() as $ac_fn => $ac_fd) {
 
 <div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b>
 <table class="sm-tbl">
-<tr><th><?php echo cam_t('TEXT.BAUSTEIN'); ?></th><th><?php echo cam_t('TEXT.NAME'); ?></th><th>Einstellung</th><th><?php echo cam_t('TEXT.EINGNGE'); ?></th></tr>
+<tr><th><?php echo cam_t('TEXT.BAUSTEIN'); ?></th><th><?php echo cam_t('TEXT.NAME'); ?></th><th><?php echo cam_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo cam_t('TEXT.EINGNGE'); ?></th></tr>
 <tr><td><?php echo cam_t('TEXT.EINSCHALTVERZGERUNG_E1'); ?></td><td><?php echo cam_t('TEXT.KLINGEL_ENTPRELLT'); ?></td><td>3 s</td><td><?php echo cam_t('TEXT.KLINGELTASTER_INTERCOM'); ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.VIRTUELLER_AUSGANG'); ?></td><td><?php echo cam_t('TEXT.BILD_HOLEN'); ?></td><td><?php echo cam_t('TEXT.BEFEHL_AUS_SCHRITT_2'); ?><span class="sm-mono"><?php echo cam_t('TEXT.ANLASS_KLINGEL'); ?></span>)</td><td><?php echo cam_t('TEXT.E1'); ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.VIRTUELLER_AUSGANG'); ?></td><td><?php echo cam_t('TEXT.BILD_HOLEN'); ?></td><td><?php echo cam_t('TEXT.BEFEHL_AUS_SCHRITT_2'); ?><span class="sm-mono"><?= ac_e(cam_anlass_beispiel()) ?></span>)</td><td><?php echo cam_t('TEXT.E1'); ?></td></tr>
 <tr><td><?php echo cam_t('TEXT.SCHWELLWERTSCHALTER_S1'); ?></td><td><?php echo cam_t('TEXT.AUFNAHME_ERFOLGT'); ?></td><td><?php echo cam_t('TEXT.EIN_0_5_AUS_0_4'); ?></td><td><?php echo cam_t('TEXT.PUSHAKTIV'); ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.SCHWELLWERTSCHALTER_S2'); ?></td><td><?php echo cam_t('TEXT.PUSH_FREIGEGEBEN'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo cam_t('TEXT.PUSH'); ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.SCHWELLWERTSCHALTER_S2'); ?></td><td><?php echo cam_t('TEXT.PUSH_FREIGEGEBEN'); ?></td><td><?php echo cam_t('TEXT.EIN_0_5_AUS_0_4'); ?></td><td><?php echo cam_t('TEXT.PUSH'); ?></td></tr>
 <tr><td><?php echo cam_t('TEXT.UND_U1'); ?></td><td><?php echo cam_t('TEXT.BESUCH_MELDEN'); ?></td><td></td><td><?php echo cam_t('TEXT.S1_S2'); ?></td></tr>
 <tr><td><?php echo cam_t('TEXT.ODER_O1'); ?></td><td><?php echo cam_t('TEXT.PUSH_SAMMLER'); ?></td><td><?php echo cam_t('TEXT.EINZIGE_QUELLE_DES_BENACHRICHTIGUN'); ?></td><td>U1</td></tr>
 <tr><td><?php echo cam_t('TEXT.BENACHRICHTIGUNGS_BAUSTEIN'); ?></td><td><?php echo cam_t('TEXT.PUSH_BESUCH_AN_DER_TR'); ?></td><td><?php echo cam_t('TEXT.TEXT_Z_B_JEMAND_HAT_GEKLINGELT_BIL'); ?></td><td><?php echo cam_t('TEXT.O1'); ?></td></tr>
@@ -904,7 +1010,7 @@ foreach (cam_felder() as $ac_fn => $ac_fd) {
 </div>
 
 <div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_5_BILD_IN_DER_APP_ANZEIGEN'); ?></b><br>
-<?php echo cam_t('TEXT.DAS_JEWEILS_LETZTE_BILD_LIEGT_UNTE'); ?>
+<?php echo cam_t('TEXT.DAS_JEWEILS_LETZTE_BILD_LIEGT_UNTE'); ?> 
 <span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.LETZTESBILD_JPG'); ?></span>
 <?php echo cam_t('TEXT.ALTERNATIV'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CAM_PHP_LETZTES_1'); ?></span><?php echo cam_t('TEXT.DIESE_ADRESSE_ENTHLT_KEINE_ZUGANGS'); ?>
 <div class="sm-small" style="margin-top:4px;"><b><?php echo cam_t('TEXT.DAMIT_VERSCHWINDET_DAS_KAMERA_PASS'); ?></b>
@@ -912,7 +1018,7 @@ foreach (cam_felder() as $ac_fn => $ac_fd) {
 </div>
 
 <div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_6_MQTT_ALTERNATIVE_JSON'); ?></b><br>
-<?php echo cam_t('TEXT.ALLE_WERTE_GIBT_ES_AUCH_BER_DAS_LO'); ?>
+<?php echo cam_t('TEXT.ALLE_WERTE_GIBT_ES_AUCH_BER_DAS_LO'); ?> 
 <span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_JSON_1'); ?></span>
 </div>
 
@@ -927,7 +1033,7 @@ foreach (cam_felder() as $ac_fn => $ac_fd) {
        Antwort aus. */
 ?>
 <div style="margin-top:8px;">
-<?php if (count(cam_kameras()) > 1) { ?><b><?= ac_e(cam_kname($ac_ak)) ?></b><br><?php } ?>
+<?php if (count(cam_kameras()) > 1) { ?><b><?= ac_e(cam_kname($ac_ak)) ?></b><br><?php } ?> 
 <span class="sm-mono" style="display:block;padding:8px;word-break:break-all;"><?= ac_e($ac_adr) ?></span>
 <span class="sm-small"><?= sprintf(ac_e(cam_t('AUSL.LAENGE')), $ac_len) ?>
 <?php if ($ac_len > 64) { ?><b style="color:#c62828;"><?php echo cam_t('AUSL.ZU_LANG'); ?></b><?php } ?></span>
@@ -938,7 +1044,7 @@ foreach (cam_felder() as $ac_fn => $ac_fd) {
 </div>
 
 <h3 class="sm-h3"><?php echo cam_t('LOX.H_VORLAGE'); ?></h3>
-<div class="sm-small"><?php echo cam_t('LOX.VORLAGE_TEXT'); ?></div>
+<div class="sm-small"><?= sprintf(cam_t('LOX.VORLAGE_TEXT'), count(cam_felder())) ?></div>
 <div class="sm-legende">
 <span><i class="sm-punkt sm-b-technik"></i> <?php echo cam_t('LEGENDE.TECHNIK'); ?></span>
 </div>
@@ -1096,16 +1202,16 @@ foreach ($ac_pr as $ac_z) {
 
 <h2><?php echo cam_t('TEXT.ZUSTAND'); ?></h2>
 <table class="sm-tbl">
-<tr><th>Wert</th><th><?php echo cam_t('TEXT.INHALT'); ?></th></tr>
-<tr><td><?php echo cam_t('TEXT.KAMERA_KONFIGURIERT'); ?></td><td><?= !empty($ac_st['ok']) ? 'ja' : '<b>nein</b>' ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.LETZTES_BILD'); ?></td><td><?= $ac_st['letztes_bild'] !== '' ? ac_e($ac_st['letztes_bild']) . ' (Anlass: ' . ac_e($ac_st['letzter_anlass']) . ')' : '&ndash;' ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.ALTER'); ?></td><td><?= (int) $ac_st['alter_min'] >= 0 ? (int) $ac_st['alter_min'] . ' Minuten' : '&ndash;' ?></td></tr>
+<tr><th><?php echo cam_t('TEXT.WERT'); ?></th><th><?php echo cam_t('TEXT.INHALT'); ?></th></tr>
+<tr><td><?php echo cam_t('TEXT.KAMERA_KONFIGURIERT'); ?></td><td><?= !empty($ac_st['ok']) ? cam_t('ALLGEMEIN.JA') : '<b>' . cam_t('ALLGEMEIN.NEIN') . '</b>' ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.LETZTES_BILD'); ?></td><td><?= $ac_st['letztes_bild'] !== '' ? ac_e($ac_st['letztes_bild']) . ' (' . cam_t('TEXT.L_ANLASS') . ': ' . ac_e($ac_st['letzter_anlass']) . ')' : '&ndash;' ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.ALTER'); ?></td><td><?= (int) $ac_st['alter_min'] >= 0 ? (int) $ac_st['alter_min'] . ' ' . cam_t('TEXT.L_MINUTEN') : '&ndash;' ?></td></tr>
 <tr><td><?php echo cam_t('TEXT.GESPEICHERTE_AUFNAHMEN'); ?></td><td><?= (int) $ac_st['bilder'] ?> <?php echo cam_t('TEXT.BILDER'); ?> <?= (int) $ac_st['clips'] ?> <?php echo cam_t('TEXT.SERIEN'); ?> <?= (int) $ac_st['timelapse'] ?> <?php echo cam_t('TEXT.ZEITRAFFERBILDER'); ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.ZULETZT_ERKANNT'); ?></td><td><?= !empty($ac_st['objekte']) ? ac_e(implode(', ', $ac_st['objekte'])) : '&ndash; (keine Erkennung eingerichtet oder nichts gefunden)' ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.ZULETZT_ERKANNT'); ?></td><td><?= !empty($ac_st['objekte']) ? ac_e(implode(', ', $ac_st['objekte'])) : '&ndash; ' . cam_t('TEXT.L_KEINE_ERKENNUNG') ?></td></tr>
 </table>
 </div>
 
-<!-- ================= <?php echo cam_t('TEXT.PROTOKOLL'); ?> ================= -->
+<!-- ================= Logdateien ================= -->
 <div class="sm-pane<?= $ac_tab === 'tab-log' ? ' sm-active' : '' ?>" id="tab-log">
 <h2><?php echo cam_t('REITER.LOG'); ?></h2>
 <div class="sm-small" style="margin-bottom:8px;"><?php echo cam_t('TEXT.PROTOKOLLIERT_WERDEN_AUFNAHMEN_AUF'); ?><br>
@@ -1123,28 +1229,6 @@ foreach ($ac_pr as $ac_z) {
 </form>
 <?php if (class_exists('LBWeb', false) && method_exists('LBWeb', 'loglist_html')) { echo LBWeb::loglist_html(); } ?>
 </div>
-
-
-<h2><?= cam_t('TEXT.H_SICHERUNG') ?></h2>
-<div class="sm-hinweis"><?= cam_t('TEXT.SICH_ERKLAERUNG') ?></div>
-<div class="sm-warnung"><?= cam_t('TEXT.SICH_WARNUNG') ?></div>
-<div class="sm-knopfreihe">
-  <!-- ZWEI GETRENNTE Formulare. Das Sichern schickt einen Download und ruft
-       exit auf; das Zurueckspielen braucht enctype="multipart/form-data".
-       Wer beides in ein Formular legt, bekommt entweder keinen Upload oder
-       einen Download, der das Speichern verschluckt. -->
-  <form action="index.php" method="post">
-    <input data-role="none" type="hidden" name="activetab" value="tab-settings">
-    <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
-    <button data-role="none" class="sm-btn sm-b-lesen" type="submit" name="cam_sichern" value="1"><?= cam_t('TEXT.K_SICHERN') ?></button>
-  </form>
-  <form action="index.php" method="post" enctype="multipart/form-data">
-    <input data-role="none" type="hidden" name="activetab" value="tab-settings">
-    <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
-    <input data-role="none" type="file" name="cam_sicherung" accept=".json">
-    <button data-role="none" class="sm-btn sm-b-aktion" type="submit" name="cam_zurueck" value="1"><?= cam_t('TEXT.K_ZURUECK') ?></button>
-  </form>
-</div>
 </div>
 <script>
 (function () {
@@ -1154,12 +1238,23 @@ foreach ($ac_pr as $ac_z) {
         tabs.forEach(function (t) { t.classList.toggle('sm-active', t.dataset.pane === id); });
         document.querySelectorAll('.sm-pane').forEach(function (p) { p.classList.toggle('sm-active', p.id === id); });
     }
-    tabs.forEach(function (t) { t.addEventListener('click', function () { zeige(t.dataset.pane); }); });
+    /* preventDefault: ohne das folgt der Browser dem href, die Seite laedt
+       neu, und alles im Reiter Einstellungen, was noch nicht gespeichert
+       war, ist weg. Der href bleibt stehen - ohne JavaScript ist er der Weg. */
+    tabs.forEach(function (t) { t.addEventListener('click', function (e) {
+        e.preventDefault();
+        zeige(t.dataset.pane);
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState(null, '', t.getAttribute('href'));
+        }
+        var felder = document.querySelectorAll('input[name=activetab]');
+        Array.prototype.forEach.call(felder, function (f) { f.value = t.dataset.pane; });
+    }); });
     zeige(aktiv);
 })();
 </script>
 <?php
-if (class_exists('LBWeb')) {
+if ($ac_rahmen) {
     LBWeb::lbfooter();
 } else {
     echo '</body></html>';

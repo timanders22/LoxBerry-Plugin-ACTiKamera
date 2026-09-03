@@ -228,12 +228,250 @@ function cam_vorgaben()
 );
 }
 
-function cam_config()
+/**
+ * Schalter fuer die Selbstheilung der Konfiguration.
+ *
+ * Ohne Argument fragt er nur ab. Die Endpunkte im unangemeldeten Baum setzen
+ * ihn als erste Anweisung auf false; danach liest cam_config() nur noch und
+ * legt unter keinen Umstaenden etwas an - auch nicht ueber die vielen
+ * mittelbaren Aufrufe (cam_kcfg, cam_kameras, cam_token_pruefen ...).
+ */
+function cam_selbstheilung($setzen = null)
+{
+    static $an = true;
+    if ($setzen !== null) {
+        $an = (bool) $setzen;
+    }
+    return $an;
+}
+
+/**
+ * ALLE Vorgabewerte in einer Abbildung - die pluginweiten aus cam_vorgaben()
+ * und die je Kamera aus cam_kamerafelder(), Kennziffer fuer Kennziffer.
+ *
+ * WARUM ES DIESE FUNKTION GIBT (1.9.17)
+ * Bis 1.9.16 kannte nur cam_config() die vollstaendige Menge; sie baute sie
+ * in ihrem Rumpf zusammen. cam_sicherung_lesen() pruefte daneben gegen die
+ * nackten cam_vorgaben() - also gegen 22 statt 86 Schluessel. Folge: die
+ * selbst erzeugte Sicherungsdatei wurde mit 64 Beanstandungen abgelehnt, und
+ * eine Teildatei, die durchkam, loeschte Aktionstoken und Zugangsdaten.
+ * Wer eine zweite Stelle mit derselben Liste braucht, ruft ab jetzt hier ab.
+ */
+function cam_alle_vorgaben()
+{
+    static $gemerkt = null;
+    if ($gemerkt !== null) {
+        return $gemerkt;
+    }
+    $aus = array();
+    /* Die Schluessel, die es JE KAMERA gibt, stehen in cam_kamerafelder() -
+       an einer Stelle, aus der sich Vorgaben, Oberflaeche und cam_kcfg()
+       gleichermassen bedienen. Kamera 1 traegt kein Suffix. */
+    foreach (cam_kamerafelder() as $ac_k => $ac_v) {
+        for ($ac_i = 1; $ac_i <= CAM_MAX; $ac_i++) {
+            $aus[$ac_k . cam_sx($ac_i)] = $ac_v;
+        }
+    }
+    $gemerkt = $aus + cam_vorgaben();
+    return $gemerkt;
+}
+
+/**
+ * Die zulaessige Gestalt jedes Einstellwerts - an EINER Stelle.
+ *
+ * Zwei Verbraucher: der Speicher-Handler der Oberflaeche klemmt Zahlen an
+ * diese Grenzen (was sich zurechtruecken laesst, wird zurechtgerueckt), und
+ * cam_sicherung_lesen() weist ab, was nicht hineinpasst (eine Sicherung wird
+ * nicht zurechtgebogen - sie stimmt oder sie stimmt nicht). Bis 1.9.16
+ * standen die Grenzen vierzehnmal als Zahlenpaar im Speicher-Handler und
+ * nirgends sonst; die Sicherung pruefte deshalb ueberhaupt keinen Wert.
+ *
+ * Je Kamera notiert ohne Kennziffer - cam_regel() schneidet sie ab.
+ */
+function cam_wertregeln()
+{
+    return array(
+        'name'            => array('art' => 'text', 'max' => 64),
+        'ausloeser_token' => array('art' => 'marke', 'max' => 64),
+        'host'            => array('art' => 'text', 'max' => 128),
+        'user'            => array('art' => 'text', 'max' => 64),
+        'pass'            => array('art' => 'text', 'max' => 128),
+        'channel'         => array('art' => 'zahl', 'min' => 1, 'max' => 16),
+        'resolution'      => array('art' => 'text', 'max' => 32),
+        'snapcmd'         => array('art' => 'text', 'max' => 512),
+        'snapurl'         => array('art' => 'text', 'max' => 512),
+        'auth'            => array('art' => 'wahl', 'werte' => array('auto', 'url', 'basic', 'digest')),
+        'timeout'         => array('art' => 'zahl', 'min' => 2, 'max' => 30),
+        'mjpeg_url'       => array('art' => 'text', 'max' => 512),
+        'rtsp_url'        => array('art' => 'text', 'max' => 512),
+        'rtsp_port'       => array('art' => 'zahl', 'min' => 1, 'max' => 65535),
+        'rtsp_stream'     => array('art' => 'zahl', 'min' => 1, 'max' => 2),
+        'rtsp_quality'    => array('art' => 'zahl', 'min' => 2, 'max' => 15),
+
+        'stream_fps'      => array('art' => 'komma', 'min' => 0.2, 'max' => 10),
+        'stream_maxsec'   => array('art' => 'zahl', 'min' => 5, 'max' => 900),
+        'stream_mode'     => array('art' => 'wahl', 'werte' => array('auto', 'mjpeg', 'jpeg', 'rtsp')),
+        'stream_token'    => array('art' => 'marke', 'max' => 64),
+        'keep_days'       => array('art' => 'zahl', 'min' => 0, 'max' => 3650),
+        'clip_seconds'    => array('art' => 'zahl', 'min' => 2, 'max' => 60),
+        'clip_fps'        => array('art' => 'zahl', 'min' => 1, 'max' => 5),
+        'notify'          => array('art' => 'notify'),
+        /* Steht in der Konfiguration unter notify.push_minutes, wird also von
+           der notify-Regel mitgeprueft; die Grenzen holt sich der
+           Speicher-Handler trotzdem von hier, damit es sie nur einmal gibt. */
+        'push_minutes'    => array('art' => 'zahl', 'min' => 1, 'max' => 30),
+        'mqtt_enabled'    => array('art' => 'zahl', 'min' => 0, 'max' => 1),
+        'mqtt_topic'      => array('art' => 'marke', 'max' => 64),
+        'keep_max'        => array('art' => 'zahl', 'min' => 0, 'max' => 100000),
+        'keep_mb'         => array('art' => 'zahl', 'min' => 0, 'max' => 1000000),
+        'timelapse'       => array('art' => 'zahl', 'min' => 0, 'max' => 1),
+        'timelapse_time'  => array('art' => 'zeit'),
+        'ai_url'          => array('art' => 'text', 'max' => 512),
+        'ai_min'          => array('art' => 'zahl', 'min' => 1, 'max' => 99),
+        'webhook1'        => array('art' => 'text', 'max' => 512),
+        'webhook2'        => array('art' => 'text', 'max' => 512),
+        'aktionstoken'    => array('art' => 'marke', 'max' => 64),
+        'archiv_pfad'     => array('art' => 'text', 'max' => 512),
+        'pruef_minuten'   => array('art' => 'zahl', 'min' => 0, 'max' => 1440),
+        'mindestpause'    => array('art' => 'zahl', 'min' => 0, 'max' => 3600),
+    );
+}
+
+/**
+ * Die Regel zu einem Schluessel.
+ *
+ * Zuerst der Schluessel selbst - sonst verloere "webhook2" seine Regel an
+ * einen Stamm "webhook", den es gar nicht gibt. Erst danach, und nur wenn der
+ * Stamm wirklich ein Kamerafeld ist, wird die Kennziffer abgeschnitten.
+ */
+function cam_regel($schluessel)
+{
+    $r = cam_wertregeln();
+    $s = (string) $schluessel;
+    if (isset($r[$s])) {
+        return $r[$s];
+    }
+    if (preg_match('/^(.*?)([2-9][0-9]*)$/', $s, $m)) {
+        $kf = cam_kamerafelder();
+        $nr = (int) $m[2];
+        if (isset($kf[$m[1]]) && isset($r[$m[1]]) && $nr >= 2 && $nr <= CAM_MAX) {
+            return $r[$m[1]];
+        }
+    }
+    return null;
+}
+
+/** Untergrenze bzw. Obergrenze aus der Regeltabelle - fuer den Speicher-Handler. */
+function cam_min($schluessel, $ersatz = 0)
+{
+    $r = cam_regel($schluessel);
+    return ($r !== null && isset($r['min'])) ? $r['min'] : $ersatz;
+}
+
+function cam_max($schluessel, $ersatz = 0)
+{
+    $r = cam_regel($schluessel);
+    return ($r !== null && isset($r['max'])) ? $r['max'] : $ersatz;
+}
+
+/**
+ * Taugt dieser Wert ueberhaupt fuer eine Einstellung?
+ *
+ * Vor jeder schluesselgenauen Pruefung: kein Feld, kein Objekt, keine
+ * Steuerzeichen, keine unbegrenzte Laenge. Ein Zeilenumbruch in einem Wert,
+ * der spaeter in eine zeilenweise gelesene Datei geht, erzeugt dort eine
+ * zweite Zeile - genau der Weg, ueber den sich beim Saugroboter eine
+ * zusaetzliche publish-Zeile einschleusen liess.
+ */
+function cam_wert_taugt($v)
+{
+    if (is_array($v) || is_object($v) || is_bool($v) || is_null($v)) {
+        return false;
+    }
+    $s = (string) $v;
+    if (strlen($s) > 4096) {
+        return false;
+    }
+    return preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $s) !== 1;
+}
+
+/**
+ * Ist dieser Wert fuer DIESE Einstellung zulaessig?
+ *
+ * Rueckgabe: '' = in Ordnung, sonst ein kurzer Grund fuer die Beanstandung.
+ * Fail closed: ein Schluessel ohne Regel wird abgewiesen, nicht durchgelassen
+ * - sonst waere jede neue Einstellung ungeprueft, bis jemand daran denkt.
+ */
+function cam_wert_pruefen($schluessel, $wert)
+{
+    $r = cam_regel($schluessel);
+    if ($r === null) {
+        return 'unbekannt';
+    }
+    if ($r['art'] === 'notify') {
+        if (!is_array($wert)) {
+            return 'kein Feld';
+        }
+        foreach ($wert as $nk => $nv) {
+            if (!in_array($nk, array('push', 'push_minutes'), true) || !is_numeric($nv)) {
+                return 'unzulaessiger Eintrag';
+            }
+        }
+        return '';
+    }
+    if (!cam_wert_taugt($wert)) {
+        return 'unzulaessige Form';
+    }
+    $s = (string) $wert;
+    switch ($r['art']) {
+        case 'zahl':
+            if (!preg_match('/^-?[0-9]+$/', $s)) { return 'keine ganze Zahl'; }
+            $z = (int) $s;
+            if ($z < $r['min'] || $z > $r['max']) { return 'ausserhalb ' . $r['min'] . '..' . $r['max']; }
+            return '';
+        case 'komma':
+            if (!is_numeric($s)) { return 'keine Zahl'; }
+            $f = (float) $s;
+            if ($f < $r['min'] || $f > $r['max']) { return 'ausserhalb ' . $r['min'] . '..' . $r['max']; }
+            return '';
+        case 'wahl':
+            return in_array($s, $r['werte'], true) ? '' : 'nicht in der Auswahl';
+        case 'marke':
+            /* Weit gefasst, wie Token wirklich aussehen - ein zu enges Muster
+               verwirft ein von Hand gesetztes oder aus einer aelteren Fassung
+               uebernommenes Token, und der Schaden ist derselbe wie bei einem
+               verlorenen (VolkswagenID 0.9.11). Leer ist zulaessig: das heisst
+               "kein Token gesichert", kein unzulaessiger Wert. */
+            return preg_match('/^[A-Za-z0-9_.\-]{0,' . (int) $r['max'] . '}$/', $s) === 1 ? '' : 'unzulaessige Zeichen';
+        case 'zeit':
+            return preg_match('/^\d{1,2}:\d{2}$/', $s) === 1 ? '' : 'keine Uhrzeit hh:mm';
+        default:
+            return strlen($s) <= (int) $r['max'] ? '' : 'zu lang';
+    }
+}
+
+/**
+ * Die Konfiguration lesen und mit den Vorgaben vervollstaendigen.
+ *
+ * $erzeugen = false schaltet die Selbstheilung ab. Der unangemeldete Bereich
+ * ruft ausschliesslich so auf (cam_selbstheilung(false) am Kopf der
+ * Endpunkte): bis 1.9.16 legte ein Aufruf ohne Token - korrekt mit HTTP 403
+ * beantwortet - die Konfiguration aus der Zweitschrift wieder an. Wer sie
+ * bewusst geleert hatte, bekam sie beim naechsten Kameraaufruf zurueck, ohne
+ * es zu merken. Was ein Endpunkt anlegt, legt er nach der Tokenpruefung an.
+ */
+function cam_config($erzeugen = true)
 {
     $p = cam_paths();
-    if ((!is_file($p['config']) || trim((string) @file_get_contents($p['config'])) === ''
-         || trim((string) @file_get_contents($p['config'])) === '{}') && is_file($p['backup'])) {
-        @mkdir(dirname($p['config']), 0775, true);
+    if ($erzeugen && cam_selbstheilung()
+        && (!is_file($p['config']) || trim((string) @file_get_contents($p['config'])) === ''
+            || trim((string) @file_get_contents($p['config'])) === '{}') && is_file($p['backup'])) {
+        /* is_dir() davor: ohne die Wache meldet PHP 7.4 bei jedem Lauf
+           "mkdir(): File exists", und ein ueber set_error_handler()
+           eingehaengter Aufnehmer sieht das trotz @ (Pruefstand-Laerm). */
+        if (!is_dir(dirname($p['config']))) {
+            @mkdir(dirname($p['config']), 0775, true);
+        }
         @copy($p['backup'], $p['config']);
         @chmod($p['config'], 0600);
     }
@@ -241,18 +479,7 @@ function cam_config()
     if (!is_array($cfg)) {
         $cfg = array();
     }
-    /* Die Schluessel, die es JE KAMERA gibt, stehen in cam_kamerafelder() -
-       an einer Stelle, aus der sich Vorgaben, Oberflaeche und cam_kcfg()
-       gleichermassen bedienen. Kamera 1 traegt kein Suffix. */
-    foreach (cam_kamerafelder() as $ac_k => $ac_v) {
-        for ($ac_i = 1; $ac_i <= CAM_MAX; $ac_i++) {
-            $ac_name = $ac_k . ($ac_i > 1 ? $ac_i : '');
-            if (!array_key_exists($ac_name, $cfg)) {
-                $cfg[$ac_name] = $ac_v;
-            }
-        }
-    }
-    $cfg += cam_vorgaben();
+    $cfg += cam_alle_vorgaben();
     if (!is_array($cfg['notify'])) {
         $cfg['notify'] = array();
     }
@@ -336,7 +563,7 @@ function cam_token_pruefen($mitgegeben)
  * Ein kurzes Token wuerfeln - zum Abtippen gedacht.
  *
  * Ohne die Zeichen, die man beim Abschreiben verwechselt: kein l gegen 1,
- * kein O gegen 0. Zwoelf Stellen aus 32 Zeichen sind rund 1,2 Trillionen
+ * kein O gegen 0. Zwoelf Stellen aus 31 Zeichen sind rund 0,8 Trillionen
  * Moeglichkeiten; im Heimnetz ist das reichlich fuer einen Aufruf, der ein
  * Bild aufnimmt.
  */
@@ -407,6 +634,22 @@ function cam_ausloeser_adresse($id, $host = '')
  *
  * Rueckgabe: 0 = darf, sonst die Zahl der noch verbleibenden Sekunden.
  */
+/**
+ * Die Zeitgrenze eines Netzabrufs fuer diese Kamera, in Sekunden.
+ *
+ * Sie steht als Einstellung je Kamera (2 bis 30 s) - und galt bis 1.9.16 nur
+ * fuer den Bildabruf. Die Erreichbarkeitspruefung des Minutentakts nahm fest
+ * 8 s, die Diagnose deckelte auf 6: wer eine langsame Kamera auf 30 s stellte,
+ * bekam trotzdem "antwortet nicht", waehrend ?foto=1 tadellos lief. Die
+ * Grenzen kommen aus derselben Tabelle wie die des Formulars.
+ */
+function cam_zeitgrenze($id = 1)
+{
+    $k = cam_kcfg($id);
+    $t = (int) $k['timeout'];
+    return max(cam_min('timeout'), min(cam_max('timeout'), $t > 0 ? $t : 8));
+}
+
 function cam_pause_rest($id)
 {
     $cfg = cam_config();
@@ -419,18 +662,70 @@ function cam_pause_rest($id)
         return 0;
     }
     $letzte = (int) @file_get_contents($f);
-    $rest = $sek - (time() - $letzte);
+    /* min($sek, ...): ein Raspberry Pi hat keine Echtzeituhr. Springt die
+       Uhr beim ersten NTP-Abgleich zurueck, liegt der Merker in der
+       Zukunft - bis 1.9.16 sperrte der Ausloeser dann so lange, wie der
+       Sprung gross war (gemessen: 7230 s bei 30 s Mindestpause). Jetzt
+       kostet ein Uhrensprung hoechstens eine Mindestpause. */
+    $rest = min($sek, $sek - (time() - $letzte));
     return $rest > 0 ? $rest : 0;
 }
 
-/** Den Zeitpunkt der letzten Aufnahme von aussen merken. */
-function cam_pause_setzen($id)
+/* cam_pause_setzen() gibt es seit 1.9.17 nicht mehr: Merken und Pruefen sind
+   zu cam_pause_nehmen() zusammengezogen, weil zwischen zwei getrennten
+   Aufrufen ein Fenster lag. Eine Schreibfunktion, die niemand mehr ruft,
+   bleibt nicht auskommentiert stehen. */
+
+/**
+ * Die Mindestpause in EINEM unteilbaren Griff pruefen und belegen.
+ *
+ * Rueckgabe: 0 = frei, der Merker ist gesetzt, der Aufrufer darf aufnehmen.
+ * Sonst die verbleibenden Sekunden; dann wurde nichts gesetzt.
+ *
+ * WARUM ZUSAMMEN
+ * Bis 1.9.16 standen Lesen (cam_pause_rest) und Schreiben (cam_pause_setzen)
+ * als zwei Aufrufe nebeneinander. Zwischen ihnen liegt ein Fenster: eine
+ * Kamera, die im Sekundentakt ausloest, und ein gleichzeitiger Aufruf aus
+ * Loxone lesen beide denselben Stand und laufen beide durch - die Bremse
+ * greift genau dann nicht, wenn sie gebraucht wird. flock() ueber Lesen UND
+ * Schreiben schliesst das Fenster. Faellt die Sperre aus (kein Schreibrecht),
+ * wird durchgelassen und nicht blockiert: eine Bremse ist kein Schutz,
+ * und eine verpasste Klingelaufnahme waere der groessere Schaden.
+ */
+function cam_pause_nehmen($id)
 {
+    $cfg = cam_config();
+    $sek = max(0, (int) $cfg['mindestpause']);
+    if ($sek === 0) {
+        return 0;
+    }
     $p = cam_paths();
     if (!is_dir($p['tmp'])) {
         @mkdir($p['tmp'], 0775, true);
     }
-    @file_put_contents($p['tmp'] . '/letzte' . cam_sx($id) . '.txt', time());
+    $f = $p['tmp'] . '/letzte' . cam_sx($id) . '.txt';
+    $fh = @fopen($f, 'c+');
+    if ($fh === false) {
+        return cam_pause_rest($id);
+    }
+    if (!@flock($fh, LOCK_EX)) {
+        fclose($fh);
+        return cam_pause_rest($id);
+    }
+    $letzte = (int) trim((string) fread($fh, 32));
+    $rest = min($sek, $sek - (time() - $letzte));
+    if ($rest > 0) {
+        @flock($fh, LOCK_UN);
+        fclose($fh);
+        return $rest;
+    }
+    ftruncate($fh, 0);
+    rewind($fh);
+    fwrite($fh, (string) time());
+    fflush($fh);
+    @flock($fh, LOCK_UN);
+    fclose($fh);
+    return 0;
 }
 
 /**
@@ -478,10 +773,22 @@ function cam_log($msg)
         $tail = array_slice(file($f, FILE_IGNORE_NEW_LINES) ?: array(), -200);
         @file_put_contents($f, implode("\n", $tail) . "\n");
     }
-    // Passwoerter niemals ins Protokoll
+    /* Passwoerter niemals ins Protokoll - und zwar die aller Kameras.
+       Bis 1.9.16 wurde nur $cfg['pass'] ersetzt, also Kamera 1; pass2 bis
+       pass4 standen ungeschuetzt da. Aktionstoken und Stromkennwort
+       gehoeren aus demselben Grund dazu. */
     $cfg = cam_config();
-    if ($cfg['pass'] !== '') {
-        $msg = str_replace($cfg['pass'], '********', $msg);
+    $ac_geheim = array();
+    for ($ac_i = 1; $ac_i <= CAM_MAX; $ac_i++) {
+        $ac_geheim[] = isset($cfg['pass' . cam_sx($ac_i)]) ? (string) $cfg['pass' . cam_sx($ac_i)] : '';
+        $ac_geheim[] = isset($cfg['ausloeser_token' . cam_sx($ac_i)]) ? (string) $cfg['ausloeser_token' . cam_sx($ac_i)] : '';
+    }
+    $ac_geheim[] = (string) $cfg['aktionstoken'];
+    $ac_geheim[] = (string) $cfg['stream_token'];
+    foreach ($ac_geheim as $ac_w) {
+        if ($ac_w !== '') {
+            $msg = str_replace($ac_w, '********', $msg);
+        }
     }
     @file_put_contents($f, '[' . date('Y-m-d H:i:s') . '] ' . $msg . "\n", FILE_APPEND);
 }
@@ -775,12 +1082,12 @@ function cam_system($befehl, $id = 1)
     }
     $url = rtrim($host, '/') . '/cgi-bin/cmd/system?USER=' . cam_q($cfg['user'])
          . '&PWD=' . cam_q($cfg['pass']) . '&' . $befehl;
-    list($body, $code, $err) = cam_http($url, 8, '', $id);
+    list($body, $code, $err) = cam_http($url, cam_zeitgrenze($id), '', $id);
     if ($body === false || $code >= 400) {
         // Zweiter Versuch ohne Zugangsdaten in der URL, dafuer mit HTTP-Anmeldung
         $url2 = rtrim($host, '/') . '/cgi-bin/cmd/system?' . $befehl;
         foreach (array('basic', 'digest') as $verf) {
-            list($body2, $code2, $err2) = cam_http($url2, 8, $verf, $id);
+            list($body2, $code2, $err2) = cam_http($url2, cam_zeitgrenze($id), $verf, $id);
             if ($body2 !== false && $code2 < 400) {
                 return array($body2, $code2, '');
             }
@@ -821,7 +1128,18 @@ function cam_rtsp_url($nur_gespeichert = false, $id = 1)
     if ($url === '') {
         return '';
     }
-    // Benutzer und Passwort in die RTSP-Adresse einsetzen, falls noch nicht enthalten
+    /* Benutzer und Passwort in die RTSP-Adresse einsetzen, falls noch nicht
+     * enthalten.
+     *
+     * ACHTUNG, bewusst so gelassen: ffmpeg kennt fuer RTSP keine getrennte
+     * Anmeldeoption - die Zugangsdaten muessen in der Adresse stehen, und
+     * die Adresse steht damit in der Kommandozeile, die auf einem Linux
+     * ueber /proc/<pid>/cmdline fuer jeden lokalen Benutzer lesbar ist.
+     * escapeshellarg() schuetzt gegen Einschleusung, nicht gegen Mitlesen.
+     * Ein Umweg ueber die Umgebung hilft nicht: die Schale setzt den Wert
+     * ein, BEVOR sie ffmpeg startet - in dessen argv stuende er wieder.
+     * Wer das nicht will, laesst den RTSP-Weg aus (Bildquelle "Nur
+     * Kamerastrom"); die Oberflaeche sagt das am Auswahlfeld. */
     if (strpos($url, '@') === false && trim((string) $cfg['user']) !== '') {
         $url = preg_replace('#^rtsp://#i',
             'rtsp://' . rawurlencode($cfg['user']) . ':' . rawurlencode($cfg['pass']) . '@', $url);
@@ -1146,7 +1464,7 @@ function cam_diag($id = 1)
     $zeilen = array();
     $fertig = trim((string) $cfg['snapurl']);
     if ($fertig !== '') {
-        list($body, $code, $err) = cam_http($fertig, min(6, (int) $cfg['timeout']), '', $id);
+        list($body, $code, $err) = cam_http($fertig, cam_zeitgrenze($id), '', $id);
         $jpeg = ($body !== false && substr((string) $body, 0, 2) === "\xff\xd8");
         $zeilen[] = array('befehl' => 'VOLLSTAENDIGE URL', 'auth' => 'wie hinterlegt', 'http' => $code,
             'ms' => 0, 'ok' => $jpeg ? 1 : 0,
@@ -1160,7 +1478,7 @@ function cam_diag($id = 1)
         foreach ($befehle as $befehl) {
             $url = cam_url($befehl, $verf === 'url', $id);
             $start = microtime(true);
-            list($body, $code, $err) = cam_http($url, min(6, (int) $cfg['timeout']), $verf === 'url' ? '' : $verf, $id);
+            list($body, $code, $err) = cam_http($url, cam_zeitgrenze($id), $verf === 'url' ? '' : $verf, $id);
             $ms = round((microtime(true) - $start) * 1000);
             $jpeg = ($body !== false && substr((string) $body, 0, 2) === "\xff\xd8");
             $antwort = $jpeg ? ('JPEG, ' . round(strlen($body) / 1024) . ' kB')
@@ -1562,6 +1880,47 @@ function cam_ai($datei)
 /* ---------------- Webhooks ---------------- */
 
 /** Nach jeder Aufnahme aufgerufen: Webhook 1 als POST/JSON, Webhook 2 als GET. */
+/**
+ * Die Nutzlast von Webhook 1 - die EINZIGE Stelle, an der ihre Felder
+ * stehen. cam_webhook_felder() liest die Namen daraus ab, damit die
+ * Oberflaeche keine zweite, von Hand gepflegte Liste zeigt. Bis 1.9.16
+ * standen fuenf von sieben Namen in den Sprachdateien, und die englische
+ * Fassung hatte sie mituebersetzt (image, file, trigger ...) - Namen, die
+ * es an keinem Endpunkt gibt.
+ */
+function cam_webhook_daten($name, $anlass, $objekte, $id = 1, $bildurl = '')
+{
+    return array('bild' => $bildurl, 'datei' => $name, 'anlass' => $anlass,
+                 'objekte' => $objekte, 'zeit' => date('c'),
+                 'kamera' => (int) $id, 'kameraname' => cam_kname($id));
+}
+
+/** Die Feldnamen der Webhook-1-Nutzlast, gerechnet statt aufgezaehlt. */
+function cam_webhook_felder()
+{
+    return array_keys(cam_webhook_daten('', '', array(), 1));
+}
+
+/**
+ * Der Beispielparameter fuer den Anlass, wie ihn die Anleitung zeigt.
+ *
+ * Aus dem Code, nicht aus der Sprachdatei: language_en.ini nannte bis
+ * 1.9.16 "trigger=klingel", waehrend cam.php $_GET['anlass'] liest. Wer
+ * die englische Oberflaeche abschrieb, trug in Loxone einen Parameter
+ * ein, den es nicht gibt - und ein virtueller Ausgang wertet die
+ * Antwort nicht aus, der Ausfall blieb still.
+ */
+function cam_anlass_beispiel()
+{
+    return 'anlass=klingel';
+}
+
+/** Die Parameter, die Webhook 2 an seine Adresse anhaengt. */
+function cam_webhook2_parameter()
+{
+    return array('bild', 'anlass', 'objekte');
+}
+
 function cam_webhooks($name, $anlass, $objekte, $id = 1)
 {
     $cfg = cam_config();
@@ -1572,9 +1931,7 @@ function cam_webhooks($name, $anlass, $objekte, $id = 1)
     $ac_ordner = getenv('LBPPLUGINDIR') ?: basename(dirname(__FILE__));
     $bildurl = 'http://' . (isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'loxberry')
              . '/plugins/' . $ac_ordner . '/letztesbild' . cam_sx($id) . '.jpg';
-    $daten = array('bild' => $bildurl, 'datei' => $name, 'anlass' => $anlass,
-                   'objekte' => $objekte, 'zeit' => date('c'),
-                   'kamera' => (int) $id, 'kameraname' => cam_kname($id));
+    $daten = cam_webhook_daten($name, $anlass, $objekte, $id, $bildurl);
     if (trim((string) $cfg['webhook1']) !== '' && function_exists('curl_init')) {
         $ch = curl_init(trim((string) $cfg['webhook1']));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -1583,17 +1940,34 @@ function cam_webhooks($name, $anlass, $objekte, $id = 1)
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($daten));
-        curl_exec($ch);
+        /* Der Rueckgabewert wird gelesen. Bis 1.9.16 stand hier nur
+           curl_exec($ch); - ein Empfaenger, der seit Wochen nicht
+           erreichbar ist, hinterliess dieselbe Zeile wie ein geglueckter
+           Aufruf. Bei einem Aufruf nach aussen ist das Protokoll die
+           einzige Stelle, an der ein Ausfall stehen kann. */
+        $ac_a = curl_exec($ch);
+        $ac_c = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $ac_f = curl_error($ch);
         curl_close($ch);
-        cam_log('Webhook 1 ausgeloest');
+        if ($ac_a === false || $ac_c < 200 || $ac_c >= 300) {
+            cam_log('Webhook 1 fehlgeschlagen: HTTP ' . $ac_c
+                    . ($ac_f !== '' ? ' (' . $ac_f . ')' : ''));
+        } else {
+            cam_log('Webhook 1: HTTP ' . $ac_c);
+        }
     }
     if (trim((string) $cfg['webhook2']) !== '') {
         $u = trim((string) $cfg['webhook2']);
         $u .= (strpos($u, '?') === false ? '?' : '&') . 'bild=' . rawurlencode($bildurl)
             . '&anlass=' . rawurlencode($anlass)
             . ($objekte ? '&objekte=' . rawurlencode(implode(',', $objekte)) : '');
-        cam_http($u, 8);
-        cam_log('Webhook 2 ausgeloest');
+        list($ac_b, $ac_c, $ac_f) = cam_http($u, 8);
+        if ($ac_b === false || (int) $ac_c < 200 || (int) $ac_c >= 300) {
+            cam_log('Webhook 2 fehlgeschlagen: HTTP ' . (int) $ac_c
+                    . ($ac_f !== '' ? ' (' . $ac_f . ')' : ''));
+        } else {
+            cam_log('Webhook 2: HTTP ' . (int) $ac_c);
+        }
     }
 }
 
@@ -1843,14 +2217,22 @@ function cam_felder()
 }
 
 /** Die Feldwerte aus dem aktuellen Zustand. */
-function cam_werte($st = null)
+/**
+ * @param array|null $st    ein schon geholter Zustand
+ * @param int        $fuer  zu WELCHER Kamera dieser Zustand gehoert
+ *
+ * Bis 1.9.16 galt ein uebergebener Zustand immer der Kamera 1. cam.php
+ * holt ihn aber fuer die angefragte Kamera: bei ?kamera=2 landete deren
+ * Zustand in den Feldern der ersten - gemessen sprang PERSON der Haustuer
+ * auf 1, waehrend die Person an der Garage stand.
+ */
+function cam_werte($st = null, $fuer = 1)
 {
     $aus = array();
+    $fuer = (int) $fuer;
     foreach (cam_kameras() as $id) {
         $sx = cam_sx($id);
-        /* Der uebergebene Zustand gilt fuer Kamera 1 - so kann cam.php ihn
-           einmal holen, statt das Archiv ein zweites Mal zu durchsuchen. */
-        $s = ($id === 1 && $st !== null) ? $st : cam_state($id);
+        $s = ($id === $fuer && $st !== null) ? $st : cam_state($id);
         $je = array(
             'OK'         => (int) $s['ok'],
             'ALTER'      => (int) $s['alter_min'],
@@ -1892,10 +2274,10 @@ function cam_werte($st = null)
  * steht, faellt das nicht auf, aber sobald sich die Reihenfolge einmal
  * aendert, stuende der falsche Wert im Eingang.
  */
-function cam_zeile($st = null)
+function cam_zeile($st = null, $fuer = 1)
 {
     $teile = array('ACTI');
-    foreach (cam_werte($st) as $k => $v) { $teile[] = $k . '=' . $v; }
+    foreach (cam_werte($st, $fuer) as $k => $v) { $teile[] = $k . '=' . $v; }
     return implode(';', $teile);
 }
 
@@ -2185,7 +2567,9 @@ function cam_oberflaeche_pfad()
 function cam_reiter_pruefen()
 {
     $aus = array('leiste' => 0, 'bereiche' => 0, 'liste' => 0,
-                 'aktiv_leiste' => 0, 'aktiv_bereiche' => 0, 'gelesen' => false);
+                 'aktiv_leiste' => 0, 'aktiv_bereiche' => 0, 'gelesen' => false,
+                 'n_leiste' => array(), 'n_bereiche' => array(), 'n_liste' => array(),
+                 'fehlt' => array());
     $pfad = cam_oberflaeche_pfad();
     if ($pfad === '') {
         return $aus;
@@ -2195,14 +2579,35 @@ function cam_reiter_pruefen()
         return $aus;
     }
     $aus['gelesen'] = true;
-    $aus['leiste'] = preg_match_all('/data-pane="(tab-[a-z0-9]+)"/', $q);
-    $aus['bereiche'] = preg_match_all('/id="(tab-[a-z0-9]+)"/', $q);
+    /* Die NAMEN einsammeln, nicht nur zaehlen. */
+    preg_match_all('/data-pane="(tab-[a-z0-9]+)"/', $q, $m1);
+    preg_match_all('/id="(tab-[a-z0-9]+)"/', $q, $m2);
+    $aus['n_leiste'] = $m1[1];
+    $aus['n_bereiche'] = $m2[1];
+    $aus['leiste'] = count($m1[1]);
+    $aus['bereiche'] = count($m2[1]);
     if (preg_match('/\^tab-\(([a-z0-9|]+)\)/', $q, $m)) {
-        $aus['liste'] = count(explode('|', $m[1]));
+        foreach (explode('|', $m[1]) as $ac_e) {
+            $aus['n_liste'][] = 'tab-' . $ac_e;
+        }
+        $aus['liste'] = count($aus['n_liste']);
     }
     // Serverseitiges sm-active, je an der Leiste und am Bereich.
     $aus['aktiv_leiste'] = preg_match_all('/class="sm-tab<\?=[^>]*sm-active/', $q);
     $aus['aktiv_bereiche'] = preg_match_all('/class="sm-pane<\?=[^>]*sm-active/', $q);
+    /* Die drei Mengen gegeneinander - in BEIDE Richtungen. Nur so faellt
+       ein umbenannter Name auf; gleich viele Eintraege sind noch lange
+       nicht dieselben. */
+    $ac_alle = array_unique(array_merge($aus['n_leiste'], $aus['n_bereiche'], $aus['n_liste']));
+    foreach ($ac_alle as $ac_n) {
+        $ac_wo = array();
+        if (!in_array($ac_n, $aus['n_leiste'], true))   { $ac_wo[] = 'Leiste'; }
+        if (!in_array($ac_n, $aus['n_bereiche'], true)) { $ac_wo[] = 'Bereich'; }
+        if (!in_array($ac_n, $aus['n_liste'], true))    { $ac_wo[] = 'Positivliste'; }
+        if ($ac_wo) {
+            $aus['fehlt'][] = $ac_n . ' (' . implode(', ', $ac_wo) . ')';
+        }
+    }
     return $aus;
 }
 
@@ -2227,14 +2632,22 @@ function cam_pruefungen()
     $zeile($ac_adressen ? 1 : 0, cam_t('TEST.F_HOST'),
         $ac_adressen ? cam_e(implode(' | ', $ac_adressen)) : cam_t('TEST.A_HOST_FEHLT'));
 
-    /* Zugangsdaten - Form beurteilen, Wert nie zeigen */
-    if ($cfg['user'] === '' && $cfg['pass'] === '') {
-        $zeile(-1, cam_t('TEST.F_ZUGANG'), cam_t('TEST.A_ZUGANG_KEINE'));
-    } elseif ($cfg['pass'] !== '' && $cfg['user'] === '') {
-        $zeile(0, cam_t('TEST.F_ZUGANG'), cam_t('TEST.A_ZUGANG_PW_OHNE_USER'));
-    } else {
-        $zeile(1, cam_t('TEST.F_ZUGANG'),
-            sprintf(cam_t('TEST.A_ZUGANG_OK'), cam_e($cfg['user']), strlen($cfg['pass'])));
+    /* Zugangsdaten - Form beurteilen, Wert nie zeigen, und JE KAMERA.
+       Bis 1.9.16 beurteilte diese Zeile nur Kamera 1: bei vier Kameras
+       stand ein Haken da, auch wenn drei davon kein Kennwort hatten -
+       eine wahre Aussage ueber ein Viertel der Anlage. Dieselbe Datei
+       begruendet 30 Zeilen weiter unten selbst, warum das nicht geht. */
+    foreach (cam_kameras() as $ac_kid) {
+        $ac_kc = cam_kcfg($ac_kid);
+        $ac_wer = count(cam_kameras()) > 1 ? ' (' . cam_e(cam_kname($ac_kid)) . ')' : '';
+        if ($ac_kc['user'] === '' && $ac_kc['pass'] === '') {
+            $zeile(-1, cam_t('TEST.F_ZUGANG') . $ac_wer, cam_t('TEST.A_ZUGANG_KEINE'));
+        } elseif ($ac_kc['pass'] !== '' && $ac_kc['user'] === '') {
+            $zeile(0, cam_t('TEST.F_ZUGANG') . $ac_wer, cam_t('TEST.A_ZUGANG_PW_OHNE_USER'));
+        } else {
+            $zeile(1, cam_t('TEST.F_ZUGANG') . $ac_wer,
+                sprintf(cam_t('TEST.A_ZUGANG_OK'), cam_e($ac_kc['user']), strlen($ac_kc['pass'])));
+        }
     }
 
     /* Rechte der Konfiguration */
@@ -2244,14 +2657,19 @@ function cam_pruefungen()
             sprintf(cam_t($rechte === '600' ? 'TEST.A_RECHTE_OK' : 'TEST.A_RECHTE_OFFEN'), $rechte));
     }
 
-    /* Anmeldeart */
-    if ($cfg['auth'] === 'digest' && !function_exists('curl_init')) {
-        $t = cam_digest_selbsttest();
-        $zeile($t[0] ? 1 : 0, cam_t('TEST.F_DIGEST'),
-            cam_t($t[0] ? 'TEST.A_DIGEST_OK' : 'TEST.A_DIGEST_FEHL'));
-    } else {
-        $zeile(1, cam_t('TEST.F_AUTH'), sprintf(cam_t('TEST.A_AUTH'), cam_e($cfg['auth']),
-            function_exists('curl_init') ? 'cURL' : cam_t('TEST.A_AUTH_STREAM')));
+    /* Anmeldeart - ebenfalls je Kamera, sie ist je Kamera einstellbar. */
+    foreach (cam_kameras() as $ac_kid) {
+        $ac_kc = cam_kcfg($ac_kid);
+        $ac_wer = count(cam_kameras()) > 1 ? ' (' . cam_e(cam_kname($ac_kid)) . ')' : '';
+        if ($ac_kc['auth'] === 'digest' && !function_exists('curl_init')) {
+            $t = cam_digest_selbsttest();
+            $zeile($t[0] ? 1 : 0, cam_t('TEST.F_DIGEST') . $ac_wer,
+                cam_t($t[0] ? 'TEST.A_DIGEST_OK' : 'TEST.A_DIGEST_FEHL'));
+        } else {
+            $zeile(1, cam_t('TEST.F_AUTH') . $ac_wer,
+                sprintf(cam_t('TEST.A_AUTH'), cam_e($ac_kc['auth']),
+                    function_exists('curl_init') ? 'cURL' : cam_t('TEST.A_AUTH_STREAM')));
+        }
     }
 
     /* Der Zustand wird EINMAL geholt und von hier ab benutzt. Vorher stand
@@ -2369,15 +2787,18 @@ function cam_pruefungen()
     if (!$ac_r['gelesen']) {
         $zeile(-1, cam_t('TEST.F_REITER'), cam_t('TEST.A_REITER_UNGELESEN'));
     } else {
-        $ac_einig = ($ac_r['leiste'] === $ac_r['bereiche']
-                     && $ac_r['leiste'] === $ac_r['liste']
+        $ac_einig = (!$ac_r['fehlt']
                      && $ac_r['leiste'] === $ac_r['aktiv_leiste']
                      && $ac_r['leiste'] === $ac_r['aktiv_bereiche']
                      && $ac_r['leiste'] > 0);
-        $zeile($ac_einig ? 1 : 0, cam_t('TEST.F_REITER'),
-            sprintf(cam_t($ac_einig ? 'TEST.A_REITER_OK' : 'TEST.A_REITER_FEHL'),
-                    (int) $ac_r['leiste'], (int) $ac_r['bereiche'], (int) $ac_r['liste'],
-                    (int) $ac_r['aktiv_leiste'], (int) $ac_r['aktiv_bereiche']));
+        $ac_antwort = sprintf(cam_t($ac_einig ? 'TEST.A_REITER_OK' : 'TEST.A_REITER_FEHL'),
+            (int) $ac_r['leiste'], (int) $ac_r['bereiche'], (int) $ac_r['liste'],
+            (int) $ac_r['aktiv_leiste'], (int) $ac_r['aktiv_bereiche']);
+        if ($ac_r['fehlt']) {
+            $ac_antwort .= ' ' . sprintf(cam_t('TEST.A_REITER_NAMEN'),
+                                         implode('; ', $ac_r['fehlt']));
+        }
+        $zeile($ac_einig ? 1 : 0, cam_t('TEST.F_REITER'), $ac_antwort);
     }
 
     /* Vorlage wohlgeformt - gehoert hierher, nicht erst in die Pruefung vor
@@ -2557,13 +2978,35 @@ function cam_sicherung_lesen($roh)
     if (!is_array($daten)) {
         return array(null, array(cam_t('TEXT.SICH_KEIN_JSON')), 0);
     }
-    $neu = cam_vorgaben();
-    $bekannt = array_keys($neu);
+    /* Grundlage ist der BESTEHENDE Stand, nicht die nackte Vorgabenliste.
+     *
+     * Bis 1.9.16 stand hier "$neu = cam_vorgaben();" - 22 Schluessel gegen die
+     * 86, die cam_config() fuehrt. Das hatte zwei Folgen, beide gemessen:
+     * die selbst erzeugte Sicherung wurde mit 64 Beanstandungen abgelehnt
+     * (die beiden Knoepfe waren kein Paar), und eine Teildatei, die durchkam,
+     * loeschte alles, was nicht darin stand - Aktionstoken, Kameraadresse,
+     * Benutzer, Kennwort und alle vier Ausloese-Token. Wer weniger sichert,
+     * als er hat, darf beim Zurueckspielen nicht mehr verlieren, als er
+     * gesichert hat: ein fehlender Schluessel behaelt seinen jetzigen Wert.
+     */
+    $neu = cam_config();
+    $bekannt = array_keys(cam_alle_vorgaben());
     $anzahl = 0;
     foreach ($daten as $k => $w) {
+        /* Der lesbare Kopf (_hinweis, _stand) wird UEBERGANGEN, nicht
+           beanstandet - er ist keine Einstellung. */
+        if ($k !== '' && $k[0] === '_') {
+            continue;
+        }
         if (!in_array($k, $bekannt, true)) {
-            $mangel[] = sprintf(cam_t('TEXT.SICH_FREMD'),
-                                 htmlspecialchars((string) $k, ENT_QUOTES, 'UTF-8'));
+            $mangel[] = sprintf(cam_t('TEXT.SICH_FREMD'), (string) $k);
+            continue;
+        }
+        /* Jeder WERT wird geprueft, nicht nur der Schluessel. Bis 1.9.16
+           wurde "NEINDANKE" als Mindestpause anstandslos uebernommen. */
+        $grund = cam_wert_pruefen($k, $w);
+        if ($grund !== '') {
+            $mangel[] = sprintf(cam_t('TEXT.SICH_WERT'), (string) $k, $grund);
             continue;
         }
         $neu[$k] = $w;
@@ -2572,6 +3015,7 @@ function cam_sicherung_lesen($roh)
     if ($anzahl === 0) {
         $mangel[] = cam_t('TEXT.SICH_LEER');
     }
+    // Eine halb gueltige Datei aendert GAR NICHTS.
     return array($mangel ? null : $neu, $mangel, $anzahl);
 }
 

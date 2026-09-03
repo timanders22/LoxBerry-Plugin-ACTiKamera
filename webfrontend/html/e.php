@@ -4,14 +4,15 @@
  *
  *   e.php?t=<Token>            Bild aufnehmen, Anlass "bewegung"
  *   e.php?t=<Token>&a=klingel  anderer Anlass
- *   e.php?t=<Token>&c=1        Bildserie statt Einzelbild
+ *   e.php?t=<Token>&c=1        Bildserie statt Einzelbild (jeder Wert gilt,
+ *                              auch &c=0 - es zaehlt, dass der Parameter da ist)
  *
  * WARUM ES DIESE DATEI GIBT
  * Nicht wegen der Laenge. Der ACTi-Web-Konfigurator verteilt die Adresse auf
  * zwei Felder, und das zweite ist grosszuegig (am Geraet gemessen):
  *
  *   Ereignis - Ereignis-Server - HTTP-Server 1
- *       nur der Rechner, z. B. 192.168.178.14      64 Zeichen
+ *       nur der Rechner, z. B. 192.0.2.14      64 Zeichen
  *   Ereignis - Ereignis-Setup - URL-Befehle senden
  *       Pfad und Anhang                           255 Zeichen
  *
@@ -37,6 +38,15 @@
 
 require_once __DIR__ . '/cam_lib.php';
 
+/* Unangemeldeter Baum: lesen ja, anlegen nein. */
+cam_selbstheilung(false);
+
+/** Einen Parameter holen - erst is_string, dann alles andere. */
+function ac_get($name, $vorgabe = '')
+{
+    return (isset($_GET[$name]) && is_string($_GET[$name])) ? $_GET[$name] : $vorgabe;
+}
+
 /* Die Aufnahme zu Ende bringen, auch wenn der Anrufer sofort auflegt.
  * Der ACTi-Konfigurator bietet eine Max. Verbindungszeit von 0 Sekunden an;
  * ein Geraet, das ausloest und die Verbindung gleich wieder zumacht, wuerde
@@ -55,7 +65,7 @@ if ($ac_ip === '') {
     $ac_ip = 'unbekannt';
 }
 
-$ac_kam = cam_ausloeser_kamera(isset($_GET['t']) ? (string) $_GET['t'] : '');
+$ac_kam = cam_ausloeser_kamera(ac_get('t'));
 if ($ac_kam < 1) {
     /* Fail closed, und gegenueber dem Anrufer ohne Auskunft darueber, WAS
        falsch war: wer raten muss, erfaehrt hier nicht, ob es die Kamera oder
@@ -73,7 +83,7 @@ if ($ac_kam < 1) {
    Anlass stuende spaeter im Dateinamen und niemand wuesste warum. */
 $ac_anlass = 'bewegung';
 if (isset($_GET['a'])) {
-    $ac_roh = (string) $_GET['a'];
+    $ac_roh = ac_get('a');
     if (!preg_match('/^[a-z0-9]{1,20}$/i', $ac_roh)) {
         /* Der abgewiesene Wert kommt von aussen und gehoert nicht ungeprueft
            in eine Datei - die Laenge sagt genug, um den Fehler zu finden. */
@@ -91,15 +101,18 @@ if (isset($_GET['a'])) {
    Sekunde vor. Die Pause wird GEMELDET, nicht verschwiegen: ein Endpunkt, der
    wortlos nichts tut, schickt den Anwender auf die Suche nach einem Fehler,
    den es nicht gibt. */
-$ac_rest = cam_pause_rest($ac_kam);
+$ac_rest = cam_pause_nehmen($ac_kam);
 if ($ac_rest > 0) {
     cam_log('e.php: Mindestpause, noch ' . (int) $ac_rest . ' s'
             . ' (Kamera ' . $ac_kam . ', Anlass ' . $ac_anlass
             . ', Aufrufer ' . $ac_ip . ')');
+    /* 429 statt 200: ein abgewiesener Aufruf sah auf der Leitung aus wie ein
+       geglueckter. Der Text bleibt unveraendert - die Kamera und Loxone lesen
+       ihn, nicht den Code. */
+    header('HTTP/1.1 429 Too Many Requests');
     echo 'ACTI;OK=0;ERR=PAUSE;REST=' . (int) $ac_rest . "\n";
     exit;
 }
-cam_pause_setzen($ac_kam);
 
 if (isset($_GET['c'])) {
     list($ac_ok, $ac_info) = cam_clip($ac_anlass, $ac_kam);

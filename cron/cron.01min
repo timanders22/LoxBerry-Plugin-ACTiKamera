@@ -1,5 +1,20 @@
 #!/bin/sh
 # Zeitraffer zur eingestellten Uhrzeit, Archiv-Bereinigung taeglich 03:35.
-if [ -f REPLACELBPHTMLDIR/cam_cron.php ]; then
-  /usr/bin/php REPLACELBPHTMLDIR/cam_cron.php >/dev/null 2>&1
+#
+# Das Skript liegt seit 1.9.17 unter bin/ statt in webfrontend/html/. Dort war
+# es ueber HTTP ohne Anmeldung und ohne Token erreichbar: ein anonymer Aufruf
+# hielt den Herzschlag frisch, an dem Loxone einen toten Minutentakt erkennt,
+# und konnte Aufnahme und Archiv-Bereinigung ausloesen.
+#
+# Als loxberry starten, nicht als root: der Cron laeuft als root, die
+# Oberflaeche als loxberry, und beide schreiben in dieselben Archivordner.
+# Faellt su aus, laeuft es wie bisher weiter - melden ist richtig, blockieren
+# nicht.
+if [ -f "REPLACELBPBINDIR/cam_cron.php" ]; then
+  if command -v su >/dev/null 2>&1 && [ "$(id -u)" = "0" ]; then
+    su loxberry -s /bin/sh -c '/usr/bin/php "REPLACELBPBINDIR/cam_cron.php"' >/dev/null 2>&1
+  else
+    /usr/bin/php "REPLACELBPBINDIR/cam_cron.php" >/dev/null 2>&1
+  fi
 fi
+exit 0

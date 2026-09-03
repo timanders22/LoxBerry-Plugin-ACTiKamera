@@ -1,5 +1,7 @@
 # LoxBerry-Plugin: ACTi Kamera
 
+Version 1.9.17 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
 Benutzername und Passwort in der Loxone-Projektdatei stehen müssen**.
@@ -78,7 +80,7 @@ sich dabei auf zwei Felder:
 
 | Wo | Was hinein gehört | Grenze |
 |---|---|---|
-| *Ereignis → Ereignis-Server → HTTP-Server 1* | nur der Rechner: `192.168.178.14` | 64 Zeichen |
+| *Ereignis → Ereignis-Server → HTTP-Server 1* | nur der Rechner: `192.0.2.14` | 64 Zeichen |
 | *Ereignis → Ereignis-Setup → URL-Befehle senden → [+] bei Befehl 1* | Pfad und Anhang | 255 Zeichen |
 | *Ereignis → Ereignis-Liste → 1* | die Regel: Bewegung → URL-Befehl 1 | — |
 
@@ -197,9 +199,17 @@ und nicht die Diagnose lesen.
 
 ## Sicherheit und Datenschutz
 
-- Zugangsdaten stehen ausschließlich in `config/plugins/actikamera/cam.json`;
-  die Datei wird auf `chmod 600` gesetzt (nur für den Besitzer lesbar)
-- Das Passwort wird in der Oberfläche nie angezeigt und im Protokoll maskiert
+- Zugangsdaten stehen in `config/plugins/actikamera/cam.json` **und** in der
+  Zweitschrift `config/plugins/actikamera.backup.json`, die ein Update
+  überlebt; beide werden auf `chmod 600` gesetzt (nur für den Besitzer
+  lesbar). Wer den LoxBerry weitergibt, denkt an beide Dateien.
+- Das Passwort wird in der Oberfläche nie angezeigt und im Protokoll
+  maskiert — seit 1.9.17 die Kennwörter **aller** Kameras sowie Aktions-
+  und Stromtoken, vorher nur das der ersten Kamera
+- Der RTSP-Weg (Bildquelle *Nur RTSP*) ist die eine Ausnahme: ffmpeg kennt
+  für RTSP keine getrennte Anmeldung, das Kennwort steht deshalb in der
+  Kommandozeile und ist unter `/proc` für jeden lokalen Benutzer lesbar.
+  Die Oberfläche sagt das am Auswahlfeld; *Nur Kamerastrom* kommt ohne aus.
 - `?diag=1` nennt Länge sowie erstes und letztes Zeichen des Passworts und ist
   deshalb seit 1.9.8 tokenpflichtig
 - Die Formulare der Oberfläche tragen ein Merkmal gegen fremde Absender
@@ -226,6 +236,58 @@ so wie die Zweitschrift der Konfiguration es seit jeher tut. Ein eigener Ort
 > Handgriff vorher, auf dem LoxBerry:
 >
 >     mv /opt/loxberry/data/plugins/actikamera /opt/loxberry/data/plugins/actikamera.archiv
+
+## Fassung 1.9.17 — die Durchsicht vom 04.09.2026
+
+Eine vollständige Gegenlesung der Fassung 1.9.16 hat 36 Punkte ergeben; 35
+davon sind hier behoben. Was ein Anwender merkt:
+
+**Die Sicherung ist wieder ein Paar.** „Einstellungen sichern" schrieb alle
+86 Schlüssel, „zurückspielen" kannte aber nur 22 — die eigene Datei wurde
+mit 64 Beanstandungen abgelehnt, der Umzug auf einen zweiten LoxBerry ging
+auf keiner Anlage. Schlimmer: eine Datei mit wenigen Schlüsseln wurde
+**angenommen** und löschte alles Übrige — Aktionstoken, Kameraadresse,
+Benutzer, Kennwort und alle vier Auslöse-Token —, während die Oberfläche
+grün „übernommen" meldete. Seit 1.9.17 wird gegen die vollständige
+Schlüsselliste geprüft, jeder **Wert** gegen seine Grenzen, und was nicht in
+der Datei steht, behält seinen bisherigen Wert.
+
+**`cam_cron.php` liegt jetzt unter `bin/`.** Bis 1.9.16 lag der Minutentakt
+im unangemeldeten Webordner und prüfte kein Token: ein beliebiges Gerät im
+Heimnetz konnte den Herzschlag frisch halten — genau den Wert, an dem Loxone
+einen toten Cron erkennt — und Aufnahme wie Archiv-Bereinigung auslösen.
+Der Cron-Eintrag zeigt auf den neuen Ort; wer ihn von Hand angepasst hatte,
+prüft ihn nach dem Update.
+
+**Das Update verliert `letztesbild.jpg` nicht mehr.** Der Installer räumt
+beide `webfrontend/`-Ordner ab; die Datei unter der festen Adresse war nach
+jedem Update weg, während `letztesbild.json` im Archiv weiter ein Bild
+meldete und `ALTER` in Loxone auf eine Datei zeigte, die es nicht gab.
+`preupgrade.sh` sichert sie jetzt zusammen mit `zeitraffer.mp4` in einen
+Geschwisterordner neben dem Datenordner, `postupgrade.sh` holt sie zurück.
+
+**Weiter behoben:** `cam.php` schreibt jetzt auf jedem Weg eine
+Protokollzeile mit der Adresse des Anrufers (bis 1.9.16 auf keinem — vier
+abgewiesene Aufrufe hinterließen nicht einmal eine Datei); Warn- und
+Hinweiskästen haben ihre CSS-Klassen zurück (die Warnung, dass die
+Sicherungsdatei ein Geheimnis trägt, stand als nackter Fließtext da);
+Rückweisungen erscheinen rot statt grün und zeigen keine HTML-Tags mehr als
+Text; die englische Oberfläche nennt die Parameter, die es wirklich gibt
+(`anlass=` statt `trigger=`); `?kamera=2` schreibt den Zustand nicht mehr in
+die Felder der ersten Kamera; ein Aufruf ohne Token legt keine Konfiguration
+mehr an; ein Uhrensprung sperrt die Mindestpause höchstens noch für ihre
+eigene Dauer statt für Stunden; die eingestellte Zeitgrenze gilt jetzt auch
+für Erreichbarkeitsprüfung und Diagnose; die Webhooks melden Erfolg nur noch
+nach einem gelesenen Rückgabewert; die Selbstprüfung im Reiter *Test*
+vergleicht die Reiternamen statt sie nur zu zählen und findet damit einen
+umbenannten Bereich; `cam_stream.php` kennt `&kamera=`.
+
+**Nicht angefasst:** Retain für die MQTT-Zustandsthemen. Die Voraussetzung ist
+inzwischen geklärt — der UDP-Eingang des Gateways kennt `retain my/topic data`
+als eine seiner dokumentierten Zeilenformen (`sbin/mqttgateway.pl`, Zeile 227,
+am 04.09.2026 am Quelltext gemessen), und ein unbekannter Befehl fiele auf
+`publish` zurück. Der Umbau selbst steht noch aus und kommt mit einer eigenen
+Fassung.
 
 ## Fassung 1.9.15 — der Stat-Zwischenspeicher
 Die Protokollkappung (512 000 Byte) stand in

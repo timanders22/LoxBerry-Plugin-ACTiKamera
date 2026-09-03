@@ -12,14 +12,50 @@
 
 require_once __DIR__ . '/cam_lib.php';
 
-$ac_cfg = cam_config();
+/* Unangemeldeter Baum: lesen ja, anlegen nein. */
+cam_selbstheilung(false);
+
+/** Einen Parameter holen - erst is_string, dann alles andere. */
+function ac_get($name, $vorgabe = '')
+{
+    return (isset($_GET[$name]) && is_string($_GET[$name])) ? $_GET[$name] : $vorgabe;
+}
+
+$ac_ip = preg_replace('/[^0-9A-Fa-f:.]/', '',
+    isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '');
+if ($ac_ip === '') { $ac_ip = 'unbekannt'; }
+
+/* Welche Kamera ist gemeint? Bis 1.9.16 kannte diese Datei den Parameter
+ * ueberhaupt nicht: Vorschau und IntVideoUrl zeigten bei mehreren Kameras
+ * immer die erste - still. Dieselbe Wahl wie in cam.php. */
+$ac_kam = 1;
+if (isset($_GET['kamera'])) {
+    $ac_kroh = ac_get('kamera');
+    if (!preg_match('/^[0-9]{1,2}$/', $ac_kroh)
+        || (int) $ac_kroh < 1 || (int) $ac_kroh > CAM_MAX
+        || !in_array((int) $ac_kroh, cam_kameras(), true)) {
+        cam_log('cam_stream.php: abgewiesen, unbekannte Kamera (Aufrufer ' . $ac_ip . ')');
+        header('HTTP/1.1 404 Not Found');
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "Diese Kamera gibt es nicht.\n";
+        exit;
+    }
+    $ac_kam = (int) $ac_kroh;
+}
+
+/* cam_kcfg() liefert die volle Konfiguration und legt die Felder DIESER
+   Kamera ohne Kennziffer darueber - user, pass und rtsp_quality gehoeren
+   damit zur gewaehlten Kamera, stream_* bleiben pluginweit. */
+$ac_cfg = cam_kcfg($ac_kam);
 
 // Optionaler Zugriffsschutz. Ohne hinterlegtes Token ist der Strom frei abrufbar
 // (im Heimnetz gewollt, damit Loxone ihn ohne Anmeldung anzeigen kann).
 $ac_token = (string) $ac_cfg['stream_token'];
 if ($ac_token !== '') {
-    $ac_hat = isset($_GET['t']) ? (string) $_GET['t'] : '';
+    $ac_hat = ac_get('t');
     if (!hash_equals($ac_token, $ac_hat)) {
+        cam_log('cam_stream.php: abgewiesen, Stromkennwort falsch oder fehlend'
+                . ' (Aufrufer ' . $ac_ip . ')');
         header('HTTP/1.1 403 Forbidden');
         header('Content-Type: text/plain; charset=utf-8');
         echo "Zugriff verweigert: falsches oder fehlendes Token.\n";
@@ -29,8 +65,10 @@ if ($ac_token !== '') {
 
 // Einzelbild - fuer die Vorschau in der Oberflaeche und fuer IntAlertImage
 if (isset($_GET['einzeln'])) {
-    list($ac_body, $ac_weg, $ac_err) = cam_fetch_jpeg();
+    list($ac_body, $ac_weg, $ac_err) = cam_fetch_jpeg($ac_kam);
     if ($ac_body === false) {
+        cam_log('cam_stream.php: Einzelbild fehlgeschlagen: ' . $ac_err
+                . ' (Kamera ' . $ac_kam . ', Aufrufer ' . $ac_ip . ')');
         header('HTTP/1.1 502 Bad Gateway');
         header('Content-Type: text/plain; charset=utf-8');
         echo 'Kein Bild erhalten: ' . $ac_err . "\n";
@@ -44,7 +82,7 @@ if (isset($_GET['einzeln'])) {
     exit;
 }
 
-$ac_fps = isset($_GET['fps']) ? (float) $_GET['fps'] : (float) $ac_cfg['stream_fps'];
+$ac_fps = isset($_GET['fps']) ? (float) ac_get('fps', '0') : (float) $ac_cfg['stream_fps'];
 /* Untergrenze, nicht nur Obergrenze.
  *
  * Bis 1.9.7 wurde nur gegen <= 0 und > 10 geprueft. ?fps=0.0001 ueberlebt
@@ -75,7 +113,7 @@ $ac_pause = (int) round(1000000 / $ac_fps);
  * offen stehen laesst.
  */
 define('AC_STREAM_MAX', 900);
-$ac_max = isset($_GET['sec']) ? (int) $_GET['sec'] : (int) $ac_cfg['stream_maxsec'];
+$ac_max = isset($_GET['sec']) ? (int) ac_get('sec', '0') : (int) $ac_cfg['stream_maxsec'];
 if ($ac_max < 5) { $ac_max = 5; }
 if ($ac_max > AC_STREAM_MAX) { $ac_max = AC_STREAM_MAX; }
 
@@ -105,7 +143,7 @@ header('Connection: close');
 // Kamera ihren Strom formatiert.
 // ---------------------------------------------------------------------------
 $ac_modus = (string) $ac_cfg['stream_mode'];
-$ac_mjpeg = ($ac_modus === 'auto' || $ac_modus === 'mjpeg') ? cam_mjpeg_url() : '';
+$ac_mjpeg = ($ac_modus === 'auto' || $ac_modus === 'mjpeg') ? cam_mjpeg_url($ac_kam) : '';
 
 if ($ac_mjpeg !== '' && function_exists('curl_init')) {
     $ac_puffer = '';
@@ -176,7 +214,7 @@ if ($ac_mjpeg !== '' && function_exists('curl_init')) {
 // offen ist statt vieler Schnappschussabrufe.
 // ---------------------------------------------------------------------------
 $ac_ffmpeg = ($ac_modus === 'jpeg' || $ac_modus === 'mjpeg') ? '' : cam_ffmpeg();
-$ac_rtsp = $ac_ffmpeg !== '' ? cam_rtsp_url() : '';
+$ac_rtsp = $ac_ffmpeg !== '' ? cam_rtsp_url(false, $ac_kam) : '';
 
 if ($ac_ffmpeg !== '' && $ac_rtsp !== '') {
     $ac_gute = max(2, min(15, (int) $ac_cfg['rtsp_quality']));
@@ -251,7 +289,7 @@ $ac_fehler = 0;
 
 while (!connection_aborted() && time() < AC_STREAM_ENDE) {
     $ac_t0 = microtime(true);
-    list($ac_body, $ac_weg, $ac_err) = cam_fetch_jpeg();
+    list($ac_body, $ac_weg, $ac_err) = cam_fetch_jpeg($ac_kam);
 
     if ($ac_body === false || $ac_body === '') {
         $ac_fehler++;

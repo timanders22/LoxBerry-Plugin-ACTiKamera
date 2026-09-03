@@ -18,7 +18,49 @@
  * Merker verhindert weiterhin die Mehrfachausfuehrung. Ein verpasster Takt
  * kostet damit hoechstens eine Minute Verspaetung statt eines Tages.
  */
-require_once __DIR__ . '/cam_lib.php';
+/* WARUM DIESE DATEI UNTER bin/ LIEGT (1.9.17)
+ * Bis 1.9.16 lag sie in webfrontend/html/ und wurde von cron.01min ueber
+ * REPLACELBPHTMLDIR gerufen - also aus dem UNANGEMELDETEN Webordner. Sie
+ * war damit fuer jedes Geraet im Heimnetz per HTTP erreichbar und prueft
+ * kein Token: ein anonymer Aufruf schrieb den Herzschlag (HERZ sprang von
+ * -1 auf 0, gemessen), stiess cam_timelapse() an und konnte ueber
+ * cam_cleanup() Archivdateien loeschen. Der Herzschlag ist genau der Wert,
+ * an dem Loxone einen stehengebliebenen Minutentakt erkennt - er liess
+ * sich von aussen frisch halten. Denselben Weg ist MG iSmart 1.0.3
+ * gegangen.
+ */
+if (PHP_SAPI !== 'cli') {
+    header('HTTP/1.1 403 Forbidden');
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "Dieses Skript laeuft nur ueber den Minutentakt.
+";
+    exit(1);
+}
+
+/* Die Bibliothek liegt in einem ANDEREN Baum: im Archiv nebenan, auf dem
+ * installierten LoxBerry drei Ebenen hoeher unter webfrontend/html/plugins/.
+ * Deshalb eine Kandidatenliste und ein Abbruch mit Rueckgabewert 1, der
+ * sagt, wo gesucht wurde - ein Cron, der still stirbt, faellt niemandem auf. */
+$ac_ordner = getenv('LBPPLUGINDIR');
+if ($ac_ordner === false || $ac_ordner === '') { $ac_ordner = basename(__DIR__); }
+$ac_home = getenv('LBHOMEDIR');
+$ac_kandidaten = array();
+if ($ac_home) {
+    $ac_kandidaten[] = $ac_home . '/webfrontend/html/plugins/' . $ac_ordner . '/cam_lib.php';
+}
+$ac_kandidaten[] = dirname(dirname(dirname(__DIR__))) . '/webfrontend/html/plugins/'
+                 . basename(__DIR__) . '/cam_lib.php';
+$ac_kandidaten[] = dirname(__DIR__) . '/webfrontend/html/cam_lib.php';
+$ac_gefunden = false;
+foreach ($ac_kandidaten as $ac_kand) {
+    if (is_file($ac_kand)) { require_once $ac_kand; $ac_gefunden = true; break; }
+}
+if (!$ac_gefunden) {
+    fwrite(STDERR, "cam_cron.php: cam_lib.php nicht gefunden, gesucht in: "
+                   . implode(', ', $ac_kandidaten) . "
+");
+    exit(1);
+}
 
 $cfg = cam_config();
 $p = cam_paths();
