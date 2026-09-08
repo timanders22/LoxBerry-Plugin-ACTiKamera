@@ -85,6 +85,32 @@ function ac_post($name, $vorgabe = '')
     return (isset($_POST[$name]) && is_string($_POST[$name])) ? $_POST[$name] : $vorgabe;
 }
 
+/**
+ * Ein Satz, der die drei Aufbewahrungsgrenzen gegen den Archivbestand haelt.
+ *
+ * Steht an zwei Stellen: dauerhaft im Reiter Aufnahmen und in der Meldung
+ * nach dem Knopf "Alte Aufnahmen jetzt aufraeumen". EINE Quelle, damit beide
+ * nicht auseinanderlaufen.
+ */
+function ac_grenzen()
+{
+    if (!function_exists('cam_aufraeum_lage')) {
+        return '';
+    }
+    $l = cam_aufraeum_lage();
+    $un = cam_t('TEXT.UNBEGRENZT');
+    return sprintf(
+        cam_t('TEXT.GRENZEN'),
+        $l['tage'] > 0 ? sprintf(cam_t('TEXT.G_TAGE'), $l['tage']) : $un,
+        $l['anzahl'] > 0 ? sprintf(cam_t('TEXT.G_DATEIEN'), $l['anzahl']) : $un,
+        $l['mb'] > 0 ? sprintf(cam_t('TEXT.G_MB'), $l['mb']) : $un,
+        (int) $l['dateien'],
+        (int) round($l['bytes'] / 1048576),
+        $l['alter_tage'] >= 0 ? sprintf(cam_t('TEXT.G_ALTER'), $l['alter_tage'])
+                              : cam_t('TEXT.G_KEINE')
+    );
+}
+
 $ac_saved = false; $ac_note = ''; $ac_err = '';
 /* Ob eine Meldung rot oder gruen erscheint, entscheidet dieser Schalter -
    nicht die Suche nach einem deutschen Wort im Text (bis 1.9.16). */
@@ -244,7 +270,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['timelapsenow']) && fu
     $ac_tab = 'tab-test';
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cleanupnow']) && function_exists('cam_cleanup')) {
-    $ac_note = sprintf(cam_t('TEXT.M_AUFGERAEUMT'), (int) cam_cleanup());
+    /* Eine Zahl ohne ihren Grund ist keine Auskunft: hat der Lauf nichts
+       entfernt, sagt die Meldung, gegen welche Grenzen gemessen wurde und was
+       im Archiv liegt. Anlass: Frage des Hausherrn vom 08.09.2026. */
+    $ac_weg = (int) cam_cleanup();
+    $ac_note = $ac_weg > 0
+        ? sprintf(cam_t('TEXT.M_AUFGERAEUMT'), $ac_weg)
+        : cam_t('TEXT.M_AUFGERAEUMT_NICHTS') . ' ' . ac_grenzen();
     $ac_tab = 'tab-shots';
 }
 
@@ -364,6 +396,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
     $ac_new['pruef_minuten'] = max(cam_min('pruef_minuten'), min(cam_max('pruef_minuten'), (int) (isset($_POST['pruef_minuten']) ? $_POST['pruef_minuten'] : 5)));
     $ac_new['mindestpause'] = max(cam_min('mindestpause'), min(cam_max('mindestpause'), (int) (isset($_POST['mindestpause']) ? $_POST['mindestpause'] : 0)));
     $ac_new['timelapse'] = isset($_POST['timelapse']) ? 1 : 0;
+    /* Kaestchen an = feste Adresse bedienen, wie seit jeher. Das Kaestchen
+       steht im selben Formular wie timelapse; ein fehlendes Feld heisst
+       deshalb wirklich "abgewaehlt" und nicht "anderes Formular". */
+    $ac_new['bild_fest'] = isset($_POST['bild_fest']) ? 1 : 0;
     $ac_new['timelapse_time'] = preg_match('/^\d{1,2}:\d{2}$/', (string) (isset($_POST['timelapse_time']) ? $_POST['timelapse_time'] : '')) ? $_POST['timelapse_time'] : '12:00';
     $ac_new['ai_url'] = trim((string) (isset($_POST['ai_url']) ? $_POST['ai_url'] : ''));
     $ac_new['ai_min'] = max(cam_min('ai_min'), min(cam_max('ai_min'), (int) (isset($_POST['ai_min']) ? $_POST['ai_min'] : 50)));
@@ -518,8 +554,36 @@ if ($ac_rahmen) {
 .acw label { display: block; font-weight: 600; margin: 8px 0 2px; }
 .acw input[type=text], .acw input[type=password], .acw input[type=number], .acw select {
     width: 100%; padding: 7px 9px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; background: #fff; }
-.acw .sm-row { display: flex; gap: 14px; flex-wrap: wrap; }
-.acw .sm-row > div { flex: 1 1 210px; }
+/* Formularzeilen als Raster, nicht als Flussreihe.
+
+   Bis 1.9.18 war das eine flex-Reihe mit "flex: 1 1 210px". Zwei Folgen, am
+   08.09.2026 am Geraet gesehen: erstens wuchsen die Felder unterschiedlich
+   breit, und ein umgebrochenes fuenftes Feld ("Bilder je Sekunde im Clip")
+   zog sich ueber die ganze Zeile; zweitens standen die Eingabefelder auf
+   verschiedenen Hoehen, weil die Beschriftungen darueber ein, zwei oder drei
+   Zeilen lang sind.
+
+   Das Raster gibt allen Zellen dieselbe Breite (auto-fit klappt leere Spuren
+   weg, eine einzelne Zelle bekommt also weiter die volle Breite). Die Zellen
+   werden auf die Hoehe der Rasterzeile gedehnt (die Ausrichtung bleibt auf
+   dem Vorgabewert), und "margin-top: auto" am Eingabefeld schiebt es an den
+   unteren Rand seiner Zelle - damit stehen alle Eingabefelder einer Zeile auf
+   derselben Grundlinie, gleich wie hoch die Beschriftung darueber ist. Die
+   Zellen am unteren Rand auszurichten waere hier falsch: dann ist die Zelle
+   nur so hoch wie ihr Inhalt, und margin-top:auto hat nichts, wogegen es
+   druecken koennte (im Browser gemessen: bis zu 77 px Versatz, danach 0). */
+.acw .sm-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 14px; }
+.acw .sm-row > div { display: flex; flex-direction: column; }
+/* Die Beschriftung nimmt die ueberschuessige Hoehe auf, damit das Eingabefeld
+   darunter auf der Grundlinie der Nachbarzellen landet - auch wenn die
+   Beschriftung ein, zwei oder drei Zeilen lang ist. */
+.acw .sm-row > div > label { margin-bottom: 4px; flex: 1 1 auto; }
+.acw .sm-row > div > input, .acw .sm-row > div > select { flex: 0 0 auto; }
+/* Eine Zelle ueber die ganze Zeile - fuer lange Adressen. Bis 1.9.18 stand
+   dafuer ein "flex: 1 1 100%" als Attribut im HTML; im Raster wirkt das
+   nicht mehr, die betroffenen Felder rutschten in eine gewoehnliche Spalte. */
+.acw .sm-row > div.acw-breit { grid-column: 1 / -1; }
 .acw .sm-small { color: #666; font-size: 0.88em; line-height: 1.45; }
 .acw .sm-mono { font-family: monospace; background: #f4f4f4; padding: 1px 5px; border-radius: 4px; }
 .acw .sm-btn { background: #6dac20; color: #fff !important; border: 0; border-radius: 8px; padding: 9px 18px;
@@ -664,7 +728,7 @@ foreach ($ac_zeigen as $ac_i):
 <?php } ?>
 
 <div class="sm-row" style="margin-top:10px;">
-    <div style="flex:1 1 100%;">
+    <div class="acw-breit">
         <label><?php echo cam_t('TEXT.VOLLSTNDIGE_SCHNAPPSCHUSS_URL_EMPF'); ?></label>
         <input data-role="none" type="text" name="snapurl<?= $ac_s ?>" value="<?= ac_e($ac_k['snapurl']) ?>" placeholder="<?php echo cam_t('TEXT.HTTP'); ?>KAMERA/cgi-bin/encoder?<?php echo cam_t('TEXT.USER_PWD'); ?>SNAPSHOT=N1920x1080,100<?php echo cam_t('TEXT.DUMMY_N'); ?>">
 <?php if ($ac_i === 1) { ?>
@@ -672,7 +736,7 @@ foreach ($ac_zeigen as $ac_i):
         <b><?php echo cam_t('TEXT.HINWEIS'); ?></b> <?php echo cam_t('TEXT.DIESE_URL_ENTHLT_DAS_KAMERA_PASSWO'); ?><span class="sm-mono">chmod 600</span><?php echo cam_t('TEXT.UND_WIRD_IN_PROTOKOLL_UND_DIAGNOSE'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CAM_PHP'); ?></span> <?php echo cam_t('TEXT.OHNE_ZUGANGSDATEN'); ?></div>
 <?php } ?>
     </div>
-    <div style="flex:1 1 100%;">
+    <div class="acw-breit">
         <label><?php echo cam_t('TEXT.SCHNAPPSCHUSS_BEFEHL_NUR_DER_TEIL_'); ?> <span class="sm-mono">USER=…&amp;PWD=…&amp;</span> <?php echo cam_t('TEXT.WIRD_IGNORIERT_WENN_OBEN_EINE_URL_'); ?></label>
         <input data-role="none" type="text" name="snapcmd<?= $ac_s ?>" value="<?= ac_e($ac_k['snapcmd']) ?>" placeholder="SNAPSHOT=N1920x1080,100&amp;DUMMY=n">
 <?php if ($ac_i === 1) { ?>
@@ -693,11 +757,11 @@ foreach ($ac_zeigen as $ac_i):
     </div>
 </div>
 <div class="sm-row" style="margin-top:8px;">
-    <div style="flex:1 1 100%;">
+    <div class="acw-breit">
         <label><?php echo cam_t('TEXT.ADRESSE_DES_KAMERASTROMS_LEER'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CGI_BIN_CMD_SYSTEM_GET_STREAM'); ?></span>)</label>
         <input type="text" data-role="none" name="mjpeg_url<?= $ac_s ?>" value="<?= ac_e((string) $ac_k['mjpeg_url']) ?>">
     </div>
-    <div style="flex:1 1 100%;">
+    <div class="acw-breit">
         <label><?php echo cam_t('TEXT.RTSP_ADRESSE_LEER_BEI_DER_KAMERA_E'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.GET_STREAM'); ?></span>)</label>
         <input type="text" data-role="none" name="rtsp_url<?= $ac_s ?>" placeholder="<?php echo ac_e(cam_t('TEXT.P_RTSP')); ?>" value="<?= ac_e((string) $ac_k['rtsp_url']) ?>">
     </div>
@@ -854,6 +918,11 @@ foreach ($ac_zeigen as $ac_i):
 <label><?php echo cam_t('TEXT.TOKEN_OPTIONAL_DANN_NUR_MIT'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.T_TOKEN'); ?></span> <?php echo cam_t('TEXT.ABRUFBAR'); ?></label>
 <input type="text" data-role="none" name="stream_token" value="<?= ac_e((string) $ac_cfg['stream_token']) ?>">
 <p class="sm-hint"><?php echo cam_t('TEXT.TOKEN_HINWEIS_LOXONE'); ?></p>
+<div class="sm-row"><label><input data-role="none" type="checkbox" name="bild_fest" value="1"<?= !empty($ac_cfg['bild_fest']) ? ' checked' : '' ?>> <?php echo cam_t('TEXT.L_BILD_FEST'); ?></label></div>
+<p class="sm-hint"><?php echo cam_t('TEXT.H_BILD_FEST'); ?></p>
+<?php if (!empty($ac_cfg['bild_fest']) && trim((string) $ac_cfg['stream_token']) !== '') { ?>
+<div class="sm-warnung"><?php echo cam_t('TEXT.W_BILD_FEST'); ?></div>
+<?php } ?>
 <div style="margin-top:16px;"><button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button></div>
 </form>
 
@@ -917,11 +986,17 @@ if ($ac_gwf >= 2) { ?>
 
 <h3 class="sm-h3"><?php echo cam_t('MQTT.H_THEMEN'); ?></h3>
 <table class="sm-tbl">
-<tr><th><?php echo cam_t('MQTT.T_THEMA'); ?></th><th><?php echo cam_t('MQTT.T_BEDEUTUNG'); ?></th><th><?php echo cam_t('MQTT.T_WERT'); ?></th></tr>
+<tr><th><?php echo cam_t('MQTT.T_THEMA'); ?></th><th><?php echo cam_t('MQTT.T_BEDEUTUNG'); ?></th><th><?php echo cam_t('MQTT.T_RETAINED'); ?></th><th><?php echo cam_t('MQTT.T_WERT'); ?></th></tr>
+<?php /* Die Liste kommt aus cam_mqtt_themenliste(), nicht aus cam_felder():
+         cam_felder() fuehrt auch Felder, die gar nicht ueber MQTT gehen
+         (HERZ, seit 1.9.19 auch ALTER), und es fehlten umgekehrt die vier
+         Themen jeder Aufnahme und das Lebenszeichen. Der Reiter Test haelt
+         diese Liste gegen die cam_mqtt()-Aufrufe im Quelltext. */ ?>
 <?php $ac_w = cam_werte(); ?>
-<?php foreach (cam_felder() as $ac_n => $ac_d) { ?>
+<?php foreach (cam_mqtt_themenliste() as $ac_n => $ac_d) { ?>
 <tr><td><span class="sm-mono"><?= ac_e($ac_cfg['mqtt_topic']) ?>/<?= ac_e($ac_n) ?></span></td>
-    <td><?php echo cam_t($ac_d[3]); ?></td>
+    <td><?php echo cam_t($ac_d[1]); ?></td>
+    <td><?php echo cam_t($ac_d[0] ? 'MQTT.RET_JA' : 'MQTT.RET_NEIN'); ?></td>
     <td><?= isset($ac_w[$ac_n]) ? ac_e($ac_w[$ac_n]) : '&mdash;' ?></td></tr>
 <?php } ?>
 </table>
@@ -1029,9 +1104,26 @@ foreach (cam_felder() as $ac_fn => $ac_fd) {
 </div>
 
 <div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_5_BILD_IN_DER_APP_ANZEIGEN'); ?></b><br>
-<?php echo cam_t('TEXT.DAS_JEWEILS_LETZTE_BILD_LIEGT_UNTE'); ?> 
+<?php
+/* Die Adresse haengt seit 1.9.19 an zwei Schaltern: ist die feste Adresse
+   abgeschaltet, gibt es sie nicht mehr, und ist ein Stromkennwort gesetzt,
+   verlangt cam.php?letztes=1 das Token. Beides hier zeigen statt einen Text
+   stehen zu lassen, der auf dieser Anlage nicht mehr stimmt. */
+$ac_stok_l = trim((string) $ac_cfg['stream_token']);
+// Vollstaendige Adresse zum Abschreiben, mit Token, wenn es eines gibt.
+$ac_letztes_adr = 'http://' . ac_e($ac_host) . '/plugins/' . ac_e($ac_plugin)
+    . ($ac_stok_l !== ''
+        ? cam_t('TEXT.CAM_PHP_LETZTES_1T') . ac_e($ac_stok_l)
+        : '/' . cam_t('TEXT.CAM_PHP_LETZTES_1'));
+?>
+<?php if (!empty($ac_cfg['bild_fest'])) { ?>
+<?php echo cam_t('TEXT.DAS_JEWEILS_LETZTE_BILD_LIEGT_UNTE'); ?>
 <span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.LETZTESBILD_JPG'); ?></span>
-<?php echo cam_t('TEXT.ALTERNATIV'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CAM_PHP_LETZTES_1'); ?></span><?php echo cam_t('TEXT.DIESE_ADRESSE_ENTHLT_KEINE_ZUGANGS'); ?>
+<?php echo cam_t('TEXT.ALTERNATIV'); ?> <span class="sm-mono"><?= $ac_letztes_adr ?></span><?php echo cam_t('TEXT.DIESE_ADRESSE_ENTHLT_KEINE_ZUGANGS'); ?>
+<?php } else { ?>
+<?php echo cam_t('TEXT.BILD_NUR_MIT_TOKEN'); ?>
+<span class="sm-mono"><?= $ac_letztes_adr ?></span>
+<?php } ?>
 <div class="sm-small" style="margin-top:4px;"><b><?php echo cam_t('TEXT.DAMIT_VERSCHWINDET_DAS_KAMERA_PASS'); ?></b>
 <?php echo cam_t('TEXT.BISHER_STAND_DORT_TYPISCHERWEISE'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.HTTP_KAMERA_CGI_BIN_ENCODER_USER_A'); ?></span><?php echo cam_t('TEXT.DIESEN_EINTRAG_KANN_MAN_NACH_DEM_U'); ?></div>
 </div>
@@ -1096,8 +1188,21 @@ foreach (cam_felder() as $ac_fn => $ac_fd) {
    einmal oben gesetzt, gleich nach dem Aktionstoken. */
 $ac_dir = function_exists('cam_datadir') ? cam_datadir() : '';
 ?>
-<div class="sm-small" style="margin-bottom:8px;"><?php echo cam_t('TEXT.TAGE_ABLAGE'); ?> <span class="sm-mono"><?= ac_e($ac_dir) ?></span> &mdash;
-<?php echo cam_t('TEXT.BILDSERIEN_AUFBEWAHRUNG'); ?> <?= (int) $ac_cfg['keep_days'] ?> <?php echo cam_t('TEXT.TAGE'); ?></div>
+<div class="sm-small" style="margin-bottom:8px;"><?php echo cam_t('TEXT.TAGE_ABLAGE'); ?> <span class="sm-mono"><?= ac_e($ac_dir) ?></span><br>
+<?= ac_grenzen() ?></div>
+<?php
+/* Wie viele Kacheln? Bis 1.9.18 stand hier fest die 12, ohne Weg zu mehr -
+   und die Zeile darunter sagte "die zwoelf neuesten", ohne zu sagen, dass es
+   dabei bleibt. Grund fuer die kleine Zahl: die Galerie hat keine
+   Vorschaubilder, jede Kachel laedt ueber cam.php?bild= die VOLLE Datei
+   (auf der gemessenen Anlage rund 690 kB). Deshalb bleibt 12 die Vorgabe,
+   und mehr gibt es auf Wunsch. loading="lazy" laedt nur, was sichtbar ist. */
+$ac_stufen = array(12, 48, 200);
+$ac_zeige = 12;
+if (isset($_GET['zeige']) && in_array((int) $_GET['zeige'], $ac_stufen, true)) {
+    $ac_zeige = (int) $_GET['zeige'];
+}
+?>
 <?php
 /* Je Kamera ein eigener Abschnitt. Die Adressen tragen &kamera=, damit der
    Archivendpunkt im richtigen Ordner sucht - bilder, bilder2, ... */
@@ -1112,7 +1217,7 @@ foreach (cam_kameras() as $ac_kamgal):
 <div class="sm-small" style="margin-bottom:8px;"><?php echo cam_t('TEXT.GESPEICHERT'); ?> <b><?= count($ac_bilder) ?></b> <?php echo cam_t('TEXT.BILDER'); ?> <b><?= count($ac_clips) ?></b> <?php echo cam_t('TEXT.BILDSERIEN'); ?></div>
 <?php if ($ac_bilder) { ?>
 <div class="sm-gal">
-<?php foreach (array_slice($ac_bilder, 0, 12) as $ac_f) {
+<?php foreach (array_slice($ac_bilder, 0, $ac_zeige) as $ac_f) {
     $ac_n = basename($ac_f); ?>
 <figure>
     <a href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?bild=<?= rawurlencode($ac_n) ?><?= $ac_kg ?><?= $ac_bt ?>" target="_blank">
@@ -1132,7 +1237,14 @@ foreach (cam_kameras() as $ac_kamgal):
 <?php } ?></table>
 <?php } ?>
 <?php endforeach; ?>
-<div class="sm-small"><?php echo cam_t('TEXT.ANGEZEIGT_WIRD_DAS_JEWEILS_NEUESTE'); ?></div>
+<div class="sm-small"><?= sprintf(cam_t('TEXT.ANGEZEIGT_WIRD_DAS_JEWEILS_NEUESTE'), (int) $ac_zeige) ?>
+<?php echo cam_t('TEXT.MEHR_ZEIGEN'); ?>
+<?php /* NICHT $ac_st als Schleifenvariable: das ist der Zustand aus
+         cam_state(), weiter unten im Reiter Test gelesen. */ ?>
+<?php foreach ($ac_stufen as $ac_stufe) {
+    if ($ac_stufe === $ac_zeige) { ?><b><?= (int) $ac_stufe ?></b>
+<?php } else { ?><a href="index.php?form=shots&amp;zeige=<?= (int) $ac_stufe ?>"><?= (int) $ac_stufe ?></a>
+<?php } } ?></div>
 <form action="index.php" method="post" style="margin-top:10px;">
     <input data-role="none" type="hidden" name="cleanupnow" value="1">
     <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">

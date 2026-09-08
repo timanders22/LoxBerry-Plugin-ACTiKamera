@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.18 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.19 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -31,7 +31,9 @@ Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 - **Bildserie** („Clip") über mehrere Sekunden, ohne ffmpeg oder Zusatzpakete —
   sie setzt danach dieselben Werte wie ein Einzelbild, also auch `PUSHAKTIV`
 - **Letztes Bild unter fester Adresse** (`letztesbild.jpg`) für Kamera-Kachel,
-  Webseiten-Baustein oder Push-Anhang — ohne Zugangsdaten in der URL
+  Webseiten-Baustein oder Push-Anhang — ohne Zugangsdaten in der URL. Seit
+  1.9.19 abschaltbar: dann gibt es das Bild nur über `cam.php?letztes=1`, und
+  mit gesetztem Stromkennwort nur mit Token
 - **Ausfallerkennung**: das Plugin fragt die Kamera in einstellbarem Takt, ob sie
   antwortet, und meldet `ERREICHBAR` sowie `FEHLER` (fehlgeschlagene Prüfungen in
   Folge) an Loxone. Bleibt der Minutentakt selbst stehen, wächst `HERZ`
@@ -184,7 +186,7 @@ Token HTTP 403 und `SELFTEST;OK=0;ERR=TOKEN`.
 |---|---|---|
 | `/plugins/actikamera/cam.php` | nein | Loxone-Zeile `ACTI;OK=..;ALTER=..;PUSHAKTIV=..;…` |
 | `…/cam.php?json=1` | nein | Zustand als JSON |
-| `…/cam.php?letztes=1` | nein | letztes Bild als JPEG |
+| `…/cam.php?letztes=1` | nein¹ | letztes Bild als JPEG (seit 1.9.19) |
 | `…/cam.php?bild=<Datei>` | nein¹ | eine bestimmte gespeicherte Aufnahme |
 | `…&kamera=<n>` | — | an jedem Aufruf: welche Kamera gemeint ist (ohne Angabe die erste) |
 | `…/cam.php?serie=<Ordner>&nr=<n>` | nein¹ | ein Bild aus einer Bildserie |
@@ -203,7 +205,9 @@ Token HTTP 403 und `SELFTEST;OK=0;ERR=TOKEN`.
 | `…/e.php?t=<Auslöse-Token>` | **ja²** | kurzer Auslöser für Geräte mit knappem Adressfeld |
 
 ¹ Lesend, deshalb ohne Aktionstoken. Ist in den Einstellungen ein **Stromkennwort**
-hinterlegt, verlangen diese Aufrufe zusätzlich `&t=<Kennwort>`.
+hinterlegt, verlangen diese Aufrufe zusätzlich `&t=<Kennwort>`. Bis 1.9.18 galt das
+für `?letztes=1` **nicht** — am 06.09.2026 an der Anlage gemessen: `?bild=…`
+antwortete mit HTTP 403, `?letztes=1` mit HTTP 200 und dem aktuellen Bild.
 
 ² Eigenes, kurzes Token je Kamera — es darf **nur** aufnehmen, nicht aufräumen
 und nicht die Diagnose lesen.
@@ -247,6 +251,63 @@ so wie die Zweitschrift der Konfiguration es seit jeher tut. Ein eigener Ort
 > Handgriff vorher, auf dem LoxBerry:
 >
 >     mv /opt/loxberry/data/plugins/actikamera /opt/loxberry/data/plugins/actikamera.archiv
+
+## Fassung 1.9.19 — am Gerät nachgemessen (06.09.2026)
+
+Seit dem 05.09.2026 lässt sich am laufenden LoxBerry messen statt zu vermuten.
+Acht Punkte kamen dabei heraus; sieben sind hier behoben, der achte ist eine
+Einstellung.
+
+**Das aktuelle Bild hängt jetzt am Stromkennwort.** Gemessen an der Anlage:
+`cam.php?bild=…` antwortete ohne Token mit **HTTP 403**, `cam.php?letztes=1`
+dagegen mit **HTTP 200** und 704 137 Byte — dem aktuellen Bild der Haustür, von
+jedem Gerät im Heimnetz. Der Grund: das Tor in `cam.php` prüfte `bild`, `serie`
+und `zeitraffer`, `letztes` stand dahinter. Jetzt steht es mit darin. **Das gilt
+nur, wenn ein Stromkennwort gesetzt ist** — ohne eines ändert sich nichts.
+
+**Der Webordner lässt sich nicht mehr auflisten.** Ein Aufruf von
+`/plugins/actikamera/` lieferte eine „Index of“-Liste, weil LoxBerry den
+`html`-Baum mit `Options +Indexes` fährt. Ein `index.php`, das mit 403
+antwortet, beendet das — dasselbe Muster wie im Intercom-Plugin.
+
+**Das letzte Bild liegt jetzt maßgeblich im Archiv**, das ein Update überlebt;
+die feste Adresse im Webordner wird zusätzlich bedient. Der neue Schalter
+*Letztes Bild unter der festen Adresse anbieten* steht ab Werk **an** — für jede
+bestehende Anlage ändert sich also nichts. Wer ihn herausnimmt, bekommt das
+Bild nur noch über `cam.php?letztes=1`, eine dort liegengebliebene Datei wird
+einmal entfernt und gemeldet. Der Reiter *Test* sagt, wenn ein Stromkennwort
+gesetzt ist und die feste Adresse trotzdem offensteht.
+
+**MQTT: Zustände gehen jetzt zurückbehalten (retained) hinaus.** Dass der
+UDP-Eingang des MQTT-Gateways `retain <thema> <wert>` genauso versteht wie
+`publish`, ist am laufenden Gateway belegt — an der Quelle
+(`mqttgateway.pl`, `sub udpin`) und mit einer Probe, bei der die
+`publish`-Zeile nicht stehenblieb und die `retain`-Zeile schon. Damit steht
+der Zustand der Kamera nach einem Neustart des Brokers sofort wieder an.
+
+**Das Lebenszeichen geht nie retained hinaus** und trägt nur noch `online` und
+`ts`. Bis 1.9.18 hingen `erreichbar`, `fehler` und `name` in Kleinschreibung
+mit darin — drei Themen, die in keiner Themenliste standen. Dieselben Werte
+liefert der Zustandsweg unter ihren dokumentierten Namen `ERREICHBAR` und
+`FEHLER`.
+
+**`ALTER` geht nicht mehr über MQTT.** Der Wert ändert sich jede Minute und kam
+damit an dem Filter vorbei, der nur Änderungen sendet (gemessen: `acti/ALTER`
+47, eine Minute später 48). Wie alt die letzte Aufnahme ist, sagt das
+zurückbehaltene Thema `zeit` — ein Zeitstempel, aus dem der Miniserver das
+Alter selbst rechnet. **Wer in Loxone einen virtuellen Eingang auf `acti/ALTER`
+gebaut hat, stellt ihn auf `acti/zeit` um.** In der Antwortzeile des virtuellen
+HTTP-Eingangs steht `ALTER` unverändert.
+
+**Die Themenliste im Reiter *Einbindung in Loxone* ist vollständig** — sie
+kommt aus einer Funktion, nennt zu jedem Thema, ob es retained ist, und der
+Reiter *Test* hält sie gegen die `cam_mqtt()`-Aufrufe im Quelltext.
+
+**Nicht geändert, weil es eine Einstellung ist:** Auf der gemessenen Anlage
+liegen 2 804 Bilder mit 1,8 GB im Archiv, weil die Kamera sich alle 20–25
+Sekunden selbst auslöst und die **Mindestpause auf dem Vorgabewert 0** steht.
+Wer das nicht will, setzt sie auf den Auslösetakt der Kamera und dazu eine
+Größengrenze (`keep_mb`).
 
 ## Fassung 1.9.17 — die Durchsicht vom 04.09.2026
 

@@ -124,20 +124,54 @@ if ($anlass === '') {
     $anlass = 'manuell';
 }
 
-/* Eine bestimmte gespeicherte Aufnahme ausliefern.
+/* Eine gespeicherte Aufnahme oder das letzte Bild ausliefern.
  *
  * Lesender Aufruf, deshalb ohne Aktionstoken - er aendert nichts. Ist aber ein
  * Stromkennwort hinterlegt, gilt es hier ebenso: es sind Bilder der eigenen
  * Haustuer, und wer den Strom schuetzt, will auch das Archiv geschuetzt haben.
+ *
+ * ?letztes=1 stand bis 1.9.18 AUSSERHALB dieses Tors. Am 06.09.2026 am Geraet
+ * gemessen: bei gesetztem Stromkennwort antwortete ?bild=... mit 403,
+ * ?letztes=1 aber mit 200 und 704 137 Byte - dem aktuellen Bild der Haustuer,
+ * von jedem Geraet im Heimnetz, ohne Anmeldung. Die Sprachdatei hielt die
+ * Adresse mit Token (TEXT.CAM_PHP_LETZTES_1T) schon bereit, benutzt hat sie
+ * niemand. Das Tor gilt weiter nur, WENN ein Stromkennwort gesetzt ist - ohne
+ * eines aendert sich nichts.
  */
-if (isset($_GET['bild']) || isset($_GET['serie']) || isset($_GET['zeitraffer'])) {
+if (isset($_GET['bild']) || isset($_GET['serie']) || isset($_GET['zeitraffer'])
+    || isset($_GET['letztes'])) {
     $ac_scfg = cam_config();
     $ac_stok = (string) $ac_scfg['stream_token'];
     if ($ac_stok !== '' && !hash_equals($ac_stok, ac_get('t'))) {
-        ac_weg('Archivabruf abgewiesen, Stromkennwort falsch oder fehlend');
+        ac_weg('Bildabruf abgewiesen, Stromkennwort falsch oder fehlend');
         header('HTTP/1.1 403 Forbidden');
         header('Content-Type: text/plain; charset=utf-8');
         echo "Zugriff verweigert: falsches oder fehlendes Token.\n";
+        exit;
+    }
+    /* Das letzte Bild ist keine Archivdatei: es liegt unter der festen Adresse
+       im Webordner und wird bei jeder Aufnahme ueberschrieben. Deshalb hier
+       heraus, bevor cam_archivdatei() danach sucht. */
+    if (isset($_GET['letztes'])) {
+        /* Massgeblich ist seit 1.9.19 die Ablage im Archiv - sie ueberlebt das
+           Update. Die Datei im Webordner ist der Rueckfall fuer den ersten
+           Lauf nach der Aktualisierung, solange noch keine neue Aufnahme
+           entstanden ist. */
+        $ac_f = cam_letztesbild_archiv($ac_kam);
+        if (!is_file($ac_f)) {
+            $ac_f = cam_letztesbild_web($ac_kam);
+        }
+        if (is_file($ac_f)) {
+            header('Content-Type: image/jpeg');
+            header('Content-Length: ' . filesize($ac_f));
+            header('Cache-Control: no-store');
+            readfile($ac_f);
+            exit;
+        }
+        ac_weg('Letztes Bild abgerufen, es gibt noch keines (Kamera ' . $ac_kam . ')');
+        header('HTTP/1.1 404 Not Found');
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "Noch kein Bild vorhanden.\n";
         exit;
     }
     if (isset($_GET['serie'])) {
@@ -160,21 +194,6 @@ if (isset($_GET['bild']) || isset($_GET['serie']) || isset($_GET['zeitraffer']))
     // Eine Archivdatei aendert sich nicht mehr - der Browser darf sie behalten.
     header('Cache-Control: private, max-age=86400');
     readfile($ac_d);
-    exit;
-}
-
-if (isset($_GET['letztes'])) {
-    $p = cam_paths();
-    $f = $p['web'] . '/letztesbild' . cam_sx($ac_kam) . '.jpg';
-    if (is_file($f)) {
-        header('Content-Type: image/jpeg');
-        header('Cache-Control: no-store');
-        readfile($f);
-        exit;
-    }
-    header('HTTP/1.1 404 Not Found');
-    header('Content-Type: text/plain; charset=utf-8');
-    echo "Noch kein Bild vorhanden.\n";
     exit;
 }
 

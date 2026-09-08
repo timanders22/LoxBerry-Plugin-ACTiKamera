@@ -20,7 +20,11 @@
  */
 /* WARUM DIESE DATEI UNTER bin/ LIEGT (1.9.17)
  * Bis 1.9.16 lag sie in webfrontend/html/ und wurde von cron.01min ueber
- * REPLACELBPHTMLDIR gerufen - also aus dem UNANGEMELDETEN Webordner. Sie
+ * den HTML-Ordner des Plugins gerufen - also aus dem UNANGEMELDETEN
+ * Webordner. (Der Platzhaltername steht hier absichtlich NICHT ausgeschrieben:
+ * der Installer ersetzt ihn auch im Kommentar, dann weicht die installierte
+ * Datei vom Archiv ab und jeder byteweise Vergleich schlaegt an. Gemessen
+ * 06.09.2026 am Geraet: md5 e4ca1205 statt 6b6b59c7.) Sie
  * war damit fuer jedes Geraet im Heimnetz per HTTP erreichbar und prueft
  * kein Token: ein anonymer Aufruf schrieb den Herzschlag (HERZ sprang von
  * -1 auf 0, gemessen), stiess cam_timelapse() an und konnte ueber
@@ -144,12 +148,14 @@ cam_mqtt_zustand();
  * Loxone sieht ein toter Dienst genauso aus wie ein ruhiges Haus. In Loxone
  * gehoert dazu eine Einschaltverzoegerung deutlich ueber dem Takt, damit ein
  * einzelner verpasster Durchlauf keine Meldung ausloest. */
-$ac_herz = array('online' => 1, 'ts' => date('c'));
-foreach (cam_kameras() as $ac_id) {
-    $ac_s = cam_sx($ac_id);
-    $ac_z = cam_betrieb($ac_id);
-    $ac_herz['erreichbar' . $ac_s] = (int) $ac_z['erreichbar'];
-    $ac_herz['fehler' . $ac_s] = (int) $ac_z['fehler'];
-    $ac_herz['name' . $ac_s] = cam_kname($ac_id);
-}
-cam_mqtt($ac_herz);
+/* Das Lebenszeichen traegt seit 1.9.19 nur noch online und ts.
+ *
+ * Bis 1.9.18 hingen erreichbar<N>, fehler<N> und name<N> mit darin - drei
+ * Themen in KLEINSCHREIBUNG, die in keiner Themenliste des Reiters
+ * "Einbindung in Loxone" stehen (die Liste kennt nur ERREICHBAR und FEHLER
+ * aus der Feldtabelle). Am 06.09.2026 am Broker gemessen: in 130 Sekunden
+ * gingen acti/erreichbar, acti/fehler und acti/name je zweimal hinaus,
+ * waehrend acti/ERREICHBAR gar nicht kam. Dieselben Werte liefert
+ * cam_mqtt_zustand() weiter oben unter ihren dokumentierten Namen - und seit
+ * 1.9.19 retained, also auch nach einem Neustart des Brokers sofort da. */
+cam_mqtt(array('online' => 1, 'ts' => date('c')));

@@ -160,6 +160,75 @@ function cam_kdatei($id, $name, $endung)
     return cam_datadir() . '/' . $name . cam_sx($id) . '.' . $endung;
 }
 
+/**
+ * Wo das jeweils letzte Bild liegt.
+ *
+ * Bis 1.9.18 gab es davon nur EINE Ablage: den unangemeldeten Webordner. Das
+ * hatte zwei Folgen. Erstens war das aktuelle Bild der Haustuer fuer jedes
+ * Geraet im Heimnetz abrufbar, auch bei gesetztem Stromkennwort (am
+ * 06.09.2026 am Geraet gemessen: HTTP 200, 704 137 Byte). Zweitens raeumt der
+ * Installer webfrontend/ bei jedem Update ab - die Datei war danach fort,
+ * waehrend letztesbild.json weiter ein Bild behauptete.
+ *
+ * Seit 1.9.19 ist das Archiv die massgebliche Ablage; es liegt neben dem
+ * Datenordner und ueberlebt das Update. Die feste Adresse im Webordner wird
+ * zusaetzlich bedient, solange bild_fest auf 1 steht - das ist die Vorgabe,
+ * an ihr haengen Kamera-Kacheln und Webseiten-Bausteine.
+ */
+function cam_letztesbild_archiv($id)
+{
+    return cam_kdatei($id, 'letztesbild', 'jpg');
+}
+
+function cam_letztesbild_web($id)
+{
+    $p = cam_paths();
+    return $p['web'] . '/letztesbild' . cam_sx($id) . '.jpg';
+}
+
+/**
+ * Die feste Adresse des letzten Bildes - EINE Quelle fuer Oberflaeche,
+ * Webhook und Anleitung.
+ *
+ * Leer, wenn die feste Adresse abgeschaltet ist: eine Adresse zu verschicken,
+ * hinter der 404 steht, ist schlechter als gar keine.
+ */
+function cam_bildurl($id = 1, $host = null)
+{
+    $cfg = cam_config();
+    if (empty($cfg['bild_fest'])) {
+        return '';
+    }
+    if ($host === null) {
+        $host = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'loxberry';
+    }
+    /* Der Ordnername kommt aus der Umgebung, nicht aus einer festen
+       Zeichenkette - ueberall sonst im Plugin wird LBPPLUGINDIR ausgewertet.
+       Bei abweichendem Ordnernamen zeigte die verschickte Bildadresse ins
+       Leere. */
+    $ordner = getenv('LBPPLUGINDIR') ?: basename(dirname(__FILE__));
+    return 'http://' . $host . '/plugins/' . $ordner
+         . '/letztesbild' . cam_sx($id) . '.jpg';
+}
+
+/** Rueckgabe: true, wenn wenigstens eine Ablage geschrieben wurde. */
+function cam_letztesbild_ablegen($id, $body)
+{
+    $ok = cam_schreibe_unteilbar(cam_letztesbild_archiv($id), $body);
+    $cfg = cam_config();
+    $web = cam_letztesbild_web($id);
+    if (!empty($cfg['bild_fest'])) {
+        return cam_schreibe_unteilbar($web, $body) || $ok;
+    }
+    /* Abgeschaltet: eine stehengebliebene Datei aus frueheren Laeufen waere
+       sonst fuer immer unter der offenen Adresse abrufbar. Einmal melden,
+       nicht bei jeder Aufnahme. */
+    if (is_file($web) && @unlink($web)) {
+        cam_log('Feste Bildadresse ist abgeschaltet - ' . basename($web) . ' entfernt');
+    }
+    return $ok;
+}
+
 function cam_paths()
 {
     $lbhomedir = getenv('LBHOMEDIR') ?: lb_wurzel_ermitteln();
@@ -225,6 +294,14 @@ function cam_vorgaben()
     'pruef_minuten' => 5,        // Takt der Erreichbarkeitspruefung (0 = aus)
     'mindestpause' => 0,         // Sekunden zwischen zwei Aufnahmen von aussen (0 = aus)
     'keep_mb' => 0,              // Hoechstgroesse des Archivs in MB (0 = unbegrenzt)
+    /* 1 = das letzte Bild liegt zusaetzlich unter der festen Adresse
+       /plugins/<ordner>/letztesbild.jpg im UNANGEMELDETEN Webordner. Das ist
+       der Zustand seit jeher und bleibt die Vorgabe - eine Kamera-Kachel, ein
+       Webseiten-Baustein oder ein Push-Anhang haengt daran. Wer 0 waehlt,
+       bekommt das Bild nur noch ueber cam.php?letztes=1 (und damit, wenn ein
+       Stromkennwort gesetzt ist, nur mit Token). Neue Funktion, ab Werk aus:
+       0 aendert das Verhalten, 1 nicht. */
+    'bild_fest' => 1,
 );
 }
 
@@ -334,6 +411,7 @@ function cam_wertregeln()
         'archiv_pfad'     => array('art' => 'text', 'max' => 512),
         'pruef_minuten'   => array('art' => 'zahl', 'min' => 0, 'max' => 1440),
         'mindestpause'    => array('art' => 'zahl', 'min' => 0, 'max' => 3600),
+        'bild_fest'       => array('art' => 'zahl', 'min' => 0, 'max' => 1),
     );
 }
 
@@ -1531,8 +1609,7 @@ function cam_snapshot($anlass = 'manuell', $id = 1)
     }
     // Immer auch als "letztes Bild" ablegen - das holt sich Loxone.
     // Unteilbar, weil mehrere Ausloeser gleichzeitig hier ankommen koennen.
-    $p = cam_paths();
-    cam_schreibe_unteilbar($p['web'] . '/letztesbild' . $sx . '.jpg', $body);
+    cam_letztesbild_ablegen($id, $body);
     cam_log('Schnappschuss gespeichert, ' . cam_kname($id) . ' (' . $anlass . '): '
         . $name . ', ' . round(strlen($body) / 1024) . ' kB, Weg: ' . $weg);
 
@@ -1615,8 +1692,7 @@ function cam_clip($anlass = 'klingel', $id = 1)
      * ohne Aufnahme dahinter waere eine Falschaussage an Loxone.
      */
     if ($n > 0 && $letztes !== false) {
-        $p = cam_paths();
-        cam_schreibe_unteilbar($p['web'] . '/letztesbild' . $sx . '.jpg', $letztes);
+        cam_letztesbild_ablegen($id, $letztes);
         $objekte = cam_ai($letzter_pfad);
         if ($objekte) {
             cam_log('Erkannt: ' . implode(', ', $objekte));
@@ -1641,6 +1717,53 @@ function cam_clip($anlass = 'klingel', $id = 1)
  * Archiv aufraeumen: nach Alter UND nach Hoechstzahl je Archiv.
  * Die jeweils neuesten Dateien bleiben immer erhalten.
  */
+/**
+ * Die Lage des Archivs gegen die drei Grenzen.
+ *
+ * Anlass: am 08.09.2026 fragte der Hausherr, warum "Alte Aufnahmen jetzt
+ * aufraeumen" nichts tut. Die Antwort war richtig - nach keiner der drei
+ * Grenzen war etwas alt (Aufbewahrung 90 Tage, aelteste Aufnahme 20 Tage;
+ * Anzahl und Groesse standen auf 0, also unbegrenzt) - aber die Meldung
+ * "0 alte Aufnahmen entfernt" sagte das nicht. Eine Zahl ohne ihren Grund
+ * ist keine Auskunft.
+ *
+ * Rein lesend.
+ */
+function cam_aufraeum_lage()
+{
+    $cfg = cam_config();
+    $aus = array(
+        'tage'    => (int) $cfg['keep_days'],
+        'anzahl'  => (int) $cfg['keep_max'],
+        'mb'      => (int) $cfg['keep_mb'],
+        'dateien' => 0,
+        'bytes'   => 0,
+        'aeltestes' => 0,      // Unix-Zeit, 0 = keine Datei
+    );
+    foreach (cam_kameras() as $id) {
+        $sx = cam_sx($id);
+        foreach (array('/bilder' . $sx . '/*.jpg', '/timelapse' . $sx . '/*.jpg',
+                       '/clips' . $sx . '/*/*.jpg') as $muster) {
+            foreach (glob(cam_datadir() . $muster) ?: array() as $f) {
+                $aus['dateien']++;
+                $aus['bytes'] += (int) @filesize($f);
+                $m = (int) @filemtime($f);
+                if ($m > 0 && ($aus['aeltestes'] === 0 || $m < $aus['aeltestes'])) {
+                    $aus['aeltestes'] = $m;
+                }
+            }
+        }
+    }
+    $aus['alter_tage'] = $aus['aeltestes'] > 0
+        ? (int) floor((time() - $aus['aeltestes']) / 86400) : -1;
+    /* Wuerde ueberhaupt eine der drei Grenzen greifen? Die Frage beantwortet
+       die Meldung nach dem Knopfdruck - und der Reiter, auch ohne Knopfdruck. */
+    $aus['greift'] = ($aus['tage'] > 0 && $aus['alter_tage'] >= $aus['tage'])
+        || ($aus['anzahl'] > 0 && $aus['dateien'] > $aus['anzahl'])
+        || ($aus['mb'] > 0 && $aus['bytes'] > $aus['mb'] * 1024 * 1024);
+    return $aus;
+}
+
 function cam_cleanup()
 {
     $cfg = cam_config();
@@ -1924,13 +2047,8 @@ function cam_webhook2_parameter()
 function cam_webhooks($name, $anlass, $objekte, $id = 1)
 {
     $cfg = cam_config();
-    /* Der Ordnername kommt aus der Umgebung, nicht aus einer festen
-       Zeichenkette - ueberall sonst im Plugin wird LBPPLUGINDIR ausgewertet.
-       Bei abweichendem Ordnernamen zeigte die verschickte Bildadresse ins
-       Leere. */
-    $ac_ordner = getenv('LBPPLUGINDIR') ?: basename(dirname(__FILE__));
-    $bildurl = 'http://' . (isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'loxberry')
-             . '/plugins/' . $ac_ordner . '/letztesbild' . cam_sx($id) . '.jpg';
+    // Eine Quelle fuer die Adresse - siehe cam_bildurl().
+    $bildurl = cam_bildurl($id);
     $daten = cam_webhook_daten($name, $anlass, $objekte, $id, $bildurl);
     if (trim((string) $cfg['webhook1']) !== '' && function_exists('curl_init')) {
         $ch = curl_init(trim((string) $cfg['webhook1']));
@@ -2173,21 +2291,179 @@ function cam_basisfelder()
        Plugin (0)? Ein Test-Push und ein Minutentakt gibt es einmal - stuenden
        sie je Kamera da, saehe man auf einer Anlage mit vier Kameras viermal
        denselben Wert und hielte ihn fuer vier Messungen. */
+    /* Achte Spalte: geht das Thema RETAINED hinaus? Hausstandard seit
+       03.09.2026 (Regeln/07): Zustaende retained, Messwerte mit Zeitbezug
+       nicht, das Lebenszeichen nie. Am 06.09.2026 am laufenden Gateway
+       gemessen, dass "retain <thema> <wert>" auf demselben UDP-Weg wirkt wie
+       "publish" (mqttgateway.pl, sub udpin, Zeilen 224-228 und 353).
+
+       ALTER hat deshalb in der sechsten Spalte jetzt eine 0: der Wert aendert
+       sich jede Minute und kam damit am Doppelt-senden-Filter immer vorbei
+       (gemessen: acti/ALTER 47, eine Minute spaeter 48). Wie alt die letzte
+       Aufnahme ist, sagt seit 1.9.19 das retained Thema "zeit" - ein
+       absoluter Zeitstempel, den der Miniserver selbst verrechnet. In der
+       HTTP-Antwortzeile bleibt ALTER unveraendert stehen. */
     return array(
-        'OK'         => array(0, 0, 1, 'FELD.OK', '', 1, 1),
-        'ALTER'      => array(1, -1, 100000, 'FELD.ALTER', '<v.1> min', 1, 1),
-        'BILDER'     => array(1, 0, 100000, 'FELD.BILDER', '', 1, 1),
-        'CLIPS'      => array(1, 0, 100000, 'FELD.CLIPS', '', 1, 1),
-        'ZEITRAFFER' => array(1, 0, 100000, 'FELD.ZEITRAFFER', '', 1, 1),
-        'PERSON'     => array(0, 0, 1, 'FELD.PERSON', '', 1, 1),
-        'OBJEKTE'    => array(1, 0, 100, 'FELD.OBJEKTE', '', 1, 1),
-        'PUSH'       => array(0, 0, 1, 'FELD.PUSH', '', 1, 0),
-        'PUSHAKTIV'  => array(0, 0, 1, 'FELD.PUSHAKTIV', '', 1, 1),
-        'PTEST'      => array(0, 0, 1, 'FELD.PTEST', '', 1, 0),
-        'ERREICHBAR' => array(0, -1, 1, 'FELD.ERREICHBAR', '', 1, 1),
-        'FEHLER'     => array(1, 0, 100000, 'FELD.FEHLER', '', 1, 1),
-        'HERZ'       => array(1, -1, 100000, 'FELD.HERZ', '<v.1> min', 0, 0),
+        'OK'         => array(0, 0, 1, 'FELD.OK', '', 1, 1, 1),
+        'ALTER'      => array(1, -1, 100000, 'FELD.ALTER', '<v.1> min', 0, 1, 0),
+        'BILDER'     => array(1, 0, 100000, 'FELD.BILDER', '', 1, 1, 1),
+        'CLIPS'      => array(1, 0, 100000, 'FELD.CLIPS', '', 1, 1, 1),
+        'ZEITRAFFER' => array(1, 0, 100000, 'FELD.ZEITRAFFER', '', 1, 1, 1),
+        'PERSON'     => array(0, 0, 1, 'FELD.PERSON', '', 1, 1, 1),
+        'OBJEKTE'    => array(1, 0, 100, 'FELD.OBJEKTE', '', 1, 1, 1),
+        'PUSH'       => array(0, 0, 1, 'FELD.PUSH', '', 1, 0, 1),
+        'PUSHAKTIV'  => array(0, 0, 1, 'FELD.PUSHAKTIV', '', 1, 1, 1),
+        'PTEST'      => array(0, 0, 1, 'FELD.PTEST', '', 1, 0, 1),
+        'ERREICHBAR' => array(0, -1, 1, 'FELD.ERREICHBAR', '', 1, 1, 1),
+        'FEHLER'     => array(1, 0, 100000, 'FELD.FEHLER', '', 1, 1, 1),
+        'HERZ'       => array(1, -1, 100000, 'FELD.HERZ', '<v.1> min', 0, 0, 0),
     );
+}
+
+/**
+ * Die Themen, die kein Feld der Statuszeile sind.
+ *
+ * Wert: 1 = retained, 0 = nicht. "objekte" (die Liste) steht bewusst auf 0:
+ * sie ist im Regelfall LEER, und eine leere retained-Nutzlast loescht das
+ * Thema im Broker (mqttgateway.pl, sub udpin: "Delete $udptopic from memory
+ * because of empty message"). Die Zahl derselben Sache steht als OBJEKTE
+ * daneben und ist nie leer.
+ *
+ * "online" und "ts" sind das Lebenszeichen und gehen nie retained hinaus -
+ * retained zeigte "online" fuer immer 1, und genau daran erkennt Loxone einen
+ * stehengebliebenen Minutentakt.
+ */
+function cam_mqtt_zusatzthemen()
+{
+    return array(
+        'letztes_bild' => 1,
+        'anlass'       => 1,
+        'zeit'         => 1,
+        'objekte'      => 0,
+        'online'       => 0,
+        'ts'           => 0,
+    );
+}
+
+/**
+ * Geht dieses Thema retained hinaus?
+ *
+ * Unbekannte Schluessel gehen NICHT retained. Ein Thema, das niemand in eine
+ * Tabelle eingetragen hat, darf nicht auf Dauer im Broker stehenbleiben.
+ * Der Reiter Test zaehlt nach, dass jeder gesendete Schluessel einen Eintrag
+ * hat - sonst waere diese Zeile eine stille Ausnahme.
+ */
+function cam_mqtt_retained($schluessel)
+{
+    $s = (string) $schluessel;
+    $zusatz = cam_mqtt_zusatzthemen();
+    $felder = cam_basisfelder();
+    if (array_key_exists($s, $zusatz)) {
+        return (bool) $zusatz[$s];
+    }
+    if (isset($felder[$s])) {
+        return !empty($felder[$s][7]);
+    }
+    /* Kennziffer der Kamera abschneiden - aber nur, wenn der Stamm wirklich
+       ein Thema ist (dieselbe Falle wie bei cam_regel(): "webhook2" darf
+       nicht zu einem Stamm "webhook" werden, den es nicht gibt). */
+    if (preg_match('/^(.*?)([2-9][0-9]*)$/', $s, $m)) {
+        $nr = (int) $m[2];
+        if ($nr >= 2 && $nr <= CAM_MAX) {
+            if (array_key_exists($m[1], $zusatz)) {
+                return (bool) $zusatz[$m[1]];
+            }
+            if (isset($felder[$m[1]])) {
+                return !empty($felder[$m[1]][7]);
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Die vollstaendige Themenliste: was geht unter welchem Namen hinaus, und
+ * welches davon retained?
+ *
+ * Diese Liste ist die Anleitung. Der Reiter "Einbindung in Loxone" zeigt sie,
+ * der Reiter "Test" haelt sie gegen die cam_mqtt()-Aufrufe im Quelltext -
+ * sonst waere sie ein Versprechen ohne Deckung (Regeln/07, Anlass Renault:
+ * 20 gesendete Themen standen nirgends).
+ *
+ * Rueckgabe: Thema => array(retained, Sprachschluessel oder Klartext)
+ */
+function cam_mqtt_themenliste()
+{
+    $aus = array();
+    foreach (cam_felder() as $n => $d) {
+        if (!empty($d[5])) {
+            $aus[$n] = array(cam_mqtt_retained($n), $d[3]);
+        }
+    }
+    foreach (cam_kameras() as $id) {
+        $sx = cam_sx($id);
+        foreach (cam_mqtt_zusatzthemen() as $k => $r) {
+            // online und ts gibt es einmal, nicht je Kamera.
+            if ($k === 'online' || $k === 'ts') { continue; }
+            $aus[$k . $sx] = array((bool) $r, 'MQTT.T_' . strtoupper($k));
+        }
+    }
+    $aus['online'] = array(false, 'MQTT.T_ONLINE');
+    $aus['ts'] = array(false, 'MQTT.T_TS');
+    return $aus;
+}
+
+/**
+ * Welche Themen die cam_mqtt()-Aufrufe im Quelltext wirklich benennen.
+ *
+ * Gelesen wird der Quelltext, nicht der laufende Zweig: eine Aufnahme
+ * passiert vielleicht gerade nicht, ihre Themen gibt es trotzdem.
+ * Rueckgabe: array(themenstamm => true) oder array() wenn keine Datei lesbar
+ * war - "nicht feststellbar" ist etwas anderes als "keine gefunden".
+ */
+function cam_mqtt_quelltext_themen()
+{
+    $p = cam_paths();
+    $ordner = getenv('LBPPLUGINDIR') ?: basename(dirname(__FILE__));
+    $dateien = array(__FILE__);
+    if ($p['lbhome'] !== '') {
+        $dateien[] = $p['lbhome'] . '/bin/plugins/' . $ordner . '/cam_cron.php';
+    }
+    $dateien[] = dirname(dirname(dirname(__FILE__))) . '/bin/cam_cron.php';
+    $aus = array();
+    $gelesen = 0;
+    foreach ($dateien as $d) {
+        if (!is_file($d)) { continue; }
+        $t = (string) @file_get_contents($d);
+        if ($t === '') { continue; }
+        $gelesen++;
+        if (!preg_match_all('/cam_mqtt\(\s*array\((.*?)\)\s*\)/s', $t, $bl)) { continue; }
+        foreach ($bl[1] as $block) {
+            if (preg_match_all('/[\'"]([A-Za-z_][A-Za-z0-9_]*)[\'"]\s*(?:\.\s*\$\w+\s*)?=>/', $block, $mm)) {
+                foreach ($mm[1] as $k) { $aus[$k] = true; }
+            }
+        }
+    }
+    return $gelesen > 0 ? $aus : array();
+}
+
+/** Kennt die Thementabelle diesen Schluessel ueberhaupt? (Fuer den Reiter Test.) */
+function cam_mqtt_thema_bekannt($schluessel)
+{
+    $s = (string) $schluessel;
+    $zusatz = cam_mqtt_zusatzthemen();
+    $felder = cam_basisfelder();
+    if (array_key_exists($s, $zusatz) || isset($felder[$s])) {
+        return true;
+    }
+    if (preg_match('/^(.*?)([2-9][0-9]*)$/', $s, $m)) {
+        $nr = (int) $m[2];
+        if ($nr >= 2 && $nr <= CAM_MAX
+            && (array_key_exists($m[1], $zusatz) || isset($felder[$m[1]]))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -2777,6 +3053,39 @@ function cam_pruefungen()
             sprintf(cam_t('TEST.A_MQTT_OK'), (int) $m['udpport'], cam_e($cfg['mqtt_topic'])));
     }
 
+    /* Steht jedes Thema, das der Quelltext sendet, auch in der Themenliste?
+       Die Liste ist die Anleitung; ein Thema, das nur im Code vorkommt, findet
+       in Loxone niemand. Gelesen werden die cam_mqtt(array(...))-Aufrufe. */
+    $ac_qt = cam_mqtt_quelltext_themen();
+    if (!$ac_qt) {
+        $zeile(-1, cam_t('TEST.F_THEMEN'), cam_t('TEST.A_THEMEN_UNLESBAR'));
+    } else {
+        $ac_fehlt = array();
+        foreach (array_keys($ac_qt) as $ac_k) {
+            if (!cam_mqtt_thema_bekannt($ac_k)) { $ac_fehlt[] = $ac_k; }
+        }
+        $zeile($ac_fehlt ? 0 : 1, cam_t('TEST.F_THEMEN'),
+            $ac_fehlt
+                ? sprintf(cam_t('TEST.A_THEMEN_FEHLT'), cam_e(implode(', ', $ac_fehlt)))
+                : sprintf(cam_t('TEST.A_THEMEN_OK'), count($ac_qt),
+                          count(cam_mqtt_themenliste())));
+    }
+
+    /* Die feste Bildadresse gegen das Stromkennwort. Wer den Kamerastrom mit
+       einem Kennwort schuetzt, aber das letzte Bild unter der festen Adresse
+       liegen laesst, hat das aktuelle Bild seiner Haustuer offen im Netz -
+       Apache liefert die Datei ohne PHP aus, cam.php sieht den Abruf nie.
+       Am 06.09.2026 an der Anlage gemessen. */
+    $ac_bf = !empty($cfg['bild_fest']);
+    $ac_st = trim((string) $cfg['stream_token']) !== '';
+    if (!$ac_bf) {
+        $zeile(1, cam_t('TEST.F_BILDADRESSE'), cam_t('TEST.A_BILD_ZU'));
+    } elseif (!$ac_st) {
+        $zeile(-1, cam_t('TEST.F_BILDADRESSE'), cam_t('TEST.A_BILD_OFFEN_OHNE_KENNWORT'));
+    } else {
+        $zeile(0, cam_t('TEST.F_BILDADRESSE'), cam_t('TEST.A_BILD_OFFEN_TROTZ_KENNWORT'));
+    }
+
     /* Reiterleiste, Bereiche und Positivliste gegeneinander.
        Diese Zeile ersetzt eine Pruefung, die hausstandard_pruefen.py seit dem
        serverseitigen sm-active nicht mehr leisten kann: eine zusammengesetzte
@@ -2883,7 +3192,15 @@ function cam_mqtt($werte)
     }
     $gesendet = 0;
     foreach ((array) $werte as $k => $v) {
-        $msg = 'publish ' . $prefix . '/' . $k . ' ' . cam_mqtt_wert_saeubern($v);
+        $wert = cam_mqtt_wert_saeubern($v);
+        /* "retain" und "publish" gehen denselben Weg - das Gateway
+           unterscheidet sie am ersten Wort (mqttgateway.pl, sub udpin).
+           Ausnahme: eine LEERE Nutzlast loescht ein zurueckbehaltenes Thema
+           im Broker. Ein Wert, der leer sein kann, geht deshalb als publish
+           hinaus, auch wenn seine Zeile retained sagt - sonst verschwaende
+           ein Leerwert das Thema, statt es zu setzen. */
+        $retain = cam_mqtt_retained($k) && $wert !== '';
+        $msg = ($retain ? 'retain ' : 'publish ') . $prefix . '/' . $k . ' ' . $wert;
         if (@fwrite($s, $msg) !== false) {
             $gesendet++;
         }
