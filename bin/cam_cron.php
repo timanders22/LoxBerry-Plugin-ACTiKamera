@@ -66,6 +66,21 @@ if (!$ac_gefunden) {
     exit(1);
 }
 
+/* ---------------- Waehrend einer Aktualisierung: nichts tun ----------------
+ * Zwischen der neuen Cron-Datei und postinstall.sh liegt fast eine Minute
+ * (Regeln/06). In dieser Zeit ist cam.json das "{}" aus dem Archiv, und
+ * data/plugins/<ordner>/ ist leer. Gemessen in WSL am 17.09.2026
+ * (Pruefung-ACTiKamera-1.9.20/messe_oberflaeche.sh, Fall marke_frisch): der
+ * Takt schrieb betrieb.json im Archiv mit "keine Adresse eingetragen" bzw.
+ * dem Fehler eines Abrufs ohne Adresse und setzte den Bereinigungsmerker des
+ * Tages - die richtige Bereinigung lief an dem Tag nicht mehr. Der Lauf
+ * entfaellt; der naechste Takt nach postupgrade holt alles nach. Die Marke
+ * legt preupgrade.sh an, postupgrade.sh entfernt sie; aelter als 3600 s gilt
+ * sie nicht (cam_upgrade_laeuft). */
+if (function_exists('cam_upgrade_laeuft') && cam_upgrade_laeuft()) {
+    exit(0);
+}
+
 $cfg = cam_config();
 $p = cam_paths();
 if (!is_dir($p['tmp'])) {
@@ -105,8 +120,23 @@ if (!empty($cfg['timelapse']) && preg_match('/^\d{1,2}:\d{2}$/', (string) $cfg['
     }
 }
 
-/* ---------------- Archiv-Bereinigung um 03:35 ---------------- */
-if (cam_faellig($p['tmp'] . '/cleanup_am.txt', 3 * 60 + 35, $jetzt_min, $heute)) {
+/* ---------------- Archiv-Bereinigung um 03:35 ----------------
+ * Nur mit eingerichteter Konfiguration, und der Merker nur dann.
+ * Ohne cam.json (und ohne Zweitschrift, aus der cam_config() oben heilt)
+ * waeren alle Grenzen Vorgabewerte aus cam_vorgaben(): keep_days 90 statt
+ * des eingestellten Werts. Gemessen in WSL, Fall E_takt_ohne_zweit
+ * (Pruefung-ACTiKamera-1.9.20/messe_upgradeluecke.sh): der Takt zwischen
+ * Cron-Installation und postinstall loeschte eine 200 Tage alte Aufnahme bei
+ * eingestellten 3650 Tagen und setzte den Merker - die richtige Bereinigung
+ * lief an dem Tag nicht mehr. Ausgelassen wird deshalb OHNE Merker; der erste
+ * Takt nach postupgrade holt sie mit der zurueckgeholten Konfiguration nach.
+ * Gemeldet wird einmal am Tag (eigener Merker), nicht jede Minute. */
+if (!cam_config_eingerichtet()) {
+    if (cam_faellig($p['tmp'] . '/cleanup_ausgelassen_am.txt', 3 * 60 + 35, $jetzt_min, $heute)) {
+        cam_log('Archiv-Bereinigung ausgelassen: keine eingerichtete Konfiguration '
+            . '(cam.json fehlt, ist leer oder {}) - sie laeuft, sobald Einstellungen gespeichert sind.');
+    }
+} elseif (cam_faellig($p['tmp'] . '/cleanup_am.txt', 3 * 60 + 35, $jetzt_min, $heute)) {
     cam_cleanup();
 }
 

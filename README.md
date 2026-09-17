@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.19 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.20 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -228,8 +228,16 @@ und nicht die Diagnose lesen.
 - `?diag=1` nennt Länge sowie erstes und letztes Zeichen des Passworts und ist
   deshalb seit 1.9.8 tokenpflichtig
 - Die Formulare der Oberfläche tragen ein Merkmal gegen fremde Absender
-- `uninstall.sh` überschreibt und löscht die Zweitschrift mit den Zugangsdaten;
-  die Aufnahmen bleiben absichtlich stehen
+- Die Deinstallation überschreibt und löscht die Zweitschrift mit den
+  Zugangsdaten und räumt die Marke `data/plugins/actikamera.upgrade_laeuft`
+  weg; die Aufnahmen bleiben absichtlich stehen. Das Skript liegt seit 1.9.20
+  zweimal byteweise gleich im Archiv: als `uninstall/uninstall` (der Ort, von
+  dem gemessen ist, dass LoxBerry ihn ausführt) und weiterhin als
+  `uninstall.sh` an der Wurzel
+- Musste die Konfiguration aus der Zweitschrift geheilt werden, bleibt der
+  verdrängte Stand als `config/plugins/actikamera/cam.json.kaputt` mit
+  `chmod 600` liegen — er kann Zugangsdaten tragen. Der Installer räumt ihn
+  beim nächsten Update und bei der Deinstallation mit dem Ordner ab
 - Im Plugin sind **keine persönlichen Daten** enthalten
 - Aufnahmen liegen lokal auf dem LoxBerry und werden nach der eingestellten
   Aufbewahrungszeit gelöscht
@@ -251,6 +259,82 @@ so wie die Zweitschrift der Konfiguration es seit jeher tut. Ein eigener Ort
 > Handgriff vorher, auf dem LoxBerry:
 >
 >     mv /opt/loxberry/data/plugins/actikamera /opt/loxberry/data/plugins/actikamera.archiv
+
+## Fassung 1.9.20 — die Minute mitten im Update (17.09.2026)
+
+Beim Update legt LoxBerry die Cron-Datei fast eine Minute vor
+`postinstall.sh` an; der Minutentakt läuft in dieser Lücke schon mit den
+neuen Dateien, aber ohne Konfiguration. Nachgestellt in WSL, nicht am Gerät.
+Sieben Punkte sind behoben:
+
+**Das Protokoll verliert beim Update keine Zeilen mehr.** `preupgrade.sh`
+sicherte `cam.log`, `postupgrade.sh` kopierte es zurück — obwohl der
+Installer den Protokollordner gar nicht abräumt. Die Kopie von vorher
+überschrieb damit alles, was während des Updates geschrieben wurde
+(gemessen: die Zeile „antwortet nicht" aus der Lücke war danach weg). Das
+Protokoll wird jetzt weder gesichert noch zurückkopiert.
+
+**Die Archiv-Bereinigung löscht nie mehr nach Vorgabewerten.** Fehlte die
+Zweitschrift der Konfiguration, lief die tägliche Bereinigung in der Lücke
+mit 90 Tagen Aufbewahrung statt mit dem eingestellten Wert (gemessen: eine
+200 Tage alte Aufnahme bei eingestellten 3650 Tagen gelöscht) und galt für
+den Tag als erledigt. Jetzt wird sie ausgelassen, solange `cam.json` fehlt,
+leer ist oder nur `{}` enthält, und am selben Tag nachgeholt, sobald die
+Konfiguration wieder da ist; das Protokoll sagt es einmal am Tag. Dasselbe
+gilt nach einer Neuinstallation: bis die Einstellungen einmal gespeichert
+sind, räumt das Plugin nichts auf — auch keine Aufnahmen, die eine frühere
+Installation im Archiv zurückgelassen hat.
+
+**Während der Aktualisierung ruhen Plugin-Seite und Minutentakt.**
+`preupgrade.sh` legt als Erstes die Marke
+`data/plugins/<ordner>.upgrade_laeuft` neben den Datenordner, `postupgrade.sh`
+entfernt sie als Letztes, die Deinstallation räumt sie weg, und älter als eine
+Stunde gilt sie nicht — eine abgebrochene Installation legt das Plugin nicht
+für immer still. Solange sie gilt, zeigt die Plugin-Seite nur einen Hinweis
+und speichert nichts, und der Minutentakt beendet sich sofort. Gemessen war
+vorher: die in dieser Minute geöffnete Seite schrieb alle 87 Einstellungen
+samt einem frischen Aktionstoken nach `cam.json` **und** in die Zweitschrift —
+danach galt die Konfiguration als eingerichtet, und die Zweitschrift trug
+Vorgabewerte mit einem Token, das in Loxone nirgends steht. Der Takt
+überschrieb in derselben Minute den Betriebszustand im Archiv mit dem Ergebnis
+eines Abrufs ohne Kameraadresse.
+
+**Das bloße Öffnen der Plugin-Seite legt keine Aufbewahrungsgrenze mehr
+fest.** Bisher schrieb die Seite beim ersten Aufruf die vollständige
+Vorgabenliste — darunter 90 Tage Aufbewahrung — in `cam.json`. Wer das Plugin
+neu installierte und ein Archiv einer früheren Installation liegen hatte,
+verlor beim nächsten nächtlichen Lauf Aufnahmen, ohne je eine Grenze gewählt
+zu haben. In `cam.json` landen beim Öffnen jetzt nur noch die beiden Token,
+die das Plugin selbst würfelt; alles andere kommt erst beim ausdrücklichen
+Speichern hinein. Die Token zählen dabei nicht als „eingerichtet". Solange
+nichts gespeichert ist, sagt der Reiter *Aufnahmen* ausdrücklich, dass die
+angezeigten Grenzen Vorschläge sind und nichts gelöscht wird.
+
+**Die Selbstheilung entscheidet nach Inhalt, nicht nach Form.** Eine
+`cam.json`, die zwar Inhalt hat, aber kein Aktionstoken — etwa nach einem
+abgebrochenen Schreibvorgang —, wurde bisher nicht aus der Zweitschrift
+geheilt: Die Seite würfelte ein neues Token und kopierte es über die
+Zweitschrift, womit das alte Token endgültig weg war und jede Loxone-Adresse
+ins Leere lief. Jetzt wird zuerst geheilt; der verdrängte Stand bleibt als
+`cam.json.kaputt` mit den Rechten 0600 daneben liegen.
+
+**Die Zweitschrift wird nie durch einen Stand ohne Aktionstoken ersetzt.**
+Sie ist der einzige Rückweg nach einem Update; ohne Token ist sie wertlos.
+Trägt der zu speichernde Stand kein Token, die Zweitschrift aber eines, bleibt
+sie unangetastet, und das Protokoll sagt es.
+
+**Die Deinstallation liegt jetzt auch dort, wo LoxBerry sie wirklich sucht.**
+Das Skript, das die Zweitschrift mit Benutzername und Kamerapasswort
+überschreibt und löscht, lag nur als `uninstall.sh` an der Archivwurzel.
+Gemessen ist aber (`Regeln/06`, Abschnitt *Deinstallation*, am Gerät am
+17.09.2026 in `sbin/plugininstall.pl` nachgesehen): der Installer kopiert
+`uninstall/uninstall` nach `data/system/uninstall/<ordner>` und ruft **diese**
+Datei auf. Von 306 Plugin-Ordnern im Arbeitsordner führen 304 genau diese
+Form; die sechs Ausnahmen waren alle Fassungen dieser Linie. Ob die
+Wurzeldatei überhaupt je ausgeführt wurde, ist **nicht gemessen** — sie bleibt
+deshalb liegen, und der gemessene Ort kommt daneben. Beide Dateien sind
+byteweise gleich, jeder Schritt hängt an einem `[ -f ]`, ein zweiter Lauf
+findet nichts mehr und sagt nichts.
 
 ## Fassung 1.9.19 — am Gerät nachgemessen (06.09.2026)
 

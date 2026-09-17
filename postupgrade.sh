@@ -18,7 +18,10 @@ if [ -s "$SICHER/cam.json" ]; then
         && echo "<OK> Konfiguration aus der Upgrade-Sicherung zurueckgeholt." \
         || echo "<WARNING> Die gesicherte Konfiguration liess sich nicht zurueckholen."
 fi
-[ -s "$SICHER/cam.log" ] && cp -p "$SICHER/cam.log" "$BASE/log/plugins/$PFOLDER/cam.log" 2>/dev/null
+# Kein Protokoll zurueckholen: log/plugins/<ordner>/ uebersteht das Upgrade,
+# eine Kopie von vorher ueberschriebe die Zeilen aus dem Upgrade selbst
+# (siehe preupgrade.sh). Liegt aus einem abgebrochenen Upgrade noch ein
+# cam.log im Sicherungsordner, bleibt es unbenutzt und geht mit ihm weg.
 
 # Das letzte Bild und der Zeitraffer liegen im Webordner, den der Installer
 # abraeumt. Ohne diesen Schritt zeigt die Kamera-Kachel in Loxone bis zur
@@ -43,5 +46,20 @@ fi
 # Aufgeraeumt wird erst, wenn wirklich etwas zurueckgeholt wurde.
 if [ -s "$CF" ]; then
     rm -rf "$SICHER" 2>/dev/null
+fi
+
+# Die Marke aus preupgrade.sh geht ZULETZT weg - erst danach duerfen die
+# Plugin-Seite und der Minutentakt wieder schreiben. Sie hier zu entfernen und
+# nicht schon in postinstall.sh ist Absicht: postinstall.sh laeuft vor diesem
+# Skript, und die Rueckholung oben ist der letzte Schritt, den ein Schreiben
+# von aussen noch verderben koennte.
+MARKE="$BASE/data/plugins/$PFOLDER.upgrade_laeuft"
+if [ -f "$MARKE" ]; then
+    if rm -f "$MARKE" 2>/dev/null && [ ! -e "$MARKE" ]; then
+        echo "<OK> Die Plugin-Seite und der Minutentakt arbeiten wieder."
+    else
+        echo "<WARNING> Die Marke $MARKE liess sich nicht entfernen."
+        echo "<WARNING> Sie verfaellt von selbst eine Stunde nach ihrer Entstehung."
+    fi
 fi
 exit 0

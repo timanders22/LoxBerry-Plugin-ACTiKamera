@@ -17,19 +17,40 @@ ARGV5=$5
 PFOLDER="${ARGV3:-actikamera}"
 BASE="${ARGV5:-$LBHOMEDIR}"
 
+# 0. Die Marke "Aktualisierung laeuft" - als ERSTES, vor jedem anderen
+#    Schritt. Zwischen der neuen Cron-Datei und postinstall.sh liegt fast eine
+#    Minute (Regeln/06). Solange die Marke gilt, speichert die Plugin-Seite
+#    nichts und der Minutentakt tut nichts; postupgrade.sh entfernt sie als
+#    Letztes. Sie liegt NEBEN dem Datenordner, weil purge_installation den
+#    Ordner selbst loescht. Aelter als 3600 s gilt sie nicht - eine
+#    abgebrochene Installation darf die Seite nicht fuer immer stilllegen.
+MARKE="$BASE/data/plugins/$PFOLDER.upgrade_laeuft"
+mkdir -p "$BASE/data/plugins" 2>/dev/null
+date +%s > "$MARKE" 2>/dev/null
+if grep -Eq '^[0-9]+$' "$MARKE" 2>/dev/null; then
+    echo "<OK> Bis zum Ende der Aktualisierung speichert die Plugin-Seite nichts."
+else
+    echo "<WARNING> Die Marke fuer die laufende Aktualisierung liess sich nicht anlegen: $MARKE"
+    echo "<WARNING> Bitte die Plugin-Seite erst nach dem Ende der Aktualisierung oeffnen."
+fi
+
 SICHER="$BASE/data/plugins/$PFOLDER.upgrade_sicherung"
 mkdir -p "$SICHER"
 chmod 0700 "$SICHER" 2>/dev/null
 
-# 1. Konfiguration und Protokoll
+# 1. Konfiguration
 if [ -f "$BASE/config/plugins/$PFOLDER/cam.json" ]; then
     cp -p "$BASE/config/plugins/$PFOLDER/cam.json" "$SICHER/cam.json" \
         && chmod 0600 "$SICHER/cam.json" \
         || echo "<WARNING> Die Konfiguration konnte nicht gesichert werden."
 fi
-if [ -f "$BASE/log/plugins/$PFOLDER/cam.log" ]; then
-    cp -p "$BASE/log/plugins/$PFOLDER/cam.log" "$SICHER/cam.log" 2>/dev/null
-fi
+# Das Protokoll wird NICHT gesichert. purge_installation raeumt
+# log/plugins/<ordner>/ beim Upgrade nicht ab (Regeln/06, Abschnitt
+# purge_installation). Das Zurueckkopieren in postupgrade.sh ueberschrieb das
+# laufende Protokoll mit dem Stand von hier - gemessen in WSL
+# (Pruefung-ACTiKamera-1.9.20/messe_upgradeluecke.sh, Fall takt): die Zeile,
+# die der Minutentakt zwischen Cron-Installation und postinstall schrieb, war
+# danach weg.
 
 # 2. Was im Webordner liegt. Der Installer raeumt BEIDE webfrontend-Ordner ab;
 #    bis 1.9.16 war letztesbild.jpg nach jedem Update weg, waehrend

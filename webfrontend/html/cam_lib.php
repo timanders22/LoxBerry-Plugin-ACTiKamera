@@ -265,6 +265,98 @@ function cam_paths()
     );
 }
 
+/* ==================================================================
+ * Die Marke "Aktualisierung laeuft"
+ * ==================================================================
+ *
+ * Zwischen dem Anlegen der neuen Cron-Datei und postinstall.sh liegt beim
+ * Upgrade fast eine Minute (Regeln/06, am Installationsprotokoll des Geraets
+ * vom 08.09.2026 gemessen: Cron-Datei 03:31:32, postinstall 03:32:24). In
+ * dieser Luecke ist cam.json das "{}" aus dem Archiv, und die eingestellten
+ * Werte liegen nur in der Zweitschrift.
+ *
+ * Gemessen in WSL (Pruefung-ACTiKamera-1.9.20/messe_oberflaeche.sh, Faelle
+ * marke_frisch und marke_fehlt, 17.09.2026):
+ *   - die Oberflaeche, in dieser Zeit geoeffnet, schrieb 87 Schluessel nach
+ *     cam.json UND in die Zweitschrift; die Zweitschrift hatte danach
+ *     dieselbe Pruefsumme wie die Vorgabenkonfiguration.
+ *   - der Minutentakt schrieb betrieb.json im Archiv mit dem Ergebnis eines
+ *     Abrufs ohne Adresse und setzte den Bereinigungsmerker des Tages.
+ *
+ * preupgrade.sh legt die Marke als Erstes an, postupgrade.sh entfernt sie als
+ * Letztes, uninstall raeumt sie weg. Sie liegt NEBEN dem Datenordner, weil
+ * purge_installation den Ordner selbst loescht. Aelter als eine Stunde oder
+ * unlesbar gilt sie nicht: eine abgebrochene Installation darf die Seite
+ * nicht fuer immer stilllegen.
+ */
+function cam_upgrade_marke()
+{
+    $p = cam_paths();
+    return dirname($p['datadir']) . '/' . basename($p['datadir']) . '.upgrade_laeuft';
+}
+
+function cam_upgrade_laeuft()
+{
+    $f = cam_upgrade_marke();
+    clearstatcache(true, $f);
+    $roh = @is_file($f) ? @file_get_contents($f) : false;
+    if ($roh === false) {
+        return false;
+    }
+    $roh = trim((string) $roh);
+    if (!preg_match('/^[0-9]{1,12}$/', $roh)) {
+        return false;
+    }
+    $alter = time() - (int) $roh;
+    // Ein paar Minuten "Zukunft" sind eine nachgestellte Uhr, keine Luege.
+    return $alter > -300 && $alter < 3600;
+}
+
+/**
+ * Traegt eine Konfiguration das Merkwort, an dem die Selbstheilung "Inhalt"
+ * erkennt? Fuer diese Linie ist das der Aktionstoken: ohne ihn ist jede
+ * Loxone-Adresse ungueltig, und eine Sicherung ohne ihn ist wertlos
+ * (Regeln/05, Abschnitt "Zweitschrift und Selbstheilung": nach INHALT
+ * entscheiden, nicht nach Form).
+ */
+function cam_hat_token($cfg)
+{
+    return is_array($cfg) && isset($cfg['aktionstoken'])
+        && is_string($cfg['aktionstoken']) && $cfg['aktionstoken'] !== '';
+}
+
+/**
+ * Was WIRKLICH in cam.json steht - ohne die Vorgaben aus cam_vorgaben().
+ *
+ * Die Oberflaeche schreibt beim blossen Oeffnen nur noch auf dieser
+ * Grundlage: wer die Seite nur ansieht, waehlt keine Aufbewahrungsgrenze
+ * (CLAUDE.md 4, "ein stiller Vorgabewert ist eine Annahme").
+ */
+function cam_config_roh()
+{
+    $p = cam_paths();
+    clearstatcache(true, $p['config']);
+    if (!is_file($p['config'])) {
+        return array();
+    }
+    $d = json_decode((string) @file_get_contents($p['config']), true);
+    return is_array($d) ? $d : array();
+}
+
+/**
+ * Die Schluessel, die das Plugin SELBST wuerfelt - ohne dass jemand etwas
+ * gewaehlt hat. Sie entstehen beim ersten Oeffnen der Oberflaeche und zaehlen
+ * deshalb nicht als "eingerichtet" (siehe cam_config_eingerichtet).
+ */
+function cam_selbsterzeugte_schluessel()
+{
+    $aus = array('aktionstoken');
+    for ($i = 1; $i <= CAM_MAX; $i++) {
+        $aus[] = 'ausloeser_token' . cam_sx($i);
+    }
+    return $aus;
+}
+
 function cam_vorgaben()
 {
     /* Herausgezogen aus cam_config(): die Vorgaben stehen weiterhin an
@@ -541,17 +633,41 @@ function cam_wert_pruefen($schluessel, $wert)
 function cam_config($erzeugen = true)
 {
     $p = cam_paths();
-    if ($erzeugen && cam_selbstheilung()
-        && (!is_file($p['config']) || trim((string) @file_get_contents($p['config'])) === ''
-            || trim((string) @file_get_contents($p['config'])) === '{}') && is_file($p['backup'])) {
-        /* is_dir() davor: ohne die Wache meldet PHP 7.4 bei jedem Lauf
-           "mkdir(): File exists", und ein ueber set_error_handler()
-           eingehaengter Aufnehmer sieht das trotz @ (Pruefstand-Laerm). */
-        if (!is_dir(dirname($p['config']))) {
-            @mkdir(dirname($p['config']), 0775, true);
+    /* Waehrend einer Aktualisierung wird nichts geheilt und nichts angelegt:
+       in der Luecke holt postupgrade.sh zurueck, und jede Schreibbewegung
+       hier verdraengte den Stand, den es zurueckholen soll. */
+    if ($erzeugen && cam_selbstheilung() && !cam_upgrade_laeuft() && is_file($p['backup'])) {
+        /* Entschieden wird nach INHALT, nicht nach Form (Regeln/05,
+           "Die Selbstheilung entscheidet nach Inhalt"): eine halb
+           geschriebene oder von Hand gekuerzte cam.json ist weder leer noch
+           "{}", traegt aber kein Aktionstoken - bis 1.9.19 wurde in diesem
+           Fall NICHT geheilt, sondern in der Oberflaeche ein neues Token
+           gewuerfelt und ueber die Zweitschrift kopiert. Damit war das alte
+           Token weg und jede Loxone-Adresse ungueltig (gemessen in WSL,
+           messe_oberflaeche.sh, Fall ohne_token). */
+        $ac_roh = is_file($p['config']) ? @file_get_contents($p['config']) : false;
+        $ac_ist = ($ac_roh === false) ? null : json_decode(trim((string) $ac_roh), true);
+        if (!cam_hat_token($ac_ist)) {
+            $ac_zweit = json_decode((string) @file_get_contents($p['backup']), true);
+            if (cam_hat_token($ac_zweit)) {
+                /* is_dir() davor: ohne die Wache meldet PHP 7.4 bei jedem Lauf
+                   "mkdir(): File exists", und ein ueber set_error_handler()
+                   eingehaengter Aufnehmer sieht das trotz @ (Pruefstand-Laerm). */
+                if (!is_dir(dirname($p['config']))) {
+                    @mkdir(dirname($p['config']), 0775, true);
+                }
+                /* Was verdraengt wird, geht nicht verloren: alles ausser
+                   leer, "{}" und "[]" bleibt daneben liegen - mit 0600, es
+                   kann Zugangsdaten tragen. */
+                $ac_rest = ($ac_roh === false) ? '' : preg_replace('/\s+/', '', (string) $ac_roh);
+                if ($ac_rest !== '' && $ac_rest !== '{}' && $ac_rest !== '[]') {
+                    @copy($p['config'], $p['config'] . '.kaputt');
+                    @chmod($p['config'] . '.kaputt', 0600);
+                }
+                @copy($p['backup'], $p['config']);
+                @chmod($p['config'], 0600);
+            }
         }
-        @copy($p['backup'], $p['config']);
-        @chmod($p['config'], 0600);
     }
     $cfg = is_file($p['config']) ? (json_decode((string) file_get_contents($p['config']), true) ?: array()) : array();
     if (!is_array($cfg)) {
@@ -563,6 +679,47 @@ function cam_config($erzeugen = true)
     }
     $cfg['notify'] += array('push' => 1, 'push_minutes' => 2);
     return $cfg;
+}
+
+/**
+ * Hat jemand Einstellungen gespeichert - steht also in cam.json mindestens
+ * ein Schluessel, den das Plugin nicht selbst wuerfelt -, oder ist alles nur
+ * das, was cam_config() aus den Vorgaben ergaenzt?
+ *
+ * Fehlt cam.json, ist sie leer, unlesbar, "{}" (so legt postinstall.sh sie
+ * an) oder traegt sie ausser den Token aus cam_selbsterzeugte_schluessel()
+ * nichts, dann sind alle Werte aus cam_config() Vorgaben. Fuer Anzeige und
+ * Abruf reicht das; fuer etwas, das LOESCHT, nicht: keep_days 90 ist eine
+ * Annahme, keine Einstellung. Gemessen in WSL am Minutentakt in der
+ * Upgrade-Luecke (Fall E, Pruefung-ACTiKamera-1.9.20/messe_upgradeluecke.sh)
+ * und an der ersten Oeffnung nach einer Neuinstallation (messe_oberflaeche.sh,
+ * Fall mit_altem_archiv).
+ *
+ * Rein lesend. Wer die Zweitschrift beruecksichtigen will, ruft vorher
+ * cam_config() auf - das heilt, wo die Selbstheilung an ist.
+ */
+function cam_config_eingerichtet()
+{
+    $p = cam_paths();
+    clearstatcache(true, $p['config']);
+    if (!is_file($p['config'])) {
+        return false;
+    }
+    $roh = json_decode((string) @file_get_contents($p['config']), true);
+    if (!is_array($roh)) {
+        return false;
+    }
+    /* Die selbst erzeugten Token zaehlen NICHT mit. Sie entstehen beim ersten
+       Oeffnen der Oberflaeche, ohne dass jemand etwas gewaehlt hat; stuenden
+       sie allein in cam.json, galte die Konfiguration als eingerichtet, und
+       die Bereinigung liefe mit den 90 Vorgabetagen. Gemessen in WSL am
+       17.09.2026 (messe_oberflaeche.sh, Fall mit_altem_archiv): nach dem
+       blossen Oeffnen der Seite loeschte der naechste Takt zwei Aufnahmen aus
+       dem Archiv einer frueheren Installation. */
+    foreach (cam_selbsterzeugte_schluessel() as $ac_s) {
+        unset($roh[$ac_s]);
+    }
+    return count($roh) > 0;
 }
 
 function cam_config_save(array $cfg)
@@ -579,8 +736,29 @@ function cam_config_save(array $cfg)
     }
     // Zugangsdaten: nur fuer den Besitzer lesbar
     @chmod($p['config'], 0600);
-    @copy($p['config'], $p['backup']);
-    @chmod($p['backup'], 0600);
+    /* Die Zweitschrift wird NIE durch einen Stand ersetzt, der weniger
+       traegt. Gemessen in WSL am 17.09.2026 (messe_oberflaeche.sh, Fall
+       Speichern/ohne_token): ein Speichervorgang ohne Aktionstoken machte aus
+       einer Zweitschrift mit Token eine ohne - und damit aus dem einzigen
+       Rueckweg eine wertlose Datei. Traegt die Zweitschrift selbst kein
+       Token, wird sie fortgeschrieben wie bisher. */
+    $ac_zweit = is_file($p['backup'])
+        ? json_decode((string) @file_get_contents($p['backup']), true) : null;
+    if (cam_hat_token($cfg) || !cam_hat_token($ac_zweit)) {
+        @copy($p['config'], $p['backup']);
+        @chmod($p['backup'], 0600);
+    } else {
+        /* Die Selbstheilung waehrend dieser einen Zeile abschalten: cam_log()
+           ruft cam_config(), und cam_config() wuerde genau jetzt aus der
+           Zweitschrift heilen - also die eben geschriebene Datei wieder
+           ueberschreiben, noch bevor cam_config_save() zurueckkehrt. Ein
+           Speichern, das sich selbst zuruecknimmt, meldete trotzdem Erfolg. */
+        $ac_alt = cam_selbstheilung();
+        cam_selbstheilung(false);
+        cam_log('Die Zweitschrift wurde nicht ueberschrieben: der gespeicherte Stand '
+            . 'traegt kein Aktionstoken, die Zweitschrift schon.');
+        cam_selbstheilung($ac_alt);
+    }
     return true;
 }
 
@@ -1767,6 +1945,13 @@ function cam_aufraeum_lage()
 function cam_cleanup()
 {
     $cfg = cam_config();
+    /* Geloescht wird nur nach eingestellten Grenzen, nie nach Vorgabewerten
+       allein (siehe cam_config_eingerichtet). cam_config() hat davor die
+       Gelegenheit, aus der Zweitschrift zu heilen. */
+    if (!cam_config_eingerichtet()) {
+        cam_log('Aufraeumen ausgelassen: keine eingerichtete Konfiguration (cam.json fehlt, ist leer oder {}).');
+        return 0;
+    }
     $tage = (int) $cfg['keep_days'];          // 0 = unbegrenzt
     $max = (int) $cfg['keep_max'];            // 0 = unbegrenzt
     $grenze = $tage > 0 ? time() - $tage * 86400 : 0;

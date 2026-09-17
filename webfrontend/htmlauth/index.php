@@ -99,7 +99,7 @@ function ac_grenzen()
     }
     $l = cam_aufraeum_lage();
     $un = cam_t('TEXT.UNBEGRENZT');
-    return sprintf(
+    $ac_satz = sprintf(
         cam_t('TEXT.GRENZEN'),
         $l['tage'] > 0 ? sprintf(cam_t('TEXT.G_TAGE'), $l['tage']) : $un,
         $l['anzahl'] > 0 ? sprintf(cam_t('TEXT.G_DATEIEN'), $l['anzahl']) : $un,
@@ -109,6 +109,15 @@ function ac_grenzen()
         $l['alter_tage'] >= 0 ? sprintf(cam_t('TEXT.G_ALTER'), $l['alter_tage'])
                               : cam_t('TEXT.G_KEINE')
     );
+    /* Solange nichts gespeichert ist, sind die drei Zahlen Vorschlaege: die
+       Bereinigung laesst sie ausdruecklich aus (cam_config_eingerichtet).
+       Ohne diesen Satz verspraeche der Reiter eine Aufbewahrung von 90 Tagen,
+       die nicht stattfindet - und zwei Zahlen, die nicht zusammenpassen, sind
+       ein Befund, auch wenn beide gruen aussehen. */
+    if (function_exists('cam_config_eingerichtet') && !cam_config_eingerichtet()) {
+        $ac_satz .= ' ' . cam_t('TEXT.G_NICHT_EINGERICHTET');
+    }
+    return $ac_satz;
 }
 
 $ac_saved = false; $ac_note = ''; $ac_err = '';
@@ -116,17 +125,67 @@ $ac_saved = false; $ac_note = ''; $ac_err = '';
    nicht die Suche nach einem deutschen Wort im Text (bis 1.9.16). */
 $ac_note_rot = false;
 
+/* Waehrend einer Aktualisierung speichert diese Seite NICHTS.
+ *
+ * Zwischen den neuen Dateien und postinstall.sh ist cam.json das "{}" aus dem
+ * Archiv; die eingestellten Werte liegen nur in der Zweitschrift. Bis 1.9.19
+ * schrieb ein Aufruf dieser Seite in der Zeit alle 87 Schluessel - samt einem
+ * frischen Aktionstoken und keep_days 90 - nach cam.json UND in die
+ * Zweitschrift (gemessen in WSL am 17.09.2026,
+ * Pruefung-ACTiKamera-1.9.20/messe_oberflaeche.sh, Fall marke_frisch). Die
+ * Konfiguration galt danach als eingerichtet, und die Zweitschrift trug
+ * Vorgaben mit fremdem Token.
+ *
+ * Solange die Marke aus preupgrade.sh gilt, zeigt die Seite nur einen
+ * Hinweis. Das steht VOR jedem Handler: auch ein Formular von vorher wird
+ * nicht mehr angenommen. */
+if (function_exists('cam_upgrade_laeuft') && cam_upgrade_laeuft()) {
+    /* Kopf und Fuss wie weiter unten: EINMAL feststellen, beides daran
+       haengen. Ohne den Rahmen ein vollstaendiges Dokument, sonst steht der
+       Hinweis als nacktes Textstueck im Browser. */
+    $ac_rahmen = class_exists('LBWeb', false);
+    if ($ac_rahmen) {
+        LBWeb::lbheader('ACTi Kamera', 'https://wiki.loxberry.de', 'help.html');
+    } else {
+        echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>ACTi Kamera</title></head><body>';
+    }
+    echo '<div style="max-width:1100px;margin:0 auto;padding:0 10px 40px;">' . "\n"
+       . '<h2>' . ac_e(cam_t('TEXT.ACTI_KAMERA')) . '</h2>' . "\n"
+       . '<p><b>' . ac_e(cam_t('TEXT.UPGRADE_LAEUFT')) . '</b> '
+       . ac_e(cam_t('TEXT.UPGRADE_LAEUFT_TEXT')) . '</p>' . "\n"
+       . '</div>' . "\n";
+    if ($ac_rahmen) {
+        LBWeb::lbfooter();
+    } else {
+        echo '</body></html>';
+    }
+    exit;
+}
+
 /* Aktionstoken beim ersten Aufruf erzeugen.
  *
  * Das gehoert in den ANGEMELDETEN Bereich - der unangemeldete Endpunkt darf
  * nichts anlegen. Erzeugt wird nur, wenn noch keines dasteht; jedes Speichern
  * traegt es weiter, weil beide Handler auf cam_config() aufbauen.
- */
+ *
+ * GESCHRIEBEN WIRD AUF DEM ROHSTAND, NICHT AUF cam_config().
+ * cam_config() ergaenzt alle Vorgaben; wer sie zurueckschreibt, hat beim
+ * blossen Oeffnen der Seite keep_days 90 festgelegt, ohne dass jemand eine
+ * Aufbewahrungsgrenze gewaehlt hat (CLAUDE.md 4: ein stiller Vorgabewert ist
+ * eine Annahme). Gemessen in WSL am 17.09.2026 (messe_oberflaeche.sh, Fall
+ * Neuinstallation/mit_altem_archiv): nach dem ersten Oeffnen loeschte der
+ * naechste Minutentakt zwei Aufnahmen aus dem Archiv einer frueheren
+ * Installation. In cam.json landen deshalb nur die beiden Token; alles
+ * andere kommt erst beim ausdruecklichen Speichern hinein.
+ *
+ * cam_config() steht trotzdem davor: sie heilt aus der Zweitschrift, bevor
+ * hier ein Token entstehen kann. */
 if (function_exists('cam_config') && function_exists('cam_token_erzeugen')) {
     $ac_start = cam_config();
+    $ac_roh = cam_config_roh();
     $ac_neu = false;
     if ((string) $ac_start['aktionstoken'] === '') {
-        $ac_start['aktionstoken'] = cam_token_erzeugen();
+        $ac_roh['aktionstoken'] = cam_token_erzeugen();
         $ac_neu = true;
     }
     /* Je Kamera ein kurzes Ausloese-Token - auch fuer Kameras, die es noch
@@ -135,12 +194,12 @@ if (function_exists('cam_config') && function_exists('cam_token_erzeugen')) {
     for ($ac_i = 1; $ac_i <= CAM_MAX; $ac_i++) {
         $ac_sl = $ac_i > 1 ? (string) $ac_i : '';
         if ((string) $ac_start['ausloeser_token' . $ac_sl] === '') {
-            $ac_start['ausloeser_token' . $ac_sl] = cam_kurztoken();
+            $ac_roh['ausloeser_token' . $ac_sl] = cam_kurztoken();
             $ac_neu = true;
         }
     }
     if ($ac_neu) {
-        cam_config_save($ac_start);
+        cam_config_save($ac_roh);
     }
 }
 
