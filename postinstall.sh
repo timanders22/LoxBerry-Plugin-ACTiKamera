@@ -31,5 +31,23 @@ if [ -f "$BK" ]; then
         echo "<OK> Konfiguration aus Sicherung wiederhergestellt."
     fi
 fi
-echo "<OK> Installation abgeschlossen. Bitte die Plugin-Oberflaeche oeffnen und Adresse, Benutzer und Passwort der Kamera eintragen."
+# Die Erstanleitung nur, wenn keine eingerichtete Konfiguration vorliegt.
+# postinstall.sh laeuft auch bei jedem Upgrade (Regeln/06); danach war der
+# Rat, die Zugangsdaten einzutragen, falsch und legte nahe, sie seien weg.
+# "Eingerichtet" heisst: fuer mindestens eine Kamera steht eine Adresse in
+# der Datei (host, host2 bis host4 nicht leer). Das Aktionstoken zaehlt
+# nicht - es entsteht beim ersten Oeffnen der Oberflaeche von selbst
+# (cam_selbsterzeugte_schluessel() in cam_lib.php).
+ac_hat_adresse() {
+    [ -s "$1" ] && grep -Eq '"host[2-4]?"[[:space:]]*:[[:space:]]*"[^"]' "$1" 2>/dev/null
+}
+if ac_hat_adresse "$CF"; then
+    echo "<OK> Installation abgeschlossen, die Einstellungen der Kamera sind uebernommen. Es ist nichts weiter zu tun."
+elif ac_hat_adresse "$BASE/data/plugins/$PFOLDER.upgrade_sicherung/cam.json"; then
+    # Ohne Zweitschrift holt erst postupgrade.sh die Konfiguration zurueck
+    # und meldet dort, ob es gelang.
+    echo "<OK> Installation abgeschlossen. Die Einstellungen der Kamera holt postupgrade.sh gleich aus der Upgrade-Sicherung zurueck."
+else
+    echo "<OK> Installation abgeschlossen. Bitte die Plugin-Oberflaeche oeffnen und Adresse, Benutzer und Passwort der Kamera eintragen."
+fi
 exit 0

@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.20 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.21 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -259,6 +259,37 @@ so wie die Zweitschrift der Konfiguration es seit jeher tut. Ein eigener Ort
 > Handgriff vorher, auf dem LoxBerry:
 >
 >     mv /opt/loxberry/data/plugins/actikamera /opt/loxberry/data/plugins/actikamera.archiv
+
+## Fassung 1.9.21 — Schlusswort nach dem Update, Digest, Bildnamen (24.09.2026)
+
+**Nach einem Update fordert die Installation nicht mehr zur Ersteinrichtung
+auf.** Bis 1.9.20 endete `postinstall.sh` immer mit dem Rat, Adresse,
+Benutzer und Passwort der Kamera einzutragen — auch wenn die Einstellungen
+gerade übernommen worden waren. Jetzt steht dort „die Einstellungen der
+Kamera sind übernommen", sobald für mindestens eine Kamera eine Adresse
+eingetragen ist; die Anleitung erscheint nur noch bei der Erstinstallation,
+wenn keine Kamera eingetragen ist, oder als Warnung aus `postupgrade.sh`,
+wenn die Rückholung gescheitert ist.
+
+**Digest-Anmeldung mit leerem `opaque=""`.** Ein leerer Wert in
+Anführungszeichen kam bis 1.9.20 als NULL an (PHP 8: Warnung „Undefined
+array key 3"), und `opaque` fehlte in der Antwort an die Kamera. Er wird
+jetzt als leerer Wert übernommen und zurückgeschickt.
+
+**Millisekunden im Bildnamen unabhängig von der Locale.** Der Name wurde
+mit `%.3f` gebildet; unter einer Locale mit Dezimalkomma fielen die
+Millisekunden auf `000`, und zwei Aufnahmen derselben Sekunde mit gleichem
+Anlass überschrieben sich. Jetzt `%.3F`.
+
+**Die Upgrade-Sicherung bleibt liegen, wenn die Rückholung scheitert.**
+`postupgrade.sh` räumte sie ab, sobald `cam.json` nicht leer war — das traf
+auch den Platzhalter `{}`, und nach einer gescheiterten Rückholung gab es
+weder Konfiguration noch Sicherung. Jetzt wird sie nur gelöscht, wenn die
+Konfiguration danach eine Adresse oder ein Aktionstoken trägt; sonst nennt
+eine Warnung ihren Pfad.
+
+Nachgestellt in WSL und mit PHP 7.4.33 und 8.4.24, nicht am Gerät
+(`Pruefung-ACTiKamera-1.9.21/`).
 
 ## Fassung 1.9.20 — die Minute mitten im Update (17.09.2026)
 

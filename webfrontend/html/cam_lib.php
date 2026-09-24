@@ -1523,7 +1523,12 @@ function cam_digest_header($wwwauth, $url, $user, $pass, $methode = 'GET',
     $w = array();
     // Die Werte stehen als  name="wert"  oder unquoted  name=wert  darin.
     if (preg_match_all('/(\w+)\s*=\s*(?:"([^"]*)"|([^,\s]+))/', $wwwauth, $m, PREG_SET_ORDER)) {
-        foreach ($m as $t) { $w[strtolower($t[1])] = $t[2] !== '' ? $t[2] : $t[3]; }
+        /* Gruppe 3 (unquoted) ist bei einem gequoteten Treffer die letzte und
+           unbeteiligte - PREG_SET_ORDER laesst sie dann ganz weg. Ein leerer
+           gequoteter Wert (opaque="") endete bis 1.9.20 in "Undefined
+           offset/array key 3" und NULL, und opaque fehlte in der Antwort
+           (Pruefung-ACTiKamera-1.9.21/messe_camlib.php, Faelle D1 und D4). */
+        foreach ($m as $t) { $w[strtolower($t[1])] = isset($t[3]) ? $t[3] : $t[2]; }
     }
     if (!isset($w['realm']) || !isset($w['nonce'])) { return ''; }
 
@@ -1778,7 +1783,10 @@ function cam_snapshot($anlass = 'manuell', $id = 1)
     // Millisekunden im Namen: Klingel und Bewegung koennen in derselben
     // Sekunde ausloesen. Bei gleichem Anlass waere der Name sonst identisch
     // und die zweite Aufnahme ueberschriebe die erste.
-    $ms = explode('.', sprintf('%.3f', microtime(true)));
+    // %F statt %f: %f setzt das Dezimalzeichen der Locale ein. Unter einer
+    // Komma-Locale gab es keinen Punkt, und die Millisekunden fielen auf
+    // '000' (Pruefung-ACTiKamera-1.9.21/messe_camlib.php, Fall M1).
+    $ms = explode('.', sprintf('%.3F', microtime(true)));
     $name = date('Ymd_His') . '-' . (isset($ms[1]) ? $ms[1] : '000')
           . '_' . preg_replace('/[^a-z0-9]/i', '', $anlass) . '.jpg';
     if (@file_put_contents($dir . '/' . $name, $body) === false) {
