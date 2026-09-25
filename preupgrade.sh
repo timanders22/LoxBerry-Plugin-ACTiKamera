@@ -17,6 +17,41 @@ ARGV5=$5
 PFOLDER="${ARGV3:-actikamera}"
 BASE="${ARGV5:-$LBHOMEDIR}"
 
+# Die LoxBerry-Wurzel. Der Installer uebergibt sie als fuenftes Argument;
+# $LBHOMEDIR gilt nur mit config/plugins UND data/plugins darunter. Sonst wird
+# vom eigenen Ablageort aufwaerts gesucht, und Wurzel ist nur, was
+# config/plugins, data/plugins UND config/system/general.json traegt
+# (Regeln/06). Ohne Wurzel wird gewarnt und nichts getan.
+#
+# Bis 1.9.21 stand hier nur BASE="${ARGV5:-$LBHOMEDIR}": fehlten beide, lagen
+# alle Pfade ab / - in einem Wurzelbaum mit Schreibrecht legte preupgrade.sh
+# /data/plugins/<ordner>.upgrade_laeuft an, postinstall.sh
+# /data/plugins/<ordner>.archiv, postupgrade.sh /log/plugins/<ordner>, und die
+# Deinstallation loeschte /config/plugins/<ordner>.backup.json (in WSL
+# gemessen, Pruefung-ACTiKamera-1.9.22, Faelle W1-W5).
+ac_wurzel_suchen() {
+    ac_v=$(cd "$(dirname "$(readlink -f "$0")")" 2>/dev/null && pwd)
+    ac_i=0
+    while [ -n "$ac_v" ] && [ "$ac_v" != "/" ] && [ $ac_i -lt 8 ]; do
+        if [ -d "$ac_v/config/plugins" ] && [ -d "$ac_v/data/plugins" ] \
+           && [ -f "$ac_v/config/system/general.json" ]; then
+            echo "$ac_v"; return 0
+        fi
+        ac_v=$(dirname "$ac_v"); ac_i=$((ac_i + 1))
+    done
+    return 1
+}
+if [ -z "$BASE" ] || [ ! -d "$BASE/config/plugins" ] || [ ! -d "$BASE/data/plugins" ]; then
+    BASE=$(ac_wurzel_suchen) || BASE=""
+fi
+if [ -z "$BASE" ]; then
+    echo "<WARNING> Es wurde kein LoxBerry-Wurzelverzeichnis gefunden: weder als"
+    echo "<WARNING> fuenftes Argument noch in \$LBHOMEDIR, und oberhalb dieses Skripts"
+    echo "<WARNING> traegt kein Verzeichnis config/plugins, data/plugins und"
+    echo "<WARNING> config/system/general.json. Es wurde nichts gesichert."
+    exit 1
+fi
+
 # 0. Die Marke "Aktualisierung laeuft" - als ERSTES, vor jedem anderen
 #    Schritt. Zwischen der neuen Cron-Datei und postinstall.sh liegt fast eine
 #    Minute (Regeln/06). Solange die Marke gilt, speichert die Plugin-Seite

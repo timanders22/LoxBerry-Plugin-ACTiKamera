@@ -43,27 +43,43 @@ if (PHP_SAPI !== 'cli') {
 
 /* Die Bibliothek liegt in einem ANDEREN Baum: im Archiv nebenan, auf dem
  * installierten LoxBerry drei Ebenen hoeher unter webfrontend/html/plugins/.
- * Deshalb eine Kandidatenliste und ein Abbruch mit Rueckgabewert 1, der
- * sagt, wo gesucht wurde - ein Cron, der still stirbt, faellt niemandem auf. */
-$ac_ordner = getenv('LBPPLUGINDIR');
-if ($ac_ordner === false || $ac_ordner === '') { $ac_ordner = basename(__DIR__); }
-$ac_home = getenv('LBHOMEDIR');
-$ac_kandidaten = array();
-if ($ac_home) {
-    $ac_kandidaten[] = $ac_home . '/webfrontend/html/plugins/' . $ac_ordner . '/cam_lib.php';
+ * Installiert oder Archiv entscheidet der eigene Ablageort: nur unter
+ * .../bin/plugins/<ordner> gilt der installierte Kandidat, sonst die
+ * Bibliothek daneben. Ob sie dann auf der Anlage arbeiten darf, entscheidet
+ * cam_paths() (Archivmodus), und cam_keine_wurzel_abbruch() haelt diesen Lauf
+ * an, wenn nicht.
+ *
+ * Bis 1.9.21 stand der installierte Kandidat auch im Archiv vorn: aus einem
+ * Archiv unter / wurde //webfrontend/html/plugins/bin/cam_lib.php geladen
+ * (Fall T4), und ein Archiv unter einer echten Wurzel schrieb den Herzschlag
+ * der Anlage und sendete deren MQTT-Werte (Faelle A1-A4, in WSL gemessen,
+ * Pruefung-ACTiKamera-1.9.22). Abgebrochen wird mit Rueckgabewert 1 und der
+ * Angabe, wo gesucht wurde - ein Cron, der still stirbt, faellt niemandem
+ * auf. */
+if (basename(dirname(__DIR__)) === 'plugins' && basename(dirname(dirname(__DIR__))) === 'bin') {
+    $ac_kandidaten = array(dirname(dirname(dirname(__DIR__))) . '/webfrontend/html/plugins/'
+                         . basename(__DIR__) . '/cam_lib.php');
+} else {
+    $ac_kandidaten = array(dirname(__DIR__) . '/webfrontend/html/cam_lib.php');
 }
-$ac_kandidaten[] = dirname(dirname(dirname(__DIR__))) . '/webfrontend/html/plugins/'
-                 . basename(__DIR__) . '/cam_lib.php';
-$ac_kandidaten[] = dirname(__DIR__) . '/webfrontend/html/cam_lib.php';
 $ac_gefunden = false;
 foreach ($ac_kandidaten as $ac_kand) {
     if (is_file($ac_kand)) { require_once $ac_kand; $ac_gefunden = true; break; }
 }
-if (!$ac_gefunden) {
+if (!$ac_gefunden || !function_exists('cam_keine_wurzel_abbruch')) {
     fwrite(STDERR, "cam_cron.php: cam_lib.php nicht gefunden, gesucht in: "
                    . implode(', ', $ac_kandidaten) . "
 ");
     exit(1);
+}
+cam_keine_wurzel_abbruch('cam_cron.php');
+
+/* ---------------- Deinstallation: zurueckbehaltene Themen leeren ----------
+ * uninstall/uninstall ruft diese Datei mit --mqtt-leeren, LBHOMEDIR und
+ * LBPPLUGINDIR, VOR dem Loeschen der Ordner (Praefix und Port stehen in der
+ * Konfiguration). Sonst tut dieser Aufruf nichts. */
+if (in_array('--mqtt-leeren', isset($argv) ? (array) $argv : array(), true)) {
+    exit(cam_mqtt_leeren());
 }
 
 /* ---------------- Waehrend einer Aktualisierung: nichts tun ----------------

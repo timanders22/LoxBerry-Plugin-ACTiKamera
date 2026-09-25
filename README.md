@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.21 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.22 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -229,8 +229,9 @@ und nicht die Diagnose lesen.
   deshalb seit 1.9.8 tokenpflichtig
 - Die Formulare der Oberfläche tragen ein Merkmal gegen fremde Absender
 - Die Deinstallation überschreibt und löscht die Zweitschrift mit den
-  Zugangsdaten und räumt die Marke `data/plugins/actikamera.upgrade_laeuft`
-  weg; die Aufnahmen bleiben absichtlich stehen. Das Skript liegt seit 1.9.20
+  Zugangsdaten, räumt die Marke `data/plugins/actikamera.upgrade_laeuft`
+  weg und leert seit 1.9.22 die zurückbehaltenen MQTT-Themen des Plugins;
+  die Aufnahmen bleiben absichtlich stehen. Das Skript liegt seit 1.9.20
   zweimal byteweise gleich im Archiv: als `uninstall/uninstall` (der Ort, von
   dem gemessen ist, dass LoxBerry ihn ausführt) und weiterhin als
   `uninstall.sh` an der Wurzel
@@ -259,6 +260,90 @@ so wie die Zweitschrift der Konfiguration es seit jeher tut. Ein eigener Ort
 > Handgriff vorher, auf dem LoxBerry:
 >
 >     mv /opt/loxberry/data/plugins/actikamera /opt/loxberry/data/plugins/actikamera.archiv
+
+## Fassung 1.9.22 — Nachlese: Retain, Archiv, Wurzel, Zweitschrift (25.09.2026)
+
+**Nicht mehr zurückbehalten: `OK`, `ERREICHBAR`, `FEHLER`, `PUSHAKTIV`, `PTEST`**
+(je Kamera, `PTEST` nur einmal). `OK` heißt hier „Adresse eingerichtet" und
+wird vom Plugin aus seiner Konfiguration gebildet, `ERREICHBAR` und `FEHLER`
+aus dem Erfolg seiner eigenen Abfrage — keiner der drei Werte kommt von der
+Kamera. `PUSHAKTIV` und `PTEST` werden allein durch die Uhr falsch. Stand ein
+solcher Wert zurückbehalten im Broker, las Loxone nach einem Neustart von
+Broker oder Gateway den letzten Stand eines Minutentakts, der vielleicht längst
+steht. `ok` und jede andere Aussage des Plugins über sich selbst gehen deshalb
+nie retained hinaus, ebenso nichts, was allein durch die Uhr veraltet. Zurückbehalten
+bleiben die Zustände der Kamera und des Archivs: `BILDER`, `CLIPS`,
+`ZEITRAFFER`, `PERSON`, `OBJEKTE`, `PUSH`, `letztes_bild`, `anlass`, `zeit`.
+
+**Die Altwerte aus 1.9.19 bis 1.9.21 werden abgeräumt.** Der Minutentakt fragt
+den Broker selbst (MQTT 3.1.1, mit `Brokeruser`/`Brokerpass` aus der
+`general.json`, ohne Zusatzbibliothek), welche der alten Themen dort noch
+stehen, und schickt für genau diese eine leere `retain`-Nachricht über den
+UDP-Eingang des Gateways — unmittelbar vor dem gültigen Wert. Erst wenn der
+Broker meldet, dass nichts mehr steht, legt er den Merker
+`data/plugins/actikamera/retain_altlast_bestaetigt` (Kennung mit Präfix und
+Themenliste); ein Senden allein zählt nicht, denn der UDP-Eingang verwirft
+unter Last Datagramme, ohne dass der Absender es merkt. Eine abgewiesene
+Anmeldung (CONNACK ≠ 0) oder ein abgelehnter Filter (SUBACK 0x80) heißt „nicht
+zu fragen", nie „nichts da".
+
+**Grenze:** Ist der Broker nicht zu fragen, gibt es keinen Beleg und damit
+keinen Merker. Dann geht in **jedem** Minutentakt vor jedem der alten Themen
+ein leeres `retain` hinaus, dazu der Wert selbst (bei einer Kamera zehn
+Datagramme mehr je Minute),
+und am Miniserver kann dabei kurz ein leerer Wert ankommen, unmittelbar gefolgt
+vom gültigen. Das Protokoll sagt das einmal am Tag. Was stehen bleibt, lässt
+sich mit `mosquitto_pub -r -n -t <thema>` von Hand löschen.
+
+**Der volle Satz geht wieder hinaus** — einmal nach dem Update und nach jedem
+Wechsel des Themenpräfixes, danach spätestens alle 30 Minuten. Bis 1.9.21
+merkte sich der Doppelt-senden-Filter unter `/tmp/actikamera` nur Werte; ein
+Wert, der sich nie änderte, ging nach einem Update nie wieder hinaus (am Gerät
+10.09.2026 für 1.9.19 gemessen: 5 von 14 zurückbehaltenen Themen im Broker).
+Ohne diesen Satz käme ein flüchtiges Thema wie `OK` nach einem Neustart des
+Miniservers erst bei der nächsten Änderung wieder.
+
+**Die Deinstallation leert die zurückbehaltenen Themen** des Plugins — für
+alle vier Kameraplätze, auch bei ausgeschaltetem MQTT. Sie fragt vorher und
+nach jeder Runde den Broker, schickt nur, was noch steht, höchstens drei
+Runden, und sagt am Ende, ob der Broker leer ist oder welche Themen von Hand
+zu löschen bleiben.
+
+**Ein ausgepacktes Archiv wirkt nicht mehr auf die Anlage.** Die Pfade der
+Anlage gelten nur, wenn das Plugin dort installiert liegt oder `LBHOMEDIR`
+**und** `LBPPLUGINDIR` ausdrücklich gesetzt sind; sonst bleibt alles im
+Archivordner. Bis 1.9.21 schrieb `bin/cam_cron.php` aus einem Archiv den
+Herzschlag der Anlage und sendete deren MQTT-Werte, `cam.php` nahm das
+Aktionstoken der Anlage an und legte `PTEST` in deren Zwischenspeicher, die
+Oberfläche schrieb deren Konfiguration. `cam_cron.php` aus einem Archiv endet
+jetzt mit Rückgabewert 1 und nennt die gefundene Installation.
+
+**Keine Pfade ab `/` mehr.** Die Installationsskripte (`preupgrade.sh`,
+`postinstall.sh`, `postupgrade.sh`, `uninstall/uninstall`) nehmen die Wurzel
+aus dem fünften Argument oder `LBHOMEDIR`, sonst nur ein Verzeichnis mit
+`config/system/general.json`; ohne Wurzel warnen sie und tun nichts. Bis 1.9.21
+lagen dann alle Pfade ab `/`. Die Bibliothek erkennt die Wurzel ebenfalls nur
+an `general.json`, die Sprachdateien kommen ohne Wurzel aus dem Plugin selbst
+(nicht mehr aus `/templates/…` oder dem festen Heimpfad des Geräts), und
+`htmlauth/index.php` und `bin/cam_cron.php` suchen die Bibliothek nur dann im
+installierten Baum, wenn sie selbst dort liegen.
+
+**Zweitschrift und Upgrade-Sicherung nach Inhalt.** Inhalt heißt: lesbares
+JSON und für mindestens eine Kamera eine Adresse oder ein Aktionstoken. Die
+Zweitschrift `actikamera.backup.json` wird nur noch eingespielt, wenn sie
+Inhalt trägt und `cam.json` keinen; ein verdrängter Stand bleibt als
+`cam.json.kaputt` (0600) liegen. Die Upgrade-Sicherung wird nur mit Inhalt
+zurückgeholt und erst gelöscht, wenn sie byteweise in `cam.json` angekommen
+ist — bis 1.9.21 genügte dafür irgendein Inhalt in `cam.json`, auch der
+ältere aus der Zweitschrift. Meldungen wie „wiederhergestellt" oder
+„zurückgeholt" stehen nur noch da, wenn es geschehen ist.
+
+Der Reiter **Test** prüft neu, dass keine dieser Aussagen wieder retained
+geriete.
+
+Nachgestellt in WSL mit Attrappen für UDP-Eingang und Broker, PHP 7.4.33 und
+8.4.24, nicht am Gerät (`Pruefung-ACTiKamera-1.9.22/`: 71 Fälle, vorher 49
+rot, nachher 0; Eichung 20 Rückbauten, jeder an seinen Fällen rot).
 
 ## Fassung 1.9.21 — Schlusswort nach dem Update, Digest, Bildnamen (24.09.2026)
 

@@ -21,29 +21,46 @@ date_default_timezone_set('Europe/Berlin');
 /* Den LoxBerry-Wurzelordner ohne festen Systempfad bestimmen.
  *
  * Vom eigenen Ablageort aufwaerts, bis ein Verzeichnis gefunden ist, das
- * config/plugins UND webfrontend enthaelt. Das trifft die uebliche
- * Installation genauso wie eine an einem anderen Ort - und es trifft auch
- * den Fall, dass das Plugin noch als entpacktes Archiv daliegt (dann findet
- * es nichts und gibt einen Leerstring zurueck, was der Aufrufer ohnehin
- * abfangen muss).
+ * config/plugins, data/plugins UND config/system/general.json enthaelt
+ * (Regeln/06). Rueckgabe '' heisst "keine Wurzel".
  *
- * Der Name traegt kein Plugin-Kuerzel und ist deshalb abgesichert: zwei
- * Bibliotheken landen nie im selben Prozess, aber die Pruefung kostet nichts.
+ * Bis 1.9.21 genuegten config/plugins und webfrontend - beide hinterlaesst
+ * jeder Pruefstand. Die Bibliothek, abgelegt wie installiert in einem
+ * fremden Baum ohne general.json, nahm diesen Baum als Wurzel, und die
+ * Oberflaeche schrieb dort ihre Konfiguration (in WSL gemessen,
+ * Pruefung-ACTiKamera-1.9.22, Faelle W8 und W10). Die Suche hiess bis
+ * 1.9.21 anders und stand ein zweites Mal in htmlauth/index.php; weil diese
+ * Datei sie zuerst definierte, galt dort deren Fassung.
  */
-if (!function_exists('lb_wurzel_ermitteln')) {
-    function lb_wurzel_ermitteln()
-    {
-        $d = __DIR__;
-        for ($i = 0; $i < 8; $i++) {
-            if (is_dir($d . '/config/plugins') && is_dir($d . '/webfrontend')) {
-                return $d;
-            }
-            $eltern = dirname($d);
-            if ($eltern === $d) { break; }
-            $d = $eltern;
+function cam_wurzel_suchen()
+{
+    $v = __DIR__;
+    for ($i = 0; $i < 8 && $v !== '' && $v !== dirname($v); $i++) {
+        if (is_dir($v . '/config/plugins') && is_dir($v . '/data/plugins')
+            && is_file($v . '/config/system/general.json')) {
+            return $v;
         }
-        return '';
+        $v = dirname($v);
     }
+    return '';
+}
+
+/**
+ * Die Wurzel: erst LBHOMEDIR, dann die Suche - und danach nichts mehr.
+ *
+ * Ein gesetztes LBHOMEDIR gilt mit config/plugins UND data/plugins darunter;
+ * general.json wird dort nicht verlangt, damit die Attrappen der Pruefkette
+ * (Werkzeuge/lb) weiter tragen. Bis 1.9.21 fiel cam_t() danach noch auf
+ * den festen Heimpfad des Geraets zurueck. Bauart bw_lbhome() aus
+ * Beschattungswaechter 0.9.21, dort aus tb_lbhome() (Spotpreis-Tibber 0.9.19).
+ */
+function cam_lbhome()
+{
+    $h = getenv('LBHOMEDIR');
+    if (is_string($h) && $h !== '' && is_dir($h . '/config/plugins') && is_dir($h . '/data/plugins')) {
+        return rtrim($h, '/');
+    }
+    return cam_wurzel_suchen();
 }
 
 /* ==================================================================
@@ -229,40 +246,119 @@ function cam_letztesbild_ablegen($id, $body)
     return $ok;
 }
 
+/**
+ * Die Pfade des Plugins.
+ *
+ * ARCHIVMODUS. Die Pfade DER ANLAGE gelten nur, wenn diese Bibliothek dort
+ * installiert liegt (<Wurzel>/webfrontend/html/plugins/<ordner>, physisch
+ * verglichen) oder der Aufrufer Wurzel UND Ordner ausdruecklich nennt
+ * ($LBHOMEDIR und $LBPPLUGINDIR - so arbeiten die Pruefwerkzeuge mit ihrer
+ * Attrappe, und so ruft uninstall/uninstall bin/cam_cron.php). Sonst ist das
+ * ein ausgepacktes Archiv oder ein Pruefordner, und alles bleibt in dessen
+ * eigenem Ordner.
+ *
+ * Bis 1.9.21 nahm ein Archiv $LBHOMEDIR (am Geraet steht es in
+ * /etc/environment) oder die gefundene Wurzel: bin/cam_cron.php aus einem
+ * Archiv schrieb den Herzschlag der Anlage und sendete deren MQTT-Werte,
+ * cam.php nahm das Aktionstoken der Anlage an, und die Oberflaeche schrieb
+ * deren Konfiguration (in WSL gemessen, Pruefung-ACTiKamera-1.9.22, Faelle
+ * A1-A6). Ohne Wurzel lag der Zwischenspeicher in /tmp/actikamera - demselben
+ * Ordner, aus dem die Anlage PTEST liest. Bauart bw_paths() aus
+ * Beschattungswaechter 0.9.21, dort aus tb_paths() (Spotpreis-Tibber 0.9.19).
+ *
+ * 'ordner' ist der Ordnername auf der Anlage (fuer Adressen und Pfade),
+ * 'fremd' im Archivmodus die gefundene Wurzel, in der diese Datei NICHT
+ * installiert liegt - fuer die Meldung von cam_keine_wurzel_abbruch().
+ */
 function cam_paths()
 {
-    $lbhomedir = getenv('LBHOMEDIR') ?: lb_wurzel_ermitteln();
-    $plugindir = getenv('LBPPLUGINDIR') ?: basename(__DIR__);
-    if ($lbhomedir && is_dir($lbhomedir . '/config/plugins/' . $plugindir) === false) {
-        $plugindir = 'actikamera';
+    static $p = null;
+    if ($p !== null) {
+        return $p;
     }
-    if ($lbhomedir) {
-        return array(
-            'config' => $lbhomedir . '/config/plugins/' . $plugindir . '/cam.json',
-            'backup' => $lbhomedir . '/config/plugins/' . $plugindir . '.backup.json',
-            'log' => $lbhomedir . '/log/plugins/' . $plugindir . '/cam.log',
-            /* 'data' ist das Verzeichnis, das der Installer bei jedem Update
-               vollstaendig abraeumt - dort liegen nur fluechtige Sachen.
-               'archiv' liegt DANEBEN und ueberlebt, wie die Zweitschrift der
-               Konfiguration eine Ebene darueber. */
-            'datadir' => $lbhomedir . '/data/plugins/' . $plugindir,
-            'archiv' => $lbhomedir . '/data/plugins/' . $plugindir . '.archiv',
-            'web' => $lbhomedir . '/webfrontend/html/plugins/' . $plugindir,
-            'tmp' => '/tmp/actikamera',
-            'lbhome' => $lbhomedir,
+    /* Von LBPPLUGINDIR zaehlt nur der letzte Pfadteil, und die Namen, die
+       nachweislich kein Pluginordner sind, gelten auch dort nicht. */
+    $lbp = basename(rtrim((string) getenv('LBPPLUGINDIR'), '/'));
+    $lbp_gilt = ($lbp !== '' && !in_array($lbp,
+        array('.', '/', 'html', 'htmlauth', 'plugins', 'bin', 'webfrontend'), true));
+    $lb = cam_lbhome();
+    $gefunden = $lb;
+    $ordner = basename(__DIR__);
+    if ($lb !== '') {
+        $soll = @realpath($lb . '/webfrontend/html/plugins/' . basename(__DIR__));
+        $ist = @realpath(__DIR__);
+        $installiert = ($soll !== false && $ist !== false && $soll === $ist);
+        $ausdruecklich = $lbp_gilt && $lb === rtrim((string) getenv('LBHOMEDIR'), '/');
+        if ($installiert) {
+            $ordner = basename(__DIR__);
+        } elseif ($ausdruecklich) {
+            $ordner = $lbp;
+        } else {
+            $lb = '';
+        }
+    }
+    if ($lb === '') {
+        /* Neben dem Plugin, nie an der Laufwerkswurzel und nie im
+           Zwischenspeicher der Anlage. */
+        $base = dirname(dirname(__DIR__));
+        $p = array(
+            'config' => $base . '/config/cam.json',
+            'backup' => $base . '/config/cam.backup.json',
+            'log' => $base . '/log/cam.log',
+            'datadir' => $base . '/data',
+            'archiv' => $base . '/data/archiv',
+            'web' => __DIR__,
+            'tmp' => $base . '/tmp',
+            'lbhome' => '',
+            'ordner' => $lbp_gilt ? $lbp : 'actikamera',
+            'fremd' => $gefunden,
         );
+        return $p;
     }
-    $base = dirname(dirname(__DIR__));
-    return array(
-        'config' => $base . '/config/cam.json',
-        'backup' => $base . '/config/cam.backup.json',
-        'log' => sys_get_temp_dir() . '/actikamera/cam.log',
-        'datadir' => sys_get_temp_dir() . '/actikamera/data',
-        'archiv' => sys_get_temp_dir() . '/actikamera/archiv',
-        'web' => __DIR__,
-        'tmp' => sys_get_temp_dir() . '/actikamera',
-        'lbhome' => '',
+    $p = array(
+        'config' => $lb . '/config/plugins/' . $ordner . '/cam.json',
+        'backup' => $lb . '/config/plugins/' . $ordner . '.backup.json',
+        'log' => $lb . '/log/plugins/' . $ordner . '/cam.log',
+        /* 'datadir' ist das Verzeichnis, das der Installer bei jedem Update
+           vollstaendig abraeumt - dort liegen nur fluechtige Sachen.
+           'archiv' liegt DANEBEN und ueberlebt, wie die Zweitschrift der
+           Konfiguration eine Ebene darueber. */
+        'datadir' => $lb . '/data/plugins/' . $ordner,
+        'archiv' => $lb . '/data/plugins/' . $ordner . '.archiv',
+        'web' => $lb . '/webfrontend/html/plugins/' . $ordner,
+        'tmp' => '/tmp/actikamera',
+        'lbhome' => $lb,
+        'ordner' => $ordner,
+        'fremd' => '',
     );
+    return $p;
+}
+
+/**
+ * Fuer bin/cam_cron.php: ohne Wurzel oder aus einem Archiv heraus nichts tun,
+ * eine Meldung auf stderr, Rueckgabewert 1 - VOR allem, was sendet oder
+ * schreibt. Bauart bw_keine_wurzel_abbruch() (Beschattungswaechter 0.9.21).
+ */
+function cam_keine_wurzel_abbruch($programm)
+{
+    $p = cam_paths();
+    if ($p['lbhome'] !== '') {
+        return;
+    }
+    if ($p['fremd'] !== '') {
+        fwrite(STDERR, $programm . ': Diese Datei liegt nicht in der Installation unter '
+            . $p['fremd'] . "\n"
+            . '(ausgepacktes Archiv oder Pruefordner). Damit nichts in die Anlage kommt,' . "\n"
+            . 'wurde nichts gesendet und nichts geschrieben.' . "\n"
+            . 'Abhilfe: das Programm aus ' . $p['fremd'] . '/bin/plugins/<ordner> aufrufen' . "\n"
+            . 'oder LBHOMEDIR und LBPPLUGINDIR ausdruecklich setzen.' . "\n");
+        exit(1);
+    }
+    fwrite(STDERR, $programm . ': Es wurde kein LoxBerry-Wurzelverzeichnis gefunden.' . "\n"
+        . '$LBHOMEDIR ist nicht gesetzt, und oberhalb von ' . __DIR__ . ' traegt kein' . "\n"
+        . 'Verzeichnis config/plugins, data/plugins und config/system/general.json.' . "\n"
+        . 'Es wurde nichts gesendet und nichts geschrieben.' . "\n");
+    exit(1);
 }
 
 /* ==================================================================
@@ -2495,9 +2591,17 @@ function cam_basisfelder()
        (gemessen: acti/ALTER 47, eine Minute spaeter 48). Wie alt die letzte
        Aufnahme ist, sagt seit 1.9.19 das retained Thema "zeit" - ein
        absoluter Zeitstempel, den der Miniserver selbst verrechnet. In der
-       HTTP-Antwortzeile bleibt ALTER unveraendert stehen. */
+       HTTP-Antwortzeile bleibt ALTER unveraendert stehen.
+
+       Seit 1.9.22 steht die achte Spalte bei OK, ERREICHBAR, FEHLER,
+       PUSHAKTIV und PTEST auf 0 (Regeln/07, Abschnitt 3): OK, ERREICHBAR
+       und FEHLER stellt der DIENST fest - aus seiner Konfiguration bzw.
+       aus seiner eigenen Abfrage -, nicht die Kamera; PUSHAKTIV und PTEST
+       werden allein durch die Uhr falsch. Zurueckbehalten blieben sie nach
+       einem Ausfall des Minutentakts als letzter Stand stehen. Die
+       Altwerte raeumt cam_mqtt_zustand() ab (cam_mqtt_altlast()). */
     return array(
-        'OK'         => array(0, 0, 1, 'FELD.OK', '', 1, 1, 1),
+        'OK'         => array(0, 0, 1, 'FELD.OK', '', 1, 1, 0),
         'ALTER'      => array(1, -1, 100000, 'FELD.ALTER', '<v.1> min', 0, 1, 0),
         'BILDER'     => array(1, 0, 100000, 'FELD.BILDER', '', 1, 1, 1),
         'CLIPS'      => array(1, 0, 100000, 'FELD.CLIPS', '', 1, 1, 1),
@@ -2505,10 +2609,10 @@ function cam_basisfelder()
         'PERSON'     => array(0, 0, 1, 'FELD.PERSON', '', 1, 1, 1),
         'OBJEKTE'    => array(1, 0, 100, 'FELD.OBJEKTE', '', 1, 1, 1),
         'PUSH'       => array(0, 0, 1, 'FELD.PUSH', '', 1, 0, 1),
-        'PUSHAKTIV'  => array(0, 0, 1, 'FELD.PUSHAKTIV', '', 1, 1, 1),
-        'PTEST'      => array(0, 0, 1, 'FELD.PTEST', '', 1, 0, 1),
-        'ERREICHBAR' => array(0, -1, 1, 'FELD.ERREICHBAR', '', 1, 1, 1),
-        'FEHLER'     => array(1, 0, 100000, 'FELD.FEHLER', '', 1, 1, 1),
+        'PUSHAKTIV'  => array(0, 0, 1, 'FELD.PUSHAKTIV', '', 1, 1, 0),
+        'PTEST'      => array(0, 0, 1, 'FELD.PTEST', '', 1, 0, 0),
+        'ERREICHBAR' => array(0, -1, 1, 'FELD.ERREICHBAR', '', 1, 1, 0),
+        'FEHLER'     => array(1, 0, 100000, 'FELD.FEHLER', '', 1, 1, 0),
         'HERZ'       => array(1, -1, 100000, 'FELD.HERZ', '<v.1> min', 0, 0, 0),
     );
 }
@@ -2617,7 +2721,7 @@ function cam_mqtt_themenliste()
 function cam_mqtt_quelltext_themen()
 {
     $p = cam_paths();
-    $ordner = getenv('LBPPLUGINDIR') ?: basename(dirname(__FILE__));
+    $ordner = $p['ordner'];
     $dateien = array(__FILE__);
     if ($p['lbhome'] !== '') {
         $dateien[] = $p['lbhome'] . '/bin/plugins/' . $ordner . '/cam_cron.php';
@@ -2790,21 +2894,48 @@ function cam_mqtt_zustand($erzwingen = false)
     }
     $merker = cam_paths()['tmp'] . '/mqtt_letzte.json';
     $vorher = cam_json_lesen($merker);
-    if ($erzwingen) { $vorher = array(); }
+    $praefix = cam_mqtt_praefix($cfg);
+    /* Der VOLLE Satz geht hinaus, wenn der Merker eine andere Form traegt
+       (Vorfassung, anderes Praefix, geaenderte Retain-Tabelle) und
+       spaetestens alle CAM_MQTT_VOLL_S Sekunden (Regeln/07, Abschnitt 2:
+       "Vollen Satz alle 30 Minuten; er muss bleiben"). Bis 1.9.21 ging
+       nur, was sich geaendert hatte - ein fluechtiges Thema, das sich nie
+       aendert, kaeme nach einem Neustart von Broker oder Miniserver nie
+       wieder (Faelle R9, R10, R12). */
+    $form = cam_mqtt_form($praefix, array_keys($werte));
+    $jetzt = time();
+    $voll_alt = (isset($vorher['_voll']) && preg_match('/^[0-9]{1,12}$/', (string) $vorher['_voll']))
+        ? (int) $vorher['_voll'] : -1;
+    $voll = $erzwingen
+        || !isset($vorher['_form']) || (string) $vorher['_form'] !== $form
+        || $voll_alt < 0 || ($jetzt - $voll_alt) >= CAM_MQTT_VOLL_S || ($jetzt - $voll_alt) < -300;
     $neu = array();
     foreach ($werte as $k => $v) {
-        if (!array_key_exists($k, $vorher) || (string) $vorher[$k] !== (string) $v) { $neu[$k] = $v; }
+        if ($voll || !array_key_exists($k, $vorher) || (string) $vorher[$k] !== (string) $v) { $neu[$k] = $v; }
+    }
+    /* Altwerte aus 1.9.19 bis 1.9.21: leeres retain UNMITTELBAR vor dem
+       gueltigen Wert, deshalb geht jedes abzuraeumende Thema in diesem
+       Lauf mit seinem Wert hinaus, auch unveraendert (Fall R5). */
+    $leeren = array();
+    $ac_alt = cam_mqtt_altlast($praefix);
+    foreach ($ac_alt['themen'] as $ac_t) {
+        if (array_key_exists($ac_t, $werte)) {
+            $leeren[] = $ac_t;
+            $neu[$ac_t] = $werte[$ac_t];
+        }
     }
     if (!$neu) { return 0; }
     /* Der Merker wird nur fortgeschrieben, wenn wirklich etwas hinausging.
        Bis 1.9.7 stand er unbedingt da - ein Lauf ohne Broker, ohne UDP-Port
        oder ohne Netzverbindung galt danach als erledigt, und die Werte kamen
-       erst bei der naechsten Aenderung wieder. OK und PUSH stehen tagelang
-       gleich; die fehlten dann dauerhaft. */
-    if (cam_mqtt($neu) < 1) {
+       erst bei der naechsten Aenderung wieder. */
+    if (cam_mqtt($neu, $leeren) < 1) {
         return 0;
     }
-    $js = json_encode($werte);
+    $ablage = $werte;
+    $ablage['_form'] = $form;
+    $ablage['_voll'] = $voll ? $jetzt : $voll_alt;
+    $js = json_encode($ablage);
     if ($js !== false) { @file_put_contents($merker, $js, LOCK_EX); }
     return count($neu);
 }
@@ -3011,7 +3142,7 @@ function cam_vorlage_ausgang($host = '')
 function cam_oberflaeche_pfad()
 {
     $p = cam_paths();
-    $ordner = getenv('LBPPLUGINDIR') ?: basename(__DIR__);
+    $ordner = $p['ordner'];
     $kandidaten = array();
     if ($p['lbhome'] !== '') {
         $kandidaten[] = $p['lbhome'] . '/webfrontend/htmlauth/plugins/' . $ordner . '/index.php';
@@ -3264,6 +3395,27 @@ function cam_pruefungen()
                           count(cam_mqtt_themenliste())));
     }
 
+    /* Keine Aussage des Dienstes ueber sich selbst und nichts, was allein
+       durch die Uhr falsch wird, geht retained hinaus (Regeln/07,
+       Abschnitt 3, Entscheidungen vom 18., 19. und 24.09.2026). Die Zeile
+       haelt die Retain-Tabelle gegen diese Liste und nennt jeden Eintrag,
+       der zurueckfiele. */
+    $ac_zu = array();
+    $ac_bf = cam_basisfelder();
+    for ($ac_i = 1; $ac_i <= CAM_MAX; $ac_i++) {
+        foreach (cam_mqtt_altlast_staemme() as $ac_s) {
+            // PTEST gibt es nur einmal (siebte Spalte 0), nicht je Kamera.
+            if ($ac_i > 1 && empty($ac_bf[$ac_s][6])) { continue; }
+            if (cam_mqtt_retained($ac_s . cam_sx($ac_i))) { $ac_zu[$ac_s . cam_sx($ac_i)] = true; }
+        }
+    }
+    foreach (array('online', 'ts') as $ac_s) {
+        if (cam_mqtt_retained($ac_s)) { $ac_zu[$ac_s] = true; }
+    }
+    $zeile($ac_zu ? 0 : 1, cam_t('TEST.F_DIENSTAUSSAGE'),
+        $ac_zu ? sprintf(cam_t('TEST.A_DIENSTAUSSAGE_FEHL'), cam_e(implode(', ', array_keys($ac_zu))))
+               : cam_t('TEST.A_DIENSTAUSSAGE_OK'));
+
     /* Die feste Bildadresse gegen das Stromkennwort. Wer den Kamerastrom mit
        einem Kennwort schuetzt, aber das letzte Bild unter der festen Adresse
        liegen laesst, hat das aktuelle Bild seiner Haustuer offen im Netz -
@@ -3350,8 +3502,14 @@ function cam_mqtt_zustand_pruefen()
     return $aus;
 }
 
-/** Rueckgabe: Zahl der wirklich abgesetzten Meldungen (0 = nichts ging hinaus). */
-function cam_mqtt($werte)
+/**
+ * Rueckgabe: Zahl der wirklich abgesetzten Meldungen (0 = nichts ging hinaus).
+ *
+ * $leeren: Schluessel, deren zurueckbehaltener Altwert abgeraeumt wird - ein
+ * leeres "retain" unmittelbar vor dem gueltigen Wert, in derselben
+ * Verbindung (Bauform der Nachlese, berichtigt 25.09.2026).
+ */
+function cam_mqtt($werte, $leeren = array())
 {
     $cfg = cam_config();
     if (empty($cfg['mqtt_enabled'])) {
@@ -3372,7 +3530,7 @@ function cam_mqtt($werte)
     if (!$udpport) {
         return 0;
     }
-    $prefix = trim((string) $cfg['mqtt_topic']) !== '' ? trim((string) $cfg['mqtt_topic']) : 'acti';
+    $prefix = cam_mqtt_praefix($cfg);
     /* stream_socket_client() statt socket_create(): letzteres steckt in der
        Erweiterung php-sockets, die nicht garantiert geladen ist. Fehlt sie,
        ist das KEIN abfangbarer Fehler, sondern ein fataler - und im Cron, der
@@ -3384,7 +3542,17 @@ function cam_mqtt($werte)
         return 0;
     }
     $gesendet = 0;
+    $ac_leer = array();
+    foreach ((array) $leeren as $ac_t) { $ac_leer[(string) $ac_t] = true; }
     foreach ((array) $werte as $k => $v) {
+        if (isset($ac_leer[(string) $k])) {
+            /* Ein Leerzeichen hinter dem Thema, sonst keine Nutzlast: die
+               Form, die das Gateway als Loeschung liest (Regeln/07,
+               Nachtrag 19.09.2026: mqttgateway.pl:281, :311-315, :357). */
+            if (@fwrite($s, 'retain ' . $prefix . '/' . $k . ' ') !== false) {
+                $gesendet++;
+            }
+        }
         $wert = cam_mqtt_wert_saeubern($v);
         /* "retain" und "publish" gehen denselben Weg - das Gateway
            unterscheidet sie am ersten Wort (mqttgateway.pl, sub udpin).
@@ -3400,6 +3568,426 @@ function cam_mqtt($werte)
     }
     fclose($s);
     return $gesendet;
+}
+
+/* ==================================================================
+ * Altwerte im Broker, Rueckfrage beim Broker, Deinstallation
+ * ================================================================== */
+
+/** Spaetestens nach so vielen Sekunden geht der volle Satz erneut hinaus. */
+define('CAM_MQTT_VOLL_S', 1800);
+
+/** Der Themen-Praefix - EINE Stelle fuer Senden, Abraeumen und Leeren. */
+function cam_mqtt_praefix($cfg)
+{
+    $t = trim((string) (isset($cfg['mqtt_topic']) ? $cfg['mqtt_topic'] : ''));
+    return $t !== '' ? $t : 'acti';
+}
+
+/**
+ * Die Form des Doppelt-senden-Merkers: Praefix und fuer jedes Thema, ob es
+ * retained geht. Aendert sich eines davon, gilt der alte Merker nicht, und der
+ * volle Satz geht einmal hinaus.
+ *
+ * Anlass: Regeln/07, "Wer auf Retain umstellt, braucht nach dem Update einen
+ * Vollversand" - an dieser Linie am Geraet gemessen (1.9.19, 10.09.2026: von
+ * 14 zurueckbehaltenen Themen standen 5 im Broker, weil der Merker unter /tmp
+ * das Update ueberlebt). Bis 1.9.21 nie behoben; ein Merker aus einer
+ * Vorfassung liess unveraenderte Werte weiter liegen (Fall R9).
+ */
+function cam_mqtt_form($praefix, array $schluessel)
+{
+    $teile = array();
+    foreach ($schluessel as $k) {
+        $teile[] = $k . (cam_mqtt_retained($k) ? ':r' : ':f');
+    }
+    return 'form2 ' . $praefix . ' ' . implode(',', $teile);
+}
+
+/**
+ * Die Stamm-Themen, die 1.9.19 bis 1.9.21 retained sendeten und die seit
+ * 1.9.22 fluechtig gehen (Regeln/07, Abschnitt 3):
+ *   OK          "Adresse eingerichtet" - festgestellt vom Dienst aus seiner
+ *               Konfiguration, nicht von der Kamera; und ok ist nie retained
+ *               (Entscheidung vom 18.09.2026).
+ *   ERREICHBAR  setzt der Dienst aus dem Erfolg seiner EIGENEN Abfrage - ein
+ *               Ausfallmerker einer Geraeteschnittstelle (19.09.2026).
+ *   FEHLER      Fehlschlaege in Folge, derselbe Fall.
+ *   PUSHAKTIV   Push-Fenster nach einer Aufnahme, PTEST Test-Push fuer 300 s:
+ *               beide werden allein durch die Uhr falsch (24.09.2026).
+ */
+function cam_mqtt_altlast_staemme()
+{
+    return array('OK', 'ERREICHBAR', 'FEHLER', 'PUSHAKTIV', 'PTEST');
+}
+
+/** Die Altthemen der eingerichteten Kameras, ohne Praefix (OK, OK2, ...). */
+function cam_mqtt_altlast_liste()
+{
+    $felder = cam_basisfelder();
+    $aus = array();
+    foreach (cam_kameras() as $id) {
+        foreach (cam_mqtt_altlast_staemme() as $s) {
+            if (!isset($felder[$s]) || empty($felder[$s][5])) { continue; }
+            if (empty($felder[$s][6]) && $id !== 1) { continue; }
+            $aus[] = $s . cam_sx($id);
+        }
+    }
+    return $aus;
+}
+
+/** Nur einmal je Zeitraum ins Protokoll - eine Zeile je Minute waere Laerm. */
+function cam_log_selten($schluessel, $text, $sekunden = 3600)
+{
+    $d = cam_paths()['tmp'];
+    $f = $d . '/gemeldet_' . preg_replace('/[^a-z0-9_]/', '', (string) $schluessel);
+    $roh = is_file($f) ? trim((string) @file_get_contents($f)) : '';
+    if (preg_match('/^[0-9]{1,12}$/', $roh) && abs(time() - (int) $roh) < (int) $sekunden) {
+        return;
+    }
+    if (!is_dir($d)) { @mkdir($d, 0775, true); }
+    @file_put_contents($f, (string) time());
+    cam_log($text);
+}
+
+/**
+ * Den Broker fragen, welche der Themen $themen er zurueckbehaelt - in EINER
+ * Verbindung, ein SUBSCRIBE mit allen Filtern.
+ *
+ * Rueckgabe array('lage' => 'ok'|'unbekannt', 'belegt' => array(thema => true)).
+ * 'ok' heisst: der Broker hat die Anmeldung (CONNACK 0) UND jeden Filter
+ * (SUBACK-Rueckgabe unter 0x80, je Filter ein Byte) bestaetigt; was dann
+ * nicht unter 'belegt' steht, ist leer. 'unbekannt': er war nicht zu fragen
+ * (keine Wurzel, keine general.json, keine Verbindung, Anmeldung abgewiesen,
+ * Filter abgelehnt, keine Antwort) - das heisst nie "nichts belegt".
+ *
+ * Warum ueberhaupt fragen: das Abraeumen laeuft ueber den UDP-Eingang des
+ * Gateways, und dort meldet fwrite() auch fuer ein verworfenes Datagramm
+ * Erfolg (Regeln/07, "Ein Absender merkt nichts davon", Nachtrag 19.09.2026).
+ * Belegt ist das Abraeumen erst, wenn der Broker selbst sagt, dass nichts
+ * mehr dasteht.
+ *
+ * MQTT 3.1.1 von Hand, nur CONNECT, SUBSCRIBE (QoS 0) und DISCONNECT - ohne
+ * fremde Bibliothek. Bauart bw_mqtt_behalten_liste() (Beschattungswaechter
+ * 0.9.21, dort aus Tibber 0.9.19 und KODI-NG 1.2.10). Belegt ist ein Thema
+ * nur am EMPFANGENEN Paket mit Retain-Merkmal und nicht leerer Nutzlast. Die
+ * Anmeldung nimmt Brokeruser/Brokerpass aus der general.json (Regeln/07,
+ * Abschnitt 2); das Kennwort steht nur im CONNECT-Paket, nie in einem
+ * Protokoll und nie auf einer Kommandozeile.
+ */
+function cam_mqtt_behalten_liste(array $themen)
+{
+    $aus = array('lage' => 'unbekannt', 'belegt' => array());
+    $soll = array();
+    foreach ($themen as $t) {
+        if ((string) $t !== '') { $soll[(string) $t] = true; }
+    }
+    if (!$soll) {
+        $aus['lage'] = 'ok';
+        return $aus;
+    }
+    $p = cam_paths();
+    if ($p['lbhome'] === '') { return $aus; }
+    $d = @json_decode((string) @file_get_contents(
+             $p['lbhome'] . '/config/system/general.json'), true);
+    if (!is_array($d) || !isset($d['Mqtt']) || !is_array($d['Mqtt'])) { return $aus; }
+    $m = $d['Mqtt'];
+    $hol = function ($k) use ($m) {
+        return (isset($m[$k]) && is_scalar($m[$k])) ? (string) $m[$k] : '';
+    };
+    $host = trim($hol('Brokerhost'));
+    if ($host === '' || $host === 'localhost') { $host = '127.0.0.1'; }
+    $port = (int) $hol('Brokerport');
+    if ($port <= 0 || $port > 65535) { $port = 1883; }
+    $benutzer = $hol('Brokeruser');
+    $kennwort = $hol('Brokerpass');
+
+    $errno = 0;
+    $errstr = '';
+    $s = @stream_socket_client('tcp://' . $host . ':' . $port, $errno, $errstr, 2);
+    if (!$s) { return $aus; }
+    stream_set_timeout($s, 1);
+
+    $zk = function ($t) { return pack('n', strlen($t)) . $t; };
+    $laenge = function ($n) {
+        $o = '';
+        do {
+            $b = $n % 128;
+            $n = intdiv($n, 128);
+            if ($n > 0) { $b |= 128; }
+            $o .= chr($b);
+        } while ($n > 0);
+        return $o;
+    };
+    /* Genau $n Bytes lesen oder null - bei Zeitablauf und Verbindungsende. */
+    $lies = function ($n) use ($s) {
+        $d = '';
+        while (strlen($d) < $n) {
+            $t = @fread($s, $n - strlen($d));
+            if ($t === false || $t === '') {
+                $meta = stream_get_meta_data($s);
+                if (!empty($meta['timed_out']) || !empty($meta['eof']) || feof($s)) { return null; }
+                continue;
+            }
+            $d .= $t;
+        }
+        return $d;
+    };
+    /* Ein Paket: array(kopfbyte, rumpf) oder null. */
+    $paket = function () use ($lies) {
+        $k = $lies(1);
+        if ($k === null) { return null; }
+        $n = 0;
+        $mult = 1;
+        for ($i = 0; $i < 4; $i++) {
+            $b = $lies(1);
+            if ($b === null) { return null; }
+            $n += (ord($b) & 127) * $mult;
+            $mult *= 128;
+            if (!(ord($b) & 128)) { break; }
+        }
+        $r = ($n > 0) ? $lies($n) : '';
+        return ($r === null) ? null : array(ord($k), $r);
+    };
+
+    $flags = 0x02;                                  // saubere Sitzung
+    $nutz = $zk('acrueck' . getmypid());
+    if ($benutzer !== '') {
+        $flags |= 0x80;
+        // Ein Kennwort ohne Benutzer laesst MQTT 3.1.1 nicht zu.
+        if ($kennwort !== '') { $flags |= 0x40; }
+    }
+    $kopf = $zk('MQTT') . chr(4) . chr($flags) . pack('n', 10);
+    if ($benutzer !== '') {
+        $nutz .= $zk($benutzer);
+        if ($kennwort !== '') { $nutz .= $zk($kennwort); }
+    }
+    if (@fwrite($s, chr(0x10) . $laenge(strlen($kopf . $nutz)) . $kopf . $nutz) !== false) {
+        $ack = $paket();
+        /* CONNACK: Art 2, zweites Byte 0 = angenommen. Jeder andere Wert
+           (5 = nicht berechtigt) heisst "nicht zu fragen" - nie "leer". */
+        if ($ack !== null && ($ack[0] >> 4) === 2 && strlen($ack[1]) >= 2 && ord($ack[1][1]) === 0) {
+            $sub = pack('n', 1);
+            foreach (array_keys($soll) as $t) { $sub .= $zk($t) . chr(0); }
+            @fwrite($s, chr(0x82) . $laenge(strlen($sub)) . $sub);
+            $bestaetigt = false;
+            $abgelehnt = false;
+            $ende = microtime(true) + 3.0;
+            while (microtime(true) < $ende) {
+                $pk = $paket();
+                if ($pk === null) { break; }           // Zeitablauf: nichts mehr gekommen
+                $art = $pk[0] >> 4;
+                if ($art === 9) {
+                    /* Je Filter ein Rueckgabebyte hinter der Paketkennung;
+                       0x80 heisst abgelehnt. Ein Broker, der das Lesen
+                       verweigert, schickt danach nichts - ungeprueft hiesse
+                       das "nichts belegt" (Muster 11 der Nachlese). */
+                    $rc = (string) substr($pk[1], 2);
+                    if (strlen($rc) !== count($soll)) { $abgelehnt = true; }
+                    for ($i = 0; $i < strlen($rc); $i++) {
+                        if (ord($rc[$i]) >= 0x80) { $abgelehnt = true; }
+                    }
+                    if ($abgelehnt) { break; }
+                    $bestaetigt = true;
+                    // Zurueckbehaltenes kommt unmittelbar nach dem SUBACK.
+                    $ende = min($ende, microtime(true) + 1.0);
+                } elseif ($art === 3 && strlen($pk[1]) >= 2) {
+                    $tl = unpack('n', substr($pk[1], 0, 2));
+                    $t = substr($pk[1], 2, $tl[1]);
+                    $versatz = 2 + $tl[1] + ((($pk[0] >> 1) & 3) > 0 ? 2 : 0);
+                    $wert = (string) substr($pk[1], $versatz);
+                    // Am empfangenen Paket: nur mit gesetztem Retain-Merkmal.
+                    if (isset($soll[$t]) && ($pk[0] & 1) && $wert !== '') {
+                        $aus['belegt'][$t] = true;
+                        if (count($aus['belegt']) === count($soll)) { break; }
+                    }
+                }
+            }
+            if ($bestaetigt && !$abgelehnt) {
+                $aus['lage'] = 'ok';
+            } else {
+                $aus['belegt'] = array();
+            }
+        }
+        @fwrite($s, chr(0xE0) . chr(0));
+    }
+    fclose($s);
+    return $aus;
+}
+
+/**
+ * Welche Altwerte muessen in diesem Lauf noch abgeraeumt werden?
+ *
+ * Rueckgabe array('lage' => 'erledigt'|'belegt'|'unbekannt',
+ *                 'themen' => array(<thema ohne praefix>, ...)).
+ *
+ * Solange der Merker nicht liegt, wird in jedem Lauf der Broker nach allen
+ * Themen aus cam_mqtt_altlast_liste() gefragt: keines belegt -> Merker
+ * schreiben, nichts abraeumen ('erledigt'); einige belegt -> genau diese
+ * ('belegt'), kein Merker; nicht zu fragen -> alle ('unbekannt'), KEIN
+ * Merker - dann raeumt jeder Lauf ab (Grenze, README). Der Merker entsteht
+ * NUR aus der Antwort des Brokers, nie aus dem Senden (Regeln/07 Nachtrag
+ * 19.09.2026, am Geraet belegt: Merker gesetzt, Altwert stand weiter).
+ *
+ * Kennung "leer-bestaetigt <praefix>: <Themenliste>": ein anderes Praefix
+ * oder eine andere Kameraliste gilt nicht. Er liegt im Datenordner, den
+ * purge_installation bei jedem Update abraeumt - dann wird einmal
+ * nachgefragt. Bauart bw_mqtt_altlast() (Beschattungswaechter 0.9.21).
+ */
+function cam_mqtt_altlast($praefix)
+{
+    $praefix = (string) $praefix;
+    $liste = cam_mqtt_altlast_liste();
+    if (!$liste) {
+        return array('lage' => 'erledigt', 'themen' => array());
+    }
+    $p = cam_paths();
+    $merker = $p['datadir'] . '/retain_altlast_bestaetigt';
+    $kennung = 'leer-bestaetigt ' . $praefix . ': ' . implode(' ', $liste);
+    clearstatcache(true, $merker);
+    if (is_file($merker) && trim((string) @file_get_contents($merker)) === $kennung) {
+        return array('lage' => 'erledigt', 'themen' => array());
+    }
+    $voll = array();
+    foreach ($liste as $t) { $voll[] = $praefix . '/' . $t; }
+    $f = cam_mqtt_behalten_liste($voll);
+    if ($f['lage'] === 'ok' && !$f['belegt']) {
+        if (!is_dir($p['datadir'])) { @mkdir($p['datadir'], 0775, true); }
+        if (@file_put_contents($merker, $kennung . "\n") !== false) {
+            cam_log('MQTT: unter ' . $praefix . '/ steht keiner der frueher zurueckbehaltenen Werte '
+                . 'mehr im Broker (' . implode(', ', $liste) . '; vom Broker bestaetigt).');
+        }
+        return array('lage' => 'erledigt', 'themen' => array());
+    }
+    if ($f['lage'] === 'ok') {
+        $l = strlen($praefix) + 1;
+        $t = array();
+        foreach (array_keys($f['belegt']) as $v) { $t[] = substr($v, $l); }
+        cam_log_selten('altlast_belegt', 'MQTT: im Broker stehen noch zurueckbehaltene Altwerte unter '
+            . $praefix . '/ (' . implode(', ', $t) . ') - sie gehen mit leerer Nutzlast unmittelbar '
+            . 'vor dem gueltigen Wert hinaus; der naechste Lauf fragt wieder nach.');
+        return array('lage' => 'belegt', 'themen' => $t);
+    }
+    cam_log_selten('altlast_unbekannt', 'MQTT: der Broker liess sich nicht befragen (Brokerhost, '
+        . 'Brokerport und Zugangsdaten in general.json) - die frueher zurueckbehaltenen Werte unter '
+        . $praefix . '/ (' . implode(', ', $liste) . ') gehen deshalb in jedem Lauf mit leerer '
+        . 'Nutzlast unmittelbar vor dem gueltigen Wert hinaus. Siehe README.', 86400);
+    return array('lage' => 'unbekannt', 'themen' => $liste);
+}
+
+/**
+ * Die Themen, die die Deinstallation leert: jedes, das eine veroeffentlichte
+ * Fassung je retained gesendet hat - fuer ALLE vier Kameraplaetze, denn eine
+ * Kamera, die inzwischen ausgetragen ist, hat ihre Themen im Broker gelassen.
+ * Was nie retained ging (ALTER, HERZ, objekte, online, ts), bleibt
+ * unberuehrt: eine leere Nachricht darauf loeschte nichts.
+ */
+function cam_mqtt_leer_themen()
+{
+    $felder = cam_basisfelder();
+    $alt = cam_mqtt_altlast_staemme();
+    $aus = array();
+    for ($id = 1; $id <= CAM_MAX; $id++) {
+        $sx = cam_sx($id);
+        foreach ($felder as $n => $d) {
+            if (empty($d[5])) { continue; }
+            if (empty($d[6]) && $id !== 1) { continue; }
+            if (!empty($d[7]) || in_array($n, $alt, true)) { $aus[] = $n . $sx; }
+        }
+        foreach (cam_mqtt_zusatzthemen() as $k => $r) {
+            if ($r && $k !== 'online' && $k !== 'ts') { $aus[] = $k . $sx; }
+        }
+    }
+    return $aus;
+}
+
+/**
+ * Die zurueckbehaltenen Themen leeren - fuer uninstall/uninstall
+ * (bin/cam_cron.php --mqtt-leeren). Schreibt kein Protokoll und legt nichts an.
+ *
+ * Geloescht wird ueber den UDP-Eingang des Gateways, "retain <thema> " mit
+ * leerer Nutzlast. VOR der ersten Runde und nach jeder wird der Broker
+ * gefragt (cam_mqtt_behalten_liste()); hinaus geht nur, was dort noch steht,
+ * hoechstens $runden Runden. Steht nichts da, geht nichts hinaus. Ist der
+ * Broker nicht zu fragen, gehen alle Themen in jeder Runde hinaus, und die
+ * Ausgabe sagt, dass nicht nachgelesen wurde. Geleert wird auch bei
+ * ausgeschaltetem MQTT: was eine fruehere Einstellung retained gesendet hat,
+ * steht sonst fuer immer im Broker. Bis 1.9.21 raeumte die Deinstallation
+ * nichts ab (Faelle U1-U6). Bauart bw_mqtt_leeren() (Beschattungswaechter
+ * 0.9.21).
+ *
+ * Rueckgabe 0 geleert oder nicht nachpruefbar, 1 es steht noch etwas bzw.
+ * der Eingang war nicht erreichbar, 2 nicht moeglich.
+ */
+function cam_mqtt_leeren($runden = 3, $pause_us = 1000000)
+{
+    $w = cam_mqtt_praefix(cam_config(false));
+    $gw = cam_mqtt_zustand_pruefen();
+    if (empty($gw['udpport'])) {
+        echo '<INFO> MQTT: in der general.json steht kein UDP-Eingangsport des Gateways - '
+           . 'zurueckbehaltene Themen unter ' . $w . '/ wurden nicht geleert.' . "\n";
+        return 2;
+    }
+    $alle = array();
+    foreach (cam_mqtt_leer_themen() as $t) { $alle[] = $w . '/' . $t; }
+    $n = count($alle);
+    $f = cam_mqtt_behalten_liste($alle);
+    $nachgelesen = ($f['lage'] === 'ok');
+    $offen = $nachgelesen ? array_keys($f['belegt']) : $alle;
+    if ($nachgelesen && !$offen) {
+        echo '<OK> MQTT: der Broker bestaetigt: keines der ' . $n . ' Themen unter ' . $w
+           . '/ steht zurueckbehalten - nichts zu leeren.' . "\n";
+        return 0;
+    }
+    $eno = 0;
+    $etxt = '';
+    $fp = @stream_socket_client('udp://127.0.0.1:' . (int) $gw['udpport'], $eno, $etxt, 2);
+    if (!$fp) {
+        echo '<WARNING> MQTT: der UDP-Eingang des Gateways ist nicht erreichbar (Port '
+           . (int) $gw['udpport'] . ') - zurueckbehaltene Themen unter ' . $w
+           . '/ wurden nicht geleert.' . "\n";
+        return 1;
+    }
+    $zu_leeren = count($offen);
+    $datagramme = 0;
+    $gelaufen = 0;
+    for ($r = 1; $r <= max(1, (int) $runden) && $offen; $r++) {
+        if ($r > 1) { usleep((int) $pause_us); }
+        $gelaufen = $r;
+        foreach ($offen as $t) {
+            // Ein Leerzeichen hinter dem Thema, sonst keine Nutzlast: die
+            // Form, die das Gateway als Loeschung liest (Regeln/07,
+            // Nachtrag 19.09.2026: mqttgateway.pl:281, :311-315, :357).
+            if (@fwrite($fp, 'retain ' . $t . ' ') !== false) { $datagramme++; }
+        }
+        usleep(300000);     // dem Gateway Zeit bis zum Broker lassen
+        $f = cam_mqtt_behalten_liste($offen);
+        if ($f['lage'] === 'ok') {
+            $nachgelesen = true;
+            $offen = array_keys($f['belegt']);
+        } else {
+            $nachgelesen = false;
+        }
+    }
+    fclose($fp);
+    echo '<INFO> MQTT: ' . $zu_leeren . ' von ' . $n . ' Themen unter ' . $w . '/ mit leerer Nutzlast '
+       . 'an den UDP-Eingang ' . (int) $gw['udpport'] . ' des Gateways gesendet (' . $gelaufen
+       . ' Runde(n), ' . $datagramme . ' Datagramme).' . "\n";
+    if ($nachgelesen && !$offen) {
+        echo '<OK> MQTT: der Broker bestaetigt: keines der ' . $n . ' Themen steht mehr '
+           . 'zurueckbehalten.' . "\n";
+        return 0;
+    }
+    if ($nachgelesen) {
+        echo '<WARNING> MQTT: ' . count($offen) . ' Themen stehen noch zurueckbehalten im Broker ('
+           . implode(', ', array_slice($offen, 0, 5)) . (count($offen) > 5 ? ', ...' : '')
+           . '). Von Hand: mosquitto_pub -r -n -t <thema> (mit den Broker-Zugangsdaten).' . "\n";
+        return 1;
+    }
+    echo '<INFO> MQTT: der Broker liess sich nicht befragen - nicht nachgelesen. Der UDP-Eingang '
+       . 'verwirft unter Last Datagramme; was stehen bleibt, laesst sich mit '
+       . 'mosquitto_pub -r -n -t <thema> von Hand loeschen.' . "\n";
+    return 0;
 }
 
 /* ==================================================================
@@ -3434,19 +4022,19 @@ function cam_t($schluessel)
     static $texte = null;
     if ($texte === null) {
         // Installiert liegen die Dateien unter
-        // <home>/templates/plugins/<ordner>/lang/ - der Ordnername ergibt
-        // sich aus dem Ablageort dieser Datei.
-        $home = getenv('LBHOMEDIR');
-        if (!$home || !is_dir($home)) {
-            foreach (array(lb_wurzel_ermitteln(), '/home/loxberry/loxberry') as $k) {
-                if (is_dir($k)) { $home = $k; break; }
-            }
+        // <wurzel>/templates/plugins/<ordner>/lang/. Ohne Wurzel (Archiv,
+        // Pruefordner) neben dem Plugin - nie ab / und nie unter einem
+        // festen Systempfad: bis 1.9.21 wurde dann
+        // /templates/plugins/html/lang bzw. unter dem festen Heimpfad
+        // gelesen (in WSL gemessen, Pruefung-ACTiKamera-1.9.22, T1 und T2).
+        $p = cam_paths();
+        $pfad = '';
+        if ($p['lbhome'] !== '') {
+            $pfad = $p['lbhome'] . '/templates/plugins/' . $p['ordner'] . '/lang';
         }
-        $ordner = basename(dirname(__FILE__));
-        $pfad = $home . '/templates/plugins/' . $ordner . '/lang';
-        if (!is_dir($pfad)) {
-            // Nicht installiert (Entwicklung): neben dem Plugin nachsehen.
-            $pfad = dirname(dirname(dirname(__FILE__))) . '/templates/lang';
+        if ($pfad === '' || !is_dir($pfad)) {
+            // Nicht installiert (Archiv, Entwicklung): neben dem Plugin.
+            $pfad = dirname(dirname(__DIR__)) . '/templates/lang';
         }
         $texte = @parse_ini_file($pfad . '/language_' . cam_sprache() . '.ini',
                                  true, INI_SCANNER_RAW);

@@ -14,53 +14,27 @@ error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
    absolute Serverpfad im Browser. Was der Betreiber sehen will, stellt er
    in seiner php.ini ein. */
 
-/* Den LoxBerry-Wurzelordner ohne festen Systempfad bestimmen.
+/* Die Bibliothek liegt im anderen Baum. Installiert oder Archiv entscheidet
+ * der eigene Ablageort: liegt diese Datei unter .../htmlauth/plugins/<ordner>,
+ * ist sie installiert, und die Bibliothek steht unter
+ * .../html/plugins/<ordner>/. Sonst ist das ein Archiv, und es gilt die
+ * Bibliothek daneben.
  *
- * Diese Definition stand bis 1.9.7 WEITER UNTEN in der Datei. PHP zieht
- * bedingte Definitionen (if (!function_exists(...)) { function ... }) nicht
- * vor - der Aufruf in der naechsten Zeile endete deshalb ohne gesetztes
- * LBHOMEDIR mit "Call to undefined function", also einer weissen Seite.
- * Gemessen: Rueckgabewert 255.
+ * Bis 1.9.21 stand der installierte Kandidat auch im Archiv VOR der eigenen
+ * Bibliothek - aus einem Archiv unter / war das /html/plugins/htmlauth/
+ * cam_lib.php ab der Laufwerkswurzel, und was dort lag, lief als Bibliothek
+ * (in WSL gemessen, Pruefung-ACTiKamera-1.9.22, Faelle T3 und T9). Dazu
+ * bestimmte diese Datei die Wurzel mit einer eigenen, schwaecheren Suche
+ * (ohne general.json), die wegen der gleichnamigen Wache in cam_lib.php auch
+ * dort galt. Wurzel, Ordner und Protokolldatei
+ * kommen jetzt allein aus cam_paths().
  */
-if (!function_exists('lb_wurzel_ermitteln')) {
-    function lb_wurzel_ermitteln()
-    {
-        $d = __DIR__;
-        for ($i = 0; $i < 8; $i++) {
-            if (is_dir($d . '/config/plugins') && is_dir($d . '/webfrontend')) {
-                return $d;
-            }
-            $eltern = dirname($d);
-            if ($eltern === $d) { break; }
-            $d = $eltern;
-        }
-        return '';
-    }
-}
-
-$ac_lbhome = getenv('LBHOMEDIR') ?: lb_wurzel_ermitteln();
-$ac_plugin = getenv('LBPPLUGINDIR') ?: basename(__DIR__);
-if ($ac_lbhome && is_dir($ac_lbhome . '/config/plugins/' . $ac_plugin) === false) {
-    $ac_plugin = basename(dirname(__DIR__));
-    if (is_dir($ac_lbhome . '/config/plugins/' . $ac_plugin) === false) {
-        $ac_plugin = 'actikamera';
-    }
-}
-if ($ac_lbhome) {
-    $ac_sdk = $ac_lbhome . '/libs/phplib/loxberry_system.php';
-    if (file_exists($ac_sdk)) {
-        require_once $ac_sdk;
-        require_once $ac_lbhome . '/libs/phplib/loxberry_web.php';
-    }
-    $ac_logfile = $ac_lbhome . '/log/plugins/' . $ac_plugin . '/cam.log';
+if (basename(dirname(__DIR__)) === 'plugins' && basename(dirname(dirname(__DIR__))) === 'htmlauth') {
+    $ac_kandidaten = array(dirname(dirname(dirname(__DIR__))) . '/html/plugins/'
+                         . basename(__DIR__) . '/cam_lib.php');
 } else {
-    $ac_logfile = sys_get_temp_dir() . '/actikamera/cam.log';
+    $ac_kandidaten = array(dirname(__DIR__) . '/html/cam_lib.php');
 }
-
-$ac_kandidaten = array(
-    dirname(dirname(dirname(__DIR__))) . '/html/plugins/' . $ac_plugin . '/cam_lib.php',
-    dirname(__DIR__) . '/html/cam_lib.php',
-);
 foreach ($ac_kandidaten as $ac_cand) {
     if (is_file($ac_cand)) { require_once $ac_cand; break; }
 }
@@ -68,7 +42,7 @@ foreach ($ac_kandidaten as $ac_cand) {
  * Bis 1.9.16 lief die Datei weiter: die function_exists-Wachen weiter unten
  * versprachen ein sanftes Scheitern, das es nicht gab - die Seite starb an
  * einem ungesicherten Uebersetzungsaufruf mit Stapelabzug und Serverpfaden. */
-if (!function_exists('cam_t')) {
+if (!function_exists('cam_t') || !function_exists('cam_paths')) {
     header('Content-Type: text/html; charset=utf-8');
     echo '<h2>ACTi Kamera</h2><p><b>Fehler:</b> cam_lib.php nicht gefunden.</p>'
        . '<p>Gesucht wurde in:</p><ul>';
@@ -78,6 +52,19 @@ if (!function_exists('cam_t')) {
     echo '</ul>';
     exit;
 }
+
+$ac_pfade = cam_paths();
+$ac_lbhome = $ac_pfade['lbhome'];
+$ac_plugin = $ac_pfade['ordner'];
+/* Der LoxBerry-Rahmen nur aus der Wurzel, in der das Plugin wirklich liegt
+ * (oder die ausdruecklich genannt ist) - im Archivmodus gar nicht. */
+if ($ac_lbhome !== '' && is_file($ac_lbhome . '/libs/phplib/loxberry_system.php')) {
+    require_once $ac_lbhome . '/libs/phplib/loxberry_system.php';
+    if (is_file($ac_lbhome . '/libs/phplib/loxberry_web.php')) {
+        require_once $ac_lbhome . '/libs/phplib/loxberry_web.php';
+    }
+}
+$ac_logfile = $ac_pfade['log'];
 
 /** Einen POST-Wert holen - erst is_string, dann alles andere. */
 function ac_post($name, $vorgabe = '')
