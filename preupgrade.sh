@@ -57,19 +57,61 @@ fi
 #    Minute (Regeln/06). Solange die Marke gilt, speichert die Plugin-Seite
 #    nichts und der Minutentakt tut nichts; postupgrade.sh entfernt sie als
 #    Letztes. Sie liegt NEBEN dem Datenordner, weil purge_installation den
-#    Ordner selbst loescht. Aelter als 3600 s gilt sie nicht - eine
-#    abgebrochene Installation darf die Seite nicht fuer immer stilllegen.
+#    Ordner selbst loescht. Fuer die Sperre der Seite gilt sie hoechstens
+#    3600 s - eine abgebrochene Installation darf die Seite nicht fuer immer
+#    stilllegen.
+#
+#    Seit 1.9.23 (Entscheidung 1 vom 29.09.2026, Befund I1) entscheidet
+#    ausserdem ALLEIN ihr Vorhandensein - ohne Altersvergleich -, ob
+#    postinstall.sh eine Aktualisierung vor sich hat: nur dann spielt es die
+#    Zweitschrift ein, sonst legt es sie als .alt beiseite. Laesst sie sich
+#    nicht anlegen, bricht dieses Skript deshalb ab (vor purge_installation):
+#    ohne Marke hielte postinstall.sh das Update fuer eine Neuinstallation und
+#    legte die Einstellungen beiseite. Bis 1.9.22 stand hier nur eine Warnung.
+#    Ob sie schon VOR diesem Lauf lag (abgebrochener Versuch desselben
+#    Updates), braucht Schritt 0b.
 MARKE="$BASE/data/plugins/$PFOLDER.upgrade_laeuft"
+AC_MARKE_VORHER=0
+if [ -f "$MARKE" ]; then AC_MARKE_VORHER=1; fi
 mkdir -p "$BASE/data/plugins" 2>/dev/null
-date +%s > "$MARKE" 2>/dev/null
+{ date +%s > "$MARKE"; } 2>/dev/null
 if grep -Eq '^[0-9]+$' "$MARKE" 2>/dev/null; then
     echo "<OK> Bis zum Ende der Aktualisierung speichert die Plugin-Seite nichts."
 else
-    echo "<WARNING> Die Marke fuer die laufende Aktualisierung liess sich nicht anlegen: $MARKE"
-    echo "<WARNING> Bitte die Plugin-Seite erst nach dem Ende der Aktualisierung oeffnen."
+    echo "<FAIL> Die Marke fuer die laufende Aktualisierung liess sich nicht anlegen: $MARKE"
+    echo "<FAIL> Ohne sie hielte postinstall.sh dieses Update fuer eine Neuinstallation und"
+    echo "<FAIL> legte die Einstellungen beiseite. Die Aktualisierung wird abgebrochen; die"
+    echo "<FAIL> bisherige Fassung bleibt unveraendert installiert."
+    exit 2
 fi
 
+# 0b. Einen ALTEN Sicherungsbestand wegraeumen, bevor neu gesichert wird
+#     (Entscheidung 1, letzter Satz; Befund I4). Bis 1.9.22 legte "mkdir -p"
+#     den Ordner nur an: was von einem frueheren Vorgang darin lag, spielte
+#     postupgrade.sh bei diesem Update ein - gemessen mit letztesbild2.jpg
+#     einer laengst ausgetragenen Kamera (Fall F7); fehlte cam.json, kam eine
+#     alte cam.json der Sicherung zurueck. Ausnahme wie KODI-NG 1.2.12: lag
+#     die Marke schon vor diesem Lauf, hat ein frueherer Versuch DIESES
+#     Updates abgebrochen, und seine Sicherung kann die einzige Abschrift
+#     sein - sie bleibt und wird ergaenzt.
 SICHER="$BASE/data/plugins/$PFOLDER.upgrade_sicherung"
+if [ -e "$SICHER" ] || [ -L "$SICHER" ]; then
+    if [ "$AC_MARKE_VORHER" = "1" ]; then
+        echo "<INFO> Die Upgrade-Sicherung unter $SICHER bleibt liegen: ein frueherer Versuch"
+        echo "<INFO> dieses Updates hat abgebrochen (seine Marke lag noch); sie wird ergaenzt."
+    else
+        case "$SICHER" in
+            */data/plugins/?*.upgrade_sicherung) rm -rf "$SICHER" 2>/dev/null ;;
+        esac
+        if [ -e "$SICHER" ] || [ -L "$SICHER" ]; then
+            echo "<WARNING> Unter $SICHER liegt eine Sicherung aus einem frueheren Vorgang, die sich"
+            echo "<WARNING> nicht entfernen liess. postupgrade.sh spielte sie ein - bitte von Hand entfernen."
+        else
+            echo "<INFO> Eine Upgrade-Sicherung aus einem frueheren Vorgang wurde entfernt, damit"
+            echo "<INFO> dieses Update keinen alten Stand einspielt."
+        fi
+    fi
+fi
 mkdir -p "$SICHER"
 chmod 0700 "$SICHER" 2>/dev/null
 

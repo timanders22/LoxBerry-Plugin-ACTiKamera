@@ -1,22 +1,16 @@
 #!/bin/bash
 # ACTi Kamera - Deinstallation
 #
-# DIESE DATEI LIEGT ZWEIMAL IM ARCHIV, BYTEWEISE GLEICH:
-#   uninstall.sh          - der Ort, den diese Linie seit jeher benutzt
-#   uninstall/uninstall   - der Ort, von dem gemessen ist, dass LoxBerry ihn
-#                           ausfuehrt (Regeln/06, Abschnitt "Deinstallation":
-#                           plugininstall.pl kopiert ihn nach
-#                           data/system/uninstall/<ordner> und ruft ihn mit
-#                           "$tempfile" "$pname" "$pfolder" "$pversion"
-#                           "$lbhomedir" "$tempfolder" auf - am Geraet
-#                           nachgesehen am 17.09.2026, LoxBerry 4.0.0.15).
-# Am 17.09.2026 ueber den Arbeitsordner gezaehlt: 304 Plugin-Ordner fuehren
-# uninstall/uninstall, 6 nur uninstall.sh - und alle sechs sind Fassungen
-# DIESER Linie. Ob LoxBerry die Wurzeldatei ueberhaupt ausfuehrt, ist NICHT
-# gemessen; deshalb liegt sie weiter da, und der gemessene Ort kommt dazu.
-# Beide Laeufe sind vertraeglich: jeder Schritt haengt an einem [ -f ], der
-# zweite Lauf findet nichts mehr und sagt nichts.
-# Der Argumentplatz ist an beiden Orten derselbe ($3 Ordnername, $5 Wurzel).
+# LoxBerry fuehrt NUR diese Datei aus: plugininstall.pl sucht
+# uninstall/uninstall* (Geraet/2026-09-05/08_plugininstall.pl:1152), kopiert
+# sie nach data/system/uninstall/<ordner> und ruft sie mit "$tempfile"
+# "$pname" "$pfolder" "$pversion" "$lbhomedir" "$tempfolder" auf (Regeln/06,
+# Abschnitt "Deinstallation", am Geraet nachgesehen am 17.09.2026,
+# LoxBerry 4.0.0.15). Bis 1.9.22 lag daneben eine byteweise gleiche uninstall.sh an der
+# Archivwurzel, mit dem Satz, ob sie je laufe, sei nicht gemessen. Das ist
+# durch den Installer-Quelltext beantwortet: sie wurde weder kopiert noch
+# ausgefuehrt (Pruefung 29.09.2026, Befund I8). Sie ist seit 1.9.23 entfernt.
+# Argumente: $3 Ordnername, $5 Wurzel.
 #
 # LoxBerry entfernt bei der Deinstallation nur die VERZEICHNISSE des Plugins.
 # Die Zweitschrift liegt eine Ebene darueber - genau deshalb ueberlebt sie ein
@@ -89,7 +83,54 @@ BK="$BASE/config/plugins/$PFOLDER.backup.json"
 if [ -f "$BK" ]; then
     : > "$BK"
     rm -f "$BK"
-    echo "<OK> Zweitschrift mit den Zugangsdaten entfernt."
+    if [ -e "$BK" ]; then
+        echo "<WARNING> Die Zweitschrift $BK liess sich nicht entfernen."
+    else
+        echo "<OK> Zweitschrift mit den Zugangsdaten entfernt."
+    fi
+fi
+
+# Weitere Kopien mit Kamerapasswort (Befunde I3 und I1, Pruefung 29.09.2026):
+#   <ordner>.backup.json.alt            beiseitegelegt von postinstall.sh
+#   <ordner>.upgrade_sicherung(.alt)/   cam.json einer Aktualisierung, die nicht
+#                                       ankam, oder beiseitegelegt
+#   config/plugins/<ordner>/cam.json.kaputt*  verdraengte Staende (0600)
+# Bis 1.9.22 blieb die Upgrade-Sicherung samt Klartextkennwort nach der
+# Deinstallation liegen, und das Protokoll meldete "Zugangsdaten entfernt"
+# (in WSL gemessen, Fall F6). Jede Datei wird vor dem Loeschen ueberschrieben;
+# gemeldet wird <OK> erst, wenn nachgezaehlt nichts mehr liegt. Die
+# .alt-Betriebsdateien im Archivordner gehen mit, die Aufnahmen bleiben.
+ac_weg() { # $1 Datei oder Verzeichnis
+    if [ -d "$1" ] && [ ! -L "$1" ]; then
+        for AC_F in "$1"/* "$1"/.[!.]*; do
+            if [ -f "$AC_F" ] && [ ! -L "$AC_F" ]; then : > "$AC_F" 2>/dev/null; fi
+        done
+        case "$1" in
+            */data/plugins/?*.upgrade_sicherung|*/data/plugins/?*.upgrade_sicherung.alt) rm -rf "$1" 2>/dev/null ;;
+        esac
+    else
+        if [ -f "$1" ] && [ ! -L "$1" ]; then : > "$1" 2>/dev/null; fi
+        rm -f "$1" 2>/dev/null
+    fi
+}
+AC_WEG=""
+AC_REST=""
+ac_pruef_weg() { # $1 Pfad: weg, dann nachzaehlen
+    if [ -e "$1" ] || [ -L "$1" ]; then
+        ac_weg "$1"
+        if [ -e "$1" ] || [ -L "$1" ]; then AC_REST="$AC_REST $1"; else AC_WEG="$AC_WEG $1"; fi
+    fi
+}
+ac_pruef_weg "$BK.alt"
+ac_pruef_weg "$BASE/data/plugins/$PFOLDER.upgrade_sicherung"
+ac_pruef_weg "$BASE/data/plugins/$PFOLDER.upgrade_sicherung.alt"
+for AC_P in "$BASE/config/plugins/$PFOLDER/cam.json.kaputt"* "$BASE/data/plugins/$PFOLDER.archiv/"*.alt; do
+    ac_pruef_weg "$AC_P"
+done
+if [ -n "$AC_REST" ]; then
+    echo "<WARNING> Nicht entfernt (kann das Kamerapasswort tragen), bitte von Hand loeschen:$AC_REST"
+elif [ -n "$AC_WEG" ]; then
+    echo "<OK> Upgrade-Sicherung und beiseitegelegte Staende entfernt, nachgezaehlt liegt nichts mehr da:$AC_WEG"
 fi
 
 # Die Marke "Aktualisierung laeuft" aus preupgrade.sh liegt NEBEN dem

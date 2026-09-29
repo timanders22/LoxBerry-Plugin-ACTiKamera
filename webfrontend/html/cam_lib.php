@@ -585,8 +585,14 @@ function cam_wertregeln()
            der notify-Regel mitgeprueft; die Grenzen holt sich der
            Speicher-Handler trotzdem von hier, damit es sie nur einmal gibt. */
         'push_minutes'    => array('art' => 'zahl', 'min' => 1, 'max' => 30),
+        // notify.push, ebenso nur ueber die notify-Regel (C2).
+        'push'            => array('art' => 'zahl', 'min' => 0, 'max' => 1),
         'mqtt_enabled'    => array('art' => 'zahl', 'min' => 0, 'max' => 1),
-        'mqtt_topic'      => array('art' => 'marke', 'max' => 64),
+        /* Eigene Art seit 1.9.23 (M5): Teile aus A-Z a-z 0-9 _ -, getrennt
+           durch EINEN Schraegstrich. Bis 1.9.22 nahm das Formular haus/acti an,
+           die Regel "marke" kannte keinen Schraegstrich - die eigene
+           Sicherung liess sich danach nicht mehr zurueckspielen. */
+        'mqtt_topic'      => array('art' => 'thema', 'max' => 64),
         'keep_max'        => array('art' => 'zahl', 'min' => 0, 'max' => 100000),
         'keep_mb'         => array('art' => 'zahl', 'min' => 0, 'max' => 1000000),
         'timelapse'       => array('art' => 'zahl', 'min' => 0, 'max' => 1),
@@ -658,7 +664,43 @@ function cam_wert_taugt($v)
     if (strlen($s) > 4096) {
         return false;
     }
-    return preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $s) !== 1;
+    /* Der Tabulator zaehlt seit 1.9.23 mit (U9): "5\t" nahm die Sicherung
+       unter PHP 8.4/8.5 als Zahl an, unter 7.4 nicht. */
+    return preg_match('/[\x00-\x1F\x7F]/', $s) !== 1;
+}
+
+/**
+ * Eine Uhrzeit hh:mm von 00:00 bis 23:59 - EINE Stelle fuer Formular und
+ * Sicherung (U3, B6). Bis 1.9.22 nahm das Formular 25:77 an, die Sicherung
+ * 99:99; der Zeitraffer lief danach nie.
+ */
+function cam_uhrzeit_gueltig($s)
+{
+    return is_string($s) && preg_match('/^([01]?[0-9]|2[0-3]):[0-5][0-9]\z/', $s) === 1;
+}
+
+/**
+ * Das MQTT-Themenpraefix pruefen - EINE Regel fuer Formular und Sicherung
+ * (M5). Rueckgabe '' = zulaessig, sonst der Grund.
+ *
+ * Gewaehlt ist: der Schraegstrich ist ueberall zulaessig, aber nur ZWISCHEN
+ * zwei Teilen. haus/acti ist in der Themenwelt ueblich; bis 1.9.22 nahm das
+ * Formular es an und die Sicherung wies es ab. Abgewiesen bleibt, was ein
+ * leeres Teilthema erzeugt (hof/ ergab hof//OK), und jedes Zeichen, das in
+ * MQTT etwas bedeutet (# +) oder das Gateway zerlegt (Leerraum).
+ */
+function cam_thema_pruefen($s)
+{
+    if (!is_string($s) || $s === '') {
+        return 'leer';
+    }
+    if (strlen($s) > 64) {
+        return 'zu lang (hoechstens 64 Zeichen)';
+    }
+    if (!preg_match('#^[A-Za-z0-9_\-]+(/[A-Za-z0-9_\-]+)*\z#', $s)) {
+        return 'unzulaessige Zeichen';
+    }
+    return '';
 }
 
 /**
@@ -678,9 +720,16 @@ function cam_wert_pruefen($schluessel, $wert)
         if (!is_array($wert)) {
             return 'kein Feld';
         }
+        /* Dieselben Grenzen wie im Formular (C2): bis 1.9.22 genuegte
+           is_numeric, und push_minutes 99999 hielt PUSHAKTIV nach jeder
+           Aufnahme rund 69 Tage lang auf 1. */
         foreach ($wert as $nk => $nv) {
-            if (!in_array($nk, array('push', 'push_minutes'), true) || !is_numeric($nv)) {
+            if ($nk !== 'push' && $nk !== 'push_minutes') {
                 return 'unzulaessiger Eintrag';
+            }
+            $ng = cam_wert_pruefen($nk, $nv);
+            if ($ng !== '') {
+                return $nk . ': ' . $ng;
             }
         }
         return '';
@@ -688,15 +737,26 @@ function cam_wert_pruefen($schluessel, $wert)
     if (!cam_wert_taugt($wert)) {
         return 'unzulaessige Form';
     }
+    /* Zeichenketten bleiben Zeichenketten: ein Token oder eine Adresse als
+       Zahl wird nicht still umgedeutet. */
+    if (in_array($r['art'], array('text', 'marke', 'wahl', 'zeit', 'thema'), true) && !is_string($wert)) {
+        return 'keine Zeichenkette';
+    }
     $s = (string) $wert;
+    /* Leerraum am Rand wird abgewiesen, nicht abgeschnitten (U9, Regel vom
+       24.09.2026) - unter 7.4, 8.4 und 8.5 gleich. */
+    if (trim($s) !== $s) {
+        return 'Leerraum am Rand';
+    }
     switch ($r['art']) {
         case 'zahl':
-            if (!preg_match('/^-?[0-9]+$/', $s)) { return 'keine ganze Zahl'; }
+            if (!preg_match('/^-?[0-9]+\z/', $s)) { return 'keine ganze Zahl'; }
             $z = (int) $s;
             if ($z < $r['min'] || $z > $r['max']) { return 'ausserhalb ' . $r['min'] . '..' . $r['max']; }
             return '';
         case 'komma':
-            if (!is_numeric($s)) { return 'keine Zahl'; }
+            // Ein Muster statt is_numeric: dessen Leerraumregel wechselt mit der PHP-Fassung.
+            if (!preg_match('/^-?[0-9]+(\.[0-9]+)?\z/', $s)) { return 'keine Zahl'; }
             $f = (float) $s;
             if ($f < $r['min'] || $f > $r['max']) { return 'ausserhalb ' . $r['min'] . '..' . $r['max']; }
             return '';
@@ -708,9 +768,11 @@ function cam_wert_pruefen($schluessel, $wert)
                uebernommenes Token, und der Schaden ist derselbe wie bei einem
                verlorenen (VolkswagenID 0.9.11). Leer ist zulaessig: das heisst
                "kein Token gesichert", kein unzulaessiger Wert. */
-            return preg_match('/^[A-Za-z0-9_.\-]{0,' . (int) $r['max'] . '}$/', $s) === 1 ? '' : 'unzulaessige Zeichen';
+            return preg_match('/^[A-Za-z0-9_.\-]{0,' . (int) $r['max'] . '}\z/', $s) === 1 ? '' : 'unzulaessige Zeichen';
         case 'zeit':
-            return preg_match('/^\d{1,2}:\d{2}$/', $s) === 1 ? '' : 'keine Uhrzeit hh:mm';
+            return cam_uhrzeit_gueltig($s) ? '' : 'keine Uhrzeit 00:00 bis 23:59';
+        case 'thema':
+            return cam_thema_pruefen($s);
         default:
             return strlen($s) <= (int) $r['max'] ? '' : 'zu lang';
     }
@@ -762,6 +824,14 @@ function cam_config($erzeugen = true)
                 }
                 @copy($p['backup'], $p['config']);
                 @chmod($p['config'], 0600);
+                /* Den Zustand VOR der Heilung festhalten (U10, Regeln/05):
+                   sonst saehe der Reiter Test nur die geheilte Datei, und die
+                   Zeile "Konfiguration heil" stuende immer auf Haken. */
+                if (!is_dir(dirname(cam_heil_merker()))) {
+                    @mkdir(dirname(cam_heil_merker()), 0775, true);
+                }
+                @file_put_contents(cam_heil_merker(), date('c') . ' '
+                    . (($ac_roh === false) ? 'fehlte' : (is_array($ac_ist) ? 'ohne Token' : 'unlesbar')) . "\n");
             }
         }
     }
@@ -775,6 +845,12 @@ function cam_config($erzeugen = true)
     }
     $cfg['notify'] += array('push' => 1, 'push_minutes' => 2);
     return $cfg;
+}
+
+/** Wo die Selbstheilung festhaelt, dass sie geheilt hat (Datenordner). */
+function cam_heil_merker()
+{
+    return cam_paths()['datadir'] . '/konfig_geheilt.txt';
 }
 
 /**
@@ -818,6 +894,47 @@ function cam_config_eingerichtet()
     return count($roh) > 0;
 }
 
+/**
+ * Eine Datei vollstaendig schreiben - oder gar nicht (C8, Pruefung 29.09.2026).
+ *
+ * Nebendatei mit Prozessnummer und Zufallsanteil, die Rechte VOR dem Inhalt,
+ * geschrieben ist erst, was GANZ geschrieben ist (fwrite === strlen, fflush,
+ * fclose), dann die Nebendatei zuruecklesen und vergleichen, erst danach
+ * umbenennen. Bis 1.9.22 schrieb cam_config_save() mit file_put_contents
+ * unmittelbar in cam.json und setzte 0600 erst danach: bei voller Karte blieb
+ * eine abgeschnittene cam.json liegen (in WSL gemessen, ulimit -f 1: 1024 Byte,
+ * json_decode NULL), und bis zur naechsten Heilung wies der Endpunkt jeden
+ * Loxone-Befehl ab. Bauform eb_json_schreiben() (Einspeisebremse 0.9.28).
+ */
+function cam_datei_schreiben($pfad, $inhalt, $rechte = null)
+{
+    $inhalt = (string) $inhalt;
+    $ordner = dirname($pfad);
+    if (!is_dir($ordner) && !@mkdir($ordner, 0775, true) && !is_dir($ordner)) {
+        return false;
+    }
+    $tmp = $pfad . '.' . getmypid() . '.' . mt_rand(100000, 999999) . '.neu';
+    $fh = @fopen($tmp, 'x');
+    if ($fh === false) {
+        return false;
+    }
+    if ($rechte !== null) {
+        @chmod($tmp, $rechte);
+    }
+    $n = @fwrite($fh, $inhalt);
+    $ok = ($n === strlen($inhalt)) && @fflush($fh);
+    $ok = @fclose($fh) && $ok;
+    clearstatcache(true, $tmp);
+    if ($ok) {
+        $ok = (@file_get_contents($tmp) === $inhalt);
+    }
+    if (!$ok || !@rename($tmp, $pfad)) {
+        @unlink($tmp);
+        return false;
+    }
+    return true;
+}
+
 function cam_config_save(array $cfg)
 {
     $p = cam_paths();
@@ -827,11 +944,25 @@ function cam_config_save(array $cfg)
     $json = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     // json_encode liefert bei ungueltigem UTF-8 false, und file_put_contents
     // schriebe dann eine Datei mit NULL Bytes - und meldete das als Erfolg.
-    if ($json === false || @file_put_contents($p['config'], $json) === false) {
+    if ($json === false) {
         return false;
     }
-    // Zugangsdaten: nur fuer den Besitzer lesbar
-    @chmod($p['config'], 0600);
+    /* Ueber den Schreibhelfer, 0600 schon an der Nebendatei (C8). Die
+       Zweitschrift entsteht erst, wenn cam.json zurueckgelesen denselben
+       Inhalt traegt - eine halb geschriebene Konfiguration darf nie die
+       Zweitschrift ersetzen. */
+    if (!cam_datei_schreiben($p['config'], $json, 0600)) {
+        return false;
+    }
+    clearstatcache(true, $p['config']);
+    if (@file_get_contents($p['config']) !== $json) {
+        return false;
+    }
+    /* Ein ausdrueckliches Speichern quittiert den Merker der Selbstheilung
+       (Reiter Test, Zeile "Konfiguration heil"). */
+    if (is_file(cam_heil_merker())) {
+        @unlink(cam_heil_merker());
+    }
     /* Die Zweitschrift wird NIE durch einen Stand ersetzt, der weniger
        traegt. Gemessen in WSL am 17.09.2026 (messe_oberflaeche.sh, Fall
        Speichern/ohne_token): ein Speichervorgang ohne Aktionstoken machte aus
@@ -841,8 +972,9 @@ function cam_config_save(array $cfg)
     $ac_zweit = is_file($p['backup'])
         ? json_decode((string) @file_get_contents($p['backup']), true) : null;
     if (cam_hat_token($cfg) || !cam_hat_token($ac_zweit)) {
-        @copy($p['config'], $p['backup']);
-        @chmod($p['backup'], 0600);
+        /* Bis 1.9.22 copy() und chmod danach: die Zweitschrift entstand
+           zuerst mit den Rechten der umask (0644) - mit Klartextkennwort. */
+        cam_datei_schreiben($p['backup'], $json, 0600);
     } else {
         /* Die Selbstheilung waehrend dieser einen Zeile abschalten: cam_log()
            ruft cam_config(), und cam_config() wuerde genau jetzt aus der
@@ -1129,6 +1261,17 @@ function cam_log($msg)
        Bis 1.9.16 wurde nur $cfg['pass'] ersetzt, also Kamera 1; pass2 bis
        pass4 standen ungeschuetzt da. Aktionstoken und Stromkennwort
        gehoeren aus demselben Grund dazu. */
+    foreach (cam_geheimnisse() as $ac_w) {
+        if ($ac_w !== '') {
+            $msg = str_replace($ac_w, '********', $msg);
+        }
+    }
+    @file_put_contents($f, '[' . date('Y-m-d H:i:s') . '] ' . $msg . "\n", FILE_APPEND);
+}
+
+/** Die Geheimnisse der Konfiguration - EINE Liste fuer Protokoll und Einmalmeldung. */
+function cam_geheimnisse()
+{
     $cfg = cam_config();
     $ac_geheim = array();
     for ($ac_i = 1; $ac_i <= CAM_MAX; $ac_i++) {
@@ -1137,12 +1280,61 @@ function cam_log($msg)
     }
     $ac_geheim[] = (string) $cfg['aktionstoken'];
     $ac_geheim[] = (string) $cfg['stream_token'];
-    foreach ($ac_geheim as $ac_w) {
-        if ($ac_w !== '') {
-            $msg = str_replace($ac_w, '********', $msg);
+    return $ac_geheim;
+}
+
+/* ==================================================================
+ * Einmalmeldung nach dem POST (U1, Regeln/04 "Jeder POST-Handler endet mit
+ * einer Umleitung"; Bauform eb_einmal_schreiben/eb_einmal_lesen,
+ * Einspeisebremse 0.9.28)
+ *
+ * Eine Datei im Datenordner, 0600, beim folgenden GET gelesen UND geloescht;
+ * aelter als 120 s wird verworfen. Sie traegt nur Meldungstexte; jedes
+ * Geheimnis der Konfiguration (ab vier Zeichen, roh und maskiert) wird vorher
+ * durch Sterne ersetzt (Regeln/04, Nachtrag Raumklima 17.09.2026).
+ * ================================================================== */
+function cam_einmal_datei()
+{
+    return cam_paths()['datadir'] . '/einmalmeldung.json';
+}
+
+function cam_geheim_tilgen($text)
+{
+    $text = (string) $text;
+    foreach (cam_geheimnisse() as $ac_w) {
+        if (strlen($ac_w) >= 4) {
+            $text = str_replace(array($ac_w, htmlspecialchars($ac_w, ENT_QUOTES, 'UTF-8')), '********', $text);
         }
     }
-    @file_put_contents($f, '[' . date('Y-m-d H:i:s') . '] ' . $msg . "\n", FILE_APPEND);
+    return $text;
+}
+
+function cam_einmal_schreiben(array $m)
+{
+    $d = array(
+        'zeit' => time(),
+        'saved' => empty($m['saved']) ? 0 : 1,
+        'note' => cam_geheim_tilgen(isset($m['note']) ? $m['note'] : ''),
+        'note_rot' => empty($m['note_rot']) ? 0 : 1,
+        'err' => cam_geheim_tilgen(isset($m['err']) ? $m['err'] : ''),
+    );
+    $js = json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    return $js !== false && cam_datei_schreiben(cam_einmal_datei(), $js, 0600);
+}
+
+function cam_einmal_lesen()
+{
+    $f = cam_einmal_datei();
+    clearstatcache(true, $f);
+    if (!is_file($f)) {
+        return null;
+    }
+    $d = json_decode((string) @file_get_contents($f), true);
+    @unlink($f);
+    if (!is_array($d) || !isset($d['zeit']) || abs(time() - (int) $d['zeit']) > 120) {
+        return null;
+    }
+    return $d + array('saved' => 0, 'note' => '', 'note_rot' => 0, 'err' => '');
 }
 
 /* ==================================================================
@@ -1365,6 +1557,82 @@ function cam_q($wert)
                                        '#' => '%23', '+' => '%2B', ' ' => '%20'));
 }
 
+/**
+ * Zugangsdaten in einer Adresse fuer ein FORMULARFELD maskieren (U6, B8).
+ *
+ * Bis 1.9.22 stand das Kamerakennwort aus der Schnappschuss-URL (PWD=...) und
+ * aus der RTSP-Adresse (rtsp://user:pass@...) woertlich im HTML der Seite -
+ * Seitenquelltext, Verlauf, Bildschirmfoto. Angezeigt wird jetzt die Maske;
+ * cam_zugang_entmaske() setzt beim Speichern den gespeicherten Wert wieder
+ * ein. Anders als cam_maske() ohne Laengenangabe: der Wert geht zurueck ins
+ * Formular und muss wiedererkannt werden.
+ */
+define('CAM_MASKE', '********');
+
+function cam_zugang_maske($s)
+{
+    $s = (string) $s;
+    $s = preg_replace('/(PWD=)[^&]+/i', '${1}' . CAM_MASKE, $s);
+    $s = preg_replace('#^([a-z][a-z0-9+.\-]*://[^:/@]*):[^@/]+@#i', '${1}:' . CAM_MASKE . '@', $s);
+    return (string) $s;
+}
+
+/**
+ * Die Maske aus einem zurueckgeschickten Feld wieder durch den gespeicherten
+ * Wert ersetzen. Unveraendert zurueckgeschickt heisst unveraendert; wer nur
+ * einen anderen Teil der Adresse aendert, behaelt das Kennwort. Wer ein neues
+ * Kennwort will, ersetzt die Sterne.
+ */
+function cam_zugang_entmaske($neu, $alt)
+{
+    $neu = (string) $neu;
+    $alt = (string) $alt;
+    if (strpos($neu, CAM_MASKE) === false) {
+        return $neu;
+    }
+    if ($neu === cam_zugang_maske($alt)) {
+        return $alt;
+    }
+    if (preg_match('/PWD=([^&]+)/i', $alt, $m)) {
+        $pw = $m[1];
+        $neu = preg_replace_callback('/(PWD=)' . preg_quote(CAM_MASKE, '/') . '(?=&|$)/i',
+            function ($t) use ($pw) { return $t[1] . $pw; }, $neu);
+    }
+    if (preg_match('#^[a-z][a-z0-9+.\-]*://[^:/@]*:([^@/]+)@#i', $alt, $m)) {
+        $pw = $m[1];
+        $neu = preg_replace_callback('#^([a-z][a-z0-9+.\-]*://[^:/@]*):' . preg_quote(CAM_MASKE, '#') . '@#i',
+            function ($t) use ($pw) { return $t[1] . ':' . $pw . '@'; }, $neu);
+    }
+    return (string) $neu;
+}
+
+/**
+ * Die eigene Fassung - fuer den Kopf der Sicherung (U14). Installiert aus
+ * data/system/plugindatabase.json ueber den Ordnernamen (Regeln/03, die
+ * plugin.cfg wird nicht installiert), im Archiv aus der plugin.cfg daneben.
+ * '' = nicht feststellbar.
+ */
+function cam_fassung()
+{
+    $p = cam_paths();
+    if ($p['lbhome'] !== '') {
+        $db = @json_decode((string) @file_get_contents($p['lbhome'] . '/data/system/plugindatabase.json'), true);
+        $liste = (is_array($db) && isset($db['plugins']) && is_array($db['plugins'])) ? $db['plugins'] : (is_array($db) ? $db : array());
+        foreach ($liste as $e) {
+            if (is_array($e) && isset($e['folder'], $e['version']) && is_scalar($e['version'])
+                && (string) $e['folder'] === $p['ordner']) {
+                return (string) $e['version'];
+            }
+        }
+        return '';
+    }
+    $cfgd = dirname(dirname(__DIR__)) . '/plugin.cfg';
+    if (is_file($cfgd) && preg_match('/^VERSION=([0-9][0-9.]*)/m', (string) @file_get_contents($cfgd), $m)) {
+        return $m[1];
+    }
+    return '';
+}
+
 /** URL fuer die Anzeige: Passwort durch Sterne ersetzen, Laenge bleibt sichtbar. */
 function cam_maske($url)
 {
@@ -1513,6 +1781,39 @@ function cam_ffmpeg()
 }
 
 /**
+ * Eine Adresse ueber die PHP-Streams abrufen (C5, Pruefung 29.09.2026).
+ * Rueckgabe: array(Inhalt oder false, HTTP-Code oder 0, WWW-Authenticate).
+ *
+ * Ueber fopen() und stream_get_meta_data() statt ueber die alte
+ * Kopfzeilen-Variable von PHP: 8.5 meldet sie schon beim Uebersetzen als
+ * ueberholt - bei jedem Einbinden dieser Bibliothek, auch mit cURL. Mit
+ * display_errors an ging die Meldung vor jeder Antwort hinaus, und
+ * cam.php?foto=1 ohne Token antwortete 200 statt 403 (gemessen unter 8.5.11).
+ * Die Ersatzfunktion gibt es unter 7.4 nicht; wrapper_data gibt es in allen
+ * Fassungen. Bauform eb_http_abruf() (Einspeisebremse 0.9.28).
+ */
+function cam_http_abruf($url, $ctx)
+{
+    $fp = @fopen($url, 'r', false, $ctx);
+    if ($fp === false) {
+        return array(false, 0, '');
+    }
+    $meta = @stream_get_meta_data($fp);
+    $body = @stream_get_contents($fp);
+    @fclose($fp);
+    $code = 0;
+    $wwwauth = '';
+    $kopf = (is_array($meta) && isset($meta['wrapper_data']) && is_array($meta['wrapper_data']))
+        ? $meta['wrapper_data'] : array();
+    foreach ($kopf as $h) {
+        if (!is_string($h)) { continue; }
+        if (preg_match('#^HTTP/\S+\s+(\d{3})#', $h, $m)) { $code = (int) $m[1]; }
+        if (stripos($h, 'WWW-Authenticate:') === 0) { $wwwauth = trim(substr($h, 17)); }
+    }
+    return array($body, $code, $wwwauth);
+}
+
+/**
  * Rohabruf mit cURL, faellt auf PHP-Streams zurueck.
  * $auth: '' = keine HTTP-Anmeldung (Zugangsdaten stehen in der URL),
  *        'basic' oder 'digest' = zusaetzliche HTTP-Anmeldung.
@@ -1561,16 +1862,7 @@ function cam_http($url, $timeout = 8, $auth = '', $id = 1)
         $opt = $grund;
         if ($kopf !== '') { $opt['header'] = $kopf; }
         $ctx = stream_context_create(array('http' => $opt));
-        $body = @file_get_contents($url, false, $ctx);
-        $code = 0;
-        $wwwauth = '';
-        if (isset($http_response_header) && is_array($http_response_header)) {
-            foreach ($http_response_header as $h) {
-                if (preg_match('#^HTTP/\S+\s+(\d{3})#', $h, $m)) { $code = (int) $m[1]; }
-                if (stripos($h, 'WWW-Authenticate:') === 0) { $wwwauth = trim(substr($h, 17)); }
-            }
-        }
-        return array($body, $code, $wwwauth);
+        return cam_http_abruf($url, $ctx);
     };
 
     if ($auth === 'basic') {
@@ -1885,7 +2177,10 @@ function cam_snapshot($anlass = 'manuell', $id = 1)
     $ms = explode('.', sprintf('%.3F', microtime(true)));
     $name = date('Ymd_His') . '-' . (isset($ms[1]) ? $ms[1] : '000')
           . '_' . preg_replace('/[^a-z0-9]/i', '', $anlass) . '.jpg';
-    if (@file_put_contents($dir . '/' . $name, $body) === false) {
+    /* Unteilbar (C6): bis 1.9.22 blieb bei voller Karte eine gekuerzte Datei
+       im Archiv, wurde in BILDER gezaehlt und ueber ?bild= ausgeliefert
+       (in WSL gemessen, ulimit -f 20: 20480 statt 60004 Byte). */
+    if (!cam_schreibe_unteilbar($dir . '/' . $name, $body)) {
         cam_log('FEHLER: Bild konnte nicht gespeichert werden: ' . $dir . '/' . $name);
         return array(0, 'Bild konnte nicht gespeichert werden');
     }
@@ -1944,7 +2239,8 @@ function cam_clip($anlass = 'klingel', $id = 1)
             // die Nummer auch dann hoch, wenn das Schreiben fehlschlug - das
             // Protokoll meldete dann Bilder, die es nicht gibt.
             $datei = sprintf('%s/%03d.jpg', $dir, ++$nr);
-            if (@file_put_contents($datei, $body) !== false) {
+            // Unteilbar (C6): ein gekuerztes Bild bleibt nicht in der Serie.
+            if (cam_schreibe_unteilbar($datei, $body)) {
                 $n++;
                 $letztes = $body;
                 $letzter_pfad = $datei;
@@ -1991,6 +2287,9 @@ function cam_clip($anlass = 'klingel', $id = 1)
         return array(1, basename($dir) . ' (' . $n . ' Bilder'
             . ($objekte ? ', ' . implode(', ', $objekte) : '') . ')');
     }
+    /* Kam kein Bild an, bleibt kein leerer Serienordner stehen (C6): er
+       zaehlte in CLIPS und erschien in der Galerie als Serie ohne Bild. */
+    @rmdir($dir);
     cam_cleanup();
     return array(0, 'Keine Bilder erhalten');
 }
@@ -2196,7 +2495,8 @@ function cam_timelapse($id = 1)
     }
     $dir = cam_ordner($id, 'timelapse');
     $name = date('Y-m-d') . '.jpg';
-    if (@file_put_contents($dir . '/' . $name, $body) === false) {
+    // Unteilbar (C6), wie Schnappschuss und Bildserie.
+    if (!cam_schreibe_unteilbar($dir . '/' . $name, $body)) {
         // Bis 1.9.8 meldete diese Funktion auch dann Erfolg, wenn nichts
         // geschrieben wurde - die Oberflaeche sagte dann "aufgenommen".
         cam_log('FEHLER: Zeitrafferbild konnte nicht gespeichert werden: ' . $dir . '/' . $name);
@@ -2467,6 +2767,33 @@ function cam_archivdatei($art, $name, $nr = 0, $id = 1)
 
 /* ---------------- Zustand fuer Loxone ---------------- */
 
+/**
+ * ERREICHBAR mit Altersgrenze (Entscheidung 6 vom 29.09.2026, C7).
+ *
+ * Der Wert kommt aus betrieb.json, geschrieben vom Minutentakt. Steht der
+ * Takt, blieb dort bis 1.9.22 "erreichbar" stehen, und der Endpunkt meldete
+ * ERREICHBAR=1 bei HERZ=2880 (zwei Tage ohne Pruefung, gemessen). Jetzt gilt:
+ * ist die letzte Pruefung aelter als das Dreifache von pruef_minuten, heisst
+ * das 0. OK behaelt seine Bedeutung "Adresse eingetragen", HERZ steht
+ * unveraendert daneben. Bei ausgeschalteter Pruefung (Takt 0) und vor der
+ * ersten Pruefung (-1) bleibt der gespeicherte Wert.
+ *
+ * Rueckgabe: array(Wert, veraltet ja/nein).
+ */
+function cam_erreichbar_gealtert(array $b, $takt)
+{
+    $w = isset($b['erreichbar']) ? (int) $b['erreichbar'] : -1;
+    $takt = (int) $takt;
+    if ($w === -1 || $takt <= 0) {
+        return array($w, false);
+    }
+    $ts = (isset($b['geprueft']) && (string) $b['geprueft'] !== '') ? strtotime((string) $b['geprueft']) : false;
+    if ($ts === false || $ts <= 0 || (time() - $ts) > 3 * $takt * 60) {
+        return array(0, true);
+    }
+    return array($w, false);
+}
+
 function cam_state($id = 1)
 {
     $cfg = cam_kcfg($id);
@@ -2497,9 +2824,11 @@ function cam_state($id = 1)
             $herz = max(0, (int) round((time() - $ac_h) / 60));
         }
     }
+    $ac_eg = cam_erreichbar_gealtert($b, isset($cfg['pruef_minuten']) ? $cfg['pruef_minuten'] : 0);
     return array(
         'ok' => trim((string) $cfg['host']) !== '' ? 1 : 0,
-        'erreichbar' => (int) $b['erreichbar'],
+        'erreichbar' => (int) $ac_eg[0],
+        'erreichbar_veraltet' => $ac_eg[1] ? 1 : 0,
         'fehler' => (int) $b['fehler'],
         'grund' => (string) $b['grund'],
         'geprueft' => (string) $b['geprueft'],
@@ -2895,6 +3224,22 @@ function cam_mqtt_zustand($erzwingen = false)
     $merker = cam_paths()['tmp'] . '/mqtt_letzte.json';
     $vorher = cam_json_lesen($merker);
     $praefix = cam_mqtt_praefix($cfg);
+    /* Eine AUSGETRAGENE Kamera (M4): stand ihr Feld im letzten gesendeten Satz
+       und ist sie jetzt nicht mehr eingerichtet, werden ihre zurueckbehaltenen
+       Themen einmal abgeraeumt - mit Rueckfrage beim Broker vorher und nach
+       jeder Runde (cam_mqtt_leeren_lauf). Bis 1.9.22 blieben BILDER2, PERSON2,
+       letztes_bild2 ... fuer immer im Broker stehen (gemessen, Fall F7). Der
+       naechste Satz traegt das Feld nicht mehr - der Anlass verschwindet mit
+       ihm. */
+    $ac_jetzt_k = cam_kameras();
+    for ($ac_i = 2; $ac_i <= CAM_MAX; $ac_i++) {
+        if (!in_array($ac_i, $ac_jetzt_k, true) && array_key_exists('OK' . $ac_i, $vorher)) {
+            $ac_l = cam_mqtt_leeren_lauf($praefix, cam_mqtt_leer_themen_kamera($ac_i), 3, 300000);
+            cam_log('MQTT: Kameraplatz ' . $ac_i . ' ist ausgetragen - seine zurueckbehaltenen '
+                . 'Themen unter ' . $praefix . '/ werden abgeraeumt: '
+                . implode(' ', $ac_l['zeilen']));
+        }
+    }
     /* Der VOLLE Satz geht hinaus, wenn der Merker eine andere Form traegt
        (Vorfassung, anderes Praefix, geaenderte Retain-Tabelle) und
        spaetestens alle CAM_MQTT_VOLL_S Sekunden (Regeln/07, Abschnitt 2:
@@ -2983,7 +3328,7 @@ function cam_xml_virtual_in_http($kopf, $cmds)
         $o .= 'MaxVal="' . (int) $c['max'] . '" ';
         // Ohne Unit steht am virtuellen Eingang eine nackte Zahl.
         $o .= 'Unit="' . cam_x(isset($c['unit']) ? $c['unit'] : '') . '" ';
-        $o .= 'HintText=""';
+        $o .= 'HintText="' . cam_x(isset($c['hint']) ? $c['hint'] : '') . '"';
         $o .= '/>' . $crlf;
     }
     $o .= '</VirtualInHttp>' . $crlf;
@@ -3027,11 +3372,22 @@ function cam_xml_virtual_out($kopf, $cmds)
         $o .= 'Analog="false" ';
         $o .= 'Repeat="0" ';
         $o .= 'RepeatRate="0" ';
-        $o .= 'HintText=""';
+        $o .= 'HintText="' . cam_x(isset($c['hint']) ? $c['hint'] : '') . '"';
         $o .= '/>' . $crlf;
     }
     $o .= '</VirtualOut>' . $crlf;
     return $o;
+}
+
+/**
+ * Kommentar eines Bausteins: hoechstens 40 Zeichen (U13). Der Kameraname
+ * ([Name]) kommt nur dazu, wenn er noch hineinpasst - der Titel traegt die
+ * Kennziffer ohnehin, und der HintText nennt den Namen.
+ */
+function cam_kommentar($kurz, $zusatz)
+{
+    $n = preg_match_all('/./us', (string) $kurz . (string) $zusatz);
+    return ($zusatz !== '' && $n !== false && $n <= 40) ? $kurz . $zusatz : (string) $kurz;
 }
 
 /** array(Dateiname, Inhalt) der Importdatei fuer Loxone Config. */
@@ -3045,10 +3401,16 @@ function cam_vorlage($host = '')
         $ac_kid = isset($d[6]) ? (int) $d[6] : 1;
         $ac_zusatz = (count(cam_kameras()) > 1 && $ac_kid >= 1)
             ? ' [' . cam_kname($ac_kid) . ']' : '';
+        /* U13 (Fehlerklasse 9): der Kommentar ist die Kurzform mit hoechstens
+           40 Zeichen, die volle Erklaerung samt Kameraname steht im
+           HintText. Bis 1.9.22 waren mit zwei Kameras 16 von 23 Kommentaren
+           laenger (bis 85), der HintText war ueberall leer. */
+        $ac_lang = trim(strip_tags(html_entity_decode(cam_t($schluessel), ENT_QUOTES, 'UTF-8')));
+        $ac_kurz = trim(strip_tags(html_entity_decode(cam_t('FELD.K_' . substr($schluessel, 5)), ENT_QUOTES, 'UTF-8')));
         $cmds[] = array(
             'title'   => 'ACTI_' . $name,
-            'comment' => trim(strip_tags(html_entity_decode(cam_t($schluessel), ENT_QUOTES, 'UTF-8')))
-                       . $ac_zusatz,
+            'comment' => cam_kommentar($ac_kurz, $ac_zusatz),
+            'hint'    => $ac_lang . $ac_zusatz,
             'check'   => '\i;' . $name . '=\i\v',
             'analog'  => $analog, 'min' => $min, 'max' => $max,
             'unit'    => isset($d[4]) ? (string) $d[4] : '',
@@ -3107,7 +3469,8 @@ function cam_ausgangsbefehle()
         foreach ($vorlagen as $v) {
             $cmds[] = array(
                 'title'   => 'ACTI_' . $v[0] . $sx,
-                'comment' => cam_t($v[1]) . ($mehrere ? ' [' . cam_kname($id) . ']' : ''),
+                'comment' => cam_kommentar(cam_t($v[1]), $mehrere ? ' [' . cam_kname($id) . ']' : ''),
+                'hint'    => cam_t($v[1]) . ($mehrere ? ' [' . cam_kname($id) . ']' : ''),
                 'on'      => $pfad . $v[2] . $kam . $anhang,
                 'kamera'  => $id,
             );
@@ -3211,6 +3574,64 @@ function cam_reiter_pruefen()
     return $aus;
 }
 
+/**
+ * Tragen alle Formulare der Oberflaeche das Merkmal (U10)? Gelesen wird die
+ * Oberflaechendatei selbst: jedes <form>...</form> muss ein Feld formtoken mit
+ * cam_formtoken() tragen. Rueckgabe array(gelesen, formen, ohne[]).
+ */
+function cam_formulare_pruefen()
+{
+    $aus = array('gelesen' => false, 'formen' => 0, 'ohne' => array());
+    $pfad = cam_oberflaeche_pfad();
+    $q = ($pfad !== '') ? (string) @file_get_contents($pfad) : '';
+    if ($q === '') {
+        return $aus;
+    }
+    $aus['gelesen'] = true;
+    preg_match_all('#<form\b[^>]*>(.*?)</form>#s', $q, $m);
+    foreach ($m[1] as $i => $inhalt) {
+        $aus['formen']++;
+        if (strpos($inhalt, 'name="formtoken"') === false || strpos($inhalt, 'cam_formtoken()') === false) {
+            $name = 'Formular ' . ($i + 1);
+            if (preg_match_all('/name="([A-Za-z_]+)"/', $inhalt, $nn)) {
+                foreach ($nn[1] as $n) {
+                    if ($n !== 'formtoken' && $n !== 'activetab') { $name = $n; break; }
+                }
+            }
+            $aus['ohne'][] = $name;
+        }
+    }
+    return $aus;
+}
+
+/**
+ * Antwortet der eigene Endpunkt (U10)? Ein echter Abruf der Statuszeile auf
+ * 127.0.0.1 unter dem Port dieser Seite, 3 s Frist. Drei Ausgaenge:
+ * 1 Statuszeile kam, 0 eine andere Antwort (HTTP 500, 404, Fremdtext),
+ * -1 nicht feststellbar (Archivmodus oder keine Verbindung).
+ * Rueckgabe array(stand, url, code, auszug).
+ */
+function cam_endpunkt_pruefen()
+{
+    $p = cam_paths();
+    if ($p['lbhome'] === '') {
+        return array(-1, '', 0, '');
+    }
+    $port = (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] > 0) ? (int) $_SERVER['SERVER_PORT'] : 80;
+    $url = 'http://127.0.0.1' . ($port !== 80 ? ':' . $port : '') . '/plugins/' . rawurlencode($p['ordner']) . '/cam.php';
+    $ctx = stream_context_create(array('http' => array('timeout' => 3, 'ignore_errors' => true,
+        'follow_location' => 0, 'max_redirects' => 1, 'user_agent' => 'LoxBerry ACTi-Plugin Selbsttest')));
+    $r = cam_http_abruf($url, $ctx);
+    if ((int) $r[1] === 0) {
+        return array(-1, $url, 0, '');
+    }
+    if ((int) $r[1] === 200 && strpos((string) $r[0], 'ACTI;') === 0) {
+        return array(1, $url, 200, '');
+    }
+    $auszug = trim(preg_replace('/\s+/', ' ', strip_tags((string) $r[0])));
+    return array(0, $url, (int) $r[1], substr($auszug, 0, 80));
+}
+
 function cam_pruefungen()
 {
     $cfg = cam_config();
@@ -3294,6 +3715,11 @@ function cam_pruefungen()
             $zeile(-1, $ac_frage, cam_t('TEST.A_ERREICHBAR_AUS'));
         } elseif ((int) $ac_b['erreichbar'] === -1) {
             $zeile(-1, $ac_frage, cam_t('TEST.A_ERREICHBAR_NIE'));
+        } elseif (cam_erreichbar_gealtert($ac_b, $cfg['pruef_minuten'])[1]) {
+            // C7: dieselbe Altersgrenze wie am Endpunkt.
+            $zeile(0, $ac_frage,
+                sprintf(cam_t('TEST.A_ERREICHBAR_ALT'), cam_e((string) $ac_b['geprueft']),
+                        3 * (int) $cfg['pruef_minuten']));
         } elseif ((int) $ac_b['erreichbar'] === 1) {
             $zeile(1, $ac_frage,
                 sprintf(cam_t('TEST.A_ERREICHBAR_JA'), cam_e((string) $ac_b['geprueft'])));
@@ -3388,9 +3814,30 @@ function cam_pruefungen()
         foreach (array_keys($ac_qt) as $ac_k) {
             if (!cam_mqtt_thema_bekannt($ac_k)) { $ac_fehlt[] = $ac_k; }
         }
-        $zeile($ac_fehlt ? 0 : 1, cam_t('TEST.F_THEMEN'),
-            $ac_fehlt
-                ? sprintf(cam_t('TEST.A_THEMEN_FEHLT'), cam_e(implode(', ', $ac_fehlt)))
+        /* Die Gegenrichtung (M6): jedes Thema der Liste muss gesendet werden -
+           entweder in einem cam_mqtt(array(...))-Aufruf (Stamm ohne
+           Kennziffer) oder als Feld mit "ueber MQTT" = 1 aus cam_felder(),
+           das cam_mqtt_zustand() sendet. Bis 1.9.22 blieb die Zeile gruen,
+           wenn ein versprochenes Thema aus dem Sendecode fiel (gemessen: zeit
+           entfernt, Haken blieb). */
+        $ac_felder = cam_felder();
+        $ac_nie = array();
+        foreach (array_keys(cam_mqtt_themenliste()) as $ac_t) {
+            $ac_stamm = preg_match('/^(.*?)([2-9])$/', $ac_t, $ac_mm)
+                && (int) $ac_mm[2] <= CAM_MAX && isset($ac_qt[$ac_mm[1]]) ? $ac_mm[1] : $ac_t;
+            $ac_feld = isset($ac_felder[$ac_t]) && !empty($ac_felder[$ac_t][5]);
+            if (!isset($ac_qt[$ac_stamm]) && !$ac_feld) { $ac_nie[] = $ac_t; }
+        }
+        $ac_antw = array();
+        if ($ac_fehlt) {
+            $ac_antw[] = sprintf(cam_t('TEST.A_THEMEN_FEHLT'), cam_e(implode(', ', $ac_fehlt)));
+        }
+        if ($ac_nie) {
+            $ac_antw[] = sprintf(cam_t('TEST.A_THEMEN_NIE'), cam_e(implode(', ', $ac_nie)));
+        }
+        $zeile(($ac_fehlt || $ac_nie) ? 0 : 1, cam_t('TEST.F_THEMEN'),
+            $ac_antw
+                ? implode(' ', $ac_antw)
                 : sprintf(cam_t('TEST.A_THEMEN_OK'), count($ac_qt),
                           count(cam_mqtt_themenliste())));
     }
@@ -3453,6 +3900,53 @@ function cam_pruefungen()
                                          implode('; ', $ac_r['fehlt']));
         }
         $zeile($ac_einig ? 1 : 0, cam_t('TEST.F_REITER'), $ac_antwort);
+    }
+
+    /* Drei Pflichtzeilen nach Regeln/04 (U10, Pruefung 29.09.2026). Bis
+       1.9.22 fehlten sie; ein Formular ohne Merkmal, ein Endpunkt mit HTTP
+       500 und eine aus der Zweitschrift geheilte Konfiguration blieben hier
+       unsichtbar (Eichung: Merkmal aus einem Formular genommen, keine Zeile
+       wechselte). */
+    $ac_fm = cam_formulare_pruefen();
+    if (!$ac_fm['gelesen']) {
+        $zeile(-1, cam_t('TEST.F_FORMTOKEN'), cam_t('TEST.A_FORMTOKEN_UNGELESEN'));
+    } elseif ($ac_fm['ohne'] || $ac_fm['formen'] === 0) {
+        $zeile(0, cam_t('TEST.F_FORMTOKEN'), sprintf(cam_t('TEST.A_FORMTOKEN_FEHL'),
+            count($ac_fm['ohne']), (int) $ac_fm['formen'], cam_e(implode(', ', $ac_fm['ohne']))));
+    } else {
+        $zeile(1, cam_t('TEST.F_FORMTOKEN'), sprintf(cam_t('TEST.A_FORMTOKEN_OK'), (int) $ac_fm['formen']));
+    }
+
+    $ac_ep = cam_endpunkt_pruefen();
+    if ($ac_ep[1] === '') {
+        $zeile(-1, cam_t('TEST.F_ENDPUNKT'), cam_t('TEST.A_ENDPUNKT_ARCHIV'));
+    } elseif ($ac_ep[0] === 1) {
+        $zeile(1, cam_t('TEST.F_ENDPUNKT'), sprintf(cam_t('TEST.A_ENDPUNKT_OK'), cam_e($ac_ep[1])));
+    } elseif ($ac_ep[0] === 0) {
+        $zeile(0, cam_t('TEST.F_ENDPUNKT'), sprintf(cam_t('TEST.A_ENDPUNKT_FEHL'), cam_e($ac_ep[1]),
+            (int) $ac_ep[2], cam_e($ac_ep[3])));
+    } else {
+        $zeile(-1, cam_t('TEST.F_ENDPUNKT'), sprintf(cam_t('TEST.A_ENDPUNKT_NICHT'), cam_e($ac_ep[1])));
+    }
+
+    /* Der Zustand VOR der Heilung: cam_config() haelt ihn in
+       konfig_geheilt.txt fest, ein Speichern quittiert ihn. */
+    clearstatcache();
+    if (is_file(cam_heil_merker())) {
+        $zeile(0, cam_t('TEST.F_HEIL'), sprintf(cam_t('TEST.A_HEIL_GEHEILT'),
+            cam_e(trim((string) @file_get_contents(cam_heil_merker())))));
+    } else {
+        $ac_hd = is_file($p['config']) ? json_decode((string) @file_get_contents($p['config']), true) : null;
+        if (!is_array($ac_hd)) {
+            $zeile(0, cam_t('TEST.F_HEIL'), cam_t('TEST.A_HEIL_KAPUTT'));
+        } elseif (!cam_hat_token($ac_hd)) {
+            $zeile(0, cam_t('TEST.F_HEIL'), cam_t('TEST.A_HEIL_OHNE_TOKEN'));
+        } elseif (is_file($p['config'] . '.kaputt')) {
+            $zeile(-1, cam_t('TEST.F_HEIL'), sprintf(cam_t('TEST.A_HEIL_KAPUTT_ALT'),
+                cam_e(basename($p['config']) . '.kaputt'), date('d.m.Y H:i', (int) filemtime($p['config'] . '.kaputt'))));
+        } else {
+            $zeile(1, cam_t('TEST.F_HEIL'), cam_t('TEST.A_HEIL_OK'));
+        }
     }
 
     /* Vorlage wohlgeformt - gehoert hierher, nicht erst in die Pruefung vor
@@ -3542,6 +4036,7 @@ function cam_mqtt($werte, $leeren = array())
         return 0;
     }
     $gesendet = 0;
+    $ac_dg = 0;
     $ac_leer = array();
     foreach ((array) $leeren as $ac_t) { $ac_leer[(string) $ac_t] = true; }
     foreach ((array) $werte as $k => $v) {
@@ -3549,19 +4044,29 @@ function cam_mqtt($werte, $leeren = array())
             /* Ein Leerzeichen hinter dem Thema, sonst keine Nutzlast: die
                Form, die das Gateway als Loeschung liest (Regeln/07,
                Nachtrag 19.09.2026: mqttgateway.pl:281, :311-315, :357). */
+            if ($ac_dg++ > 0) { usleep(CAM_MQTT_PAUSE_US); }
             if (@fwrite($s, 'retain ' . $prefix . '/' . $k . ' ') !== false) {
                 $gesendet++;
             }
         }
         $wert = cam_mqtt_wert_saeubern($v);
-        /* "retain" und "publish" gehen denselben Weg - das Gateway
-           unterscheidet sie am ersten Wort (mqttgateway.pl, sub udpin).
-           Ausnahme: eine LEERE Nutzlast loescht ein zurueckbehaltenes Thema
-           im Broker. Ein Wert, der leer sein kann, geht deshalb als publish
-           hinaus, auch wenn seine Zeile retained sagt - sonst verschwaende
-           ein Leerwert das Thema, statt es zu setzen. */
-        $retain = cam_mqtt_retained($k) && $wert !== '';
+        /* NIE eine leere Nutzlast (M1, Entscheidungen 3 und 5 vom 29.09.2026):
+           ein Wert ohne Aussage geht als "-" hinaus. Bis 1.9.22 ging objekte
+           nach jeder Aufnahme ohne Treffer - dem Regelfall - leer hinaus, und
+           das Gateway reichte den leeren Wert an den Miniserver weiter; ein
+           leerer retained Zustand ging als publish, und der Altwert blieb im
+           Broker stehen. "retain" und "publish" gehen denselben Weg - das
+           Gateway unterscheidet sie am ersten Wort (mqttgateway.pl, sub
+           udpin). */
+        if ($wert === '') {
+            $wert = '-';
+        }
+        $retain = cam_mqtt_retained($k);
         $msg = ($retain ? 'retain ' : 'publish ') . $prefix . '/' . $k . ' ' . $wert;
+        /* 5 ms zwischen zwei Datagrammen (M8, Regeln/07): ein Stoss ohne
+           Pause ist am UDP-Eingang des Gateways messbar verlustbehaftet. Bis
+           1.9.22 gingen bei vier Kameras 40 Datagramme in einem Stoss. */
+        if ($ac_dg++ > 0) { usleep(CAM_MQTT_PAUSE_US); }
         if (@fwrite($s, $msg) !== false) {
             $gesendet++;
         }
@@ -3576,6 +4081,38 @@ function cam_mqtt($werte, $leeren = array())
 
 /** Spaetestens nach so vielen Sekunden geht der volle Satz erneut hinaus. */
 define('CAM_MQTT_VOLL_S', 1800);
+
+/** Pause zwischen zwei Datagrammen an den UDP-Eingang (M8), Mikrosekunden. */
+define('CAM_MQTT_PAUSE_US', 5000);
+
+/**
+ * Die Abo-Datei des MQTT-Gateways: config/plugins/<ordner>/mqtt_subscriptions.cfg
+ * mit "<praefix>/#" (M7). Das Gateway V1 liest sie selbst und abonniert jede
+ * Zeile (Regeln/07, am Geraet belegt). Bis 1.9.22 gab es sie nicht; der
+ * Anwender musste acti/# von Hand eintragen und nach jedem Praefixwechsel
+ * erneut. Geschrieben wird nur bei eingeschaltetem MQTT und nur, wenn sie
+ * fehlt oder abweicht - der Installer raeumt den Konfigordner bei jedem
+ * Update ab, der Minutentakt legt sie wieder an. Bauform eb_abo_datei()
+ * (Einspeisebremse 0.9.28). Rueckgabe: array(Pfad, traegt das Abo).
+ */
+function cam_mqtt_abo_datei($schreiben = false)
+{
+    $p = cam_paths();
+    $cfg = cam_config();
+    $pfad = dirname($p['config']) . '/mqtt_subscriptions.cfg';
+    $soll = cam_mqtt_praefix($cfg) . '/#';
+    clearstatcache(true, $pfad);
+    $roh = is_readable($pfad) ? (string) @file_get_contents($pfad) : '';
+    $da = in_array($soll, array_map('trim', preg_split('/\r?\n/', $roh)), true);
+    if ($schreiben && !empty($cfg['mqtt_enabled']) && $roh !== $soll . "\n"
+        && is_dir(dirname($pfad))) {
+        if (cam_datei_schreiben($pfad, $soll . "\n", 0644)) {
+            cam_log('MQTT: Abo-Datei des Gateways gesetzt: ' . $pfad . ' -> ' . $soll);
+            $da = true;
+        }
+    }
+    return array($pfad, $da);
+}
 
 /** Der Themen-Praefix - EINE Stelle fuer Senden, Abraeumen und Leeren. */
 function cam_mqtt_praefix($cfg)
@@ -3868,10 +4405,25 @@ function cam_mqtt_altlast($praefix)
             . 'vor dem gueltigen Wert hinaus; der naechste Lauf fragt wieder nach.');
         return array('lage' => 'belegt', 'themen' => $t);
     }
+    /* Ohne Antwort des Brokers hoechstens EINMAL JE STUNDE blind abraeumen
+       (M9, Hinweis H1 der Pruefung 29.09.2026). Bis 1.9.22 gingen dann in
+       JEDEM Takt fuenf leere retain hinaus, jedes vom Wert gefolgt - bei
+       einer Kamera 12 statt 2 Datagramme je Minute, ohne Ende, und der
+       Miniserver sah jede Minute kurz einen leeren Wert. Der Zeitpunkt liegt
+       im Datenordner; ein Update raeumt ihn ab, danach wird einmal
+       abgeraeumt. */
+    $blind = $p['datadir'] . '/retain_altlast_blind_am';
+    clearstatcache(true, $blind);
+    $zuletzt = is_file($blind) ? trim((string) @file_get_contents($blind)) : '';
+    if (preg_match('/^[0-9]{1,12}$/', $zuletzt) && abs(time() - (int) $zuletzt) < 3600) {
+        return array('lage' => 'unbekannt', 'themen' => array());
+    }
+    if (!is_dir($p['datadir'])) { @mkdir($p['datadir'], 0775, true); }
+    @file_put_contents($blind, (string) time());
     cam_log_selten('altlast_unbekannt', 'MQTT: der Broker liess sich nicht befragen (Brokerhost, '
         . 'Brokerport und Zugangsdaten in general.json) - die frueher zurueckbehaltenen Werte unter '
-        . $praefix . '/ (' . implode(', ', $liste) . ') gehen deshalb in jedem Lauf mit leerer '
-        . 'Nutzlast unmittelbar vor dem gueltigen Wert hinaus. Siehe README.', 86400);
+        . $praefix . '/ (' . implode(', ', $liste) . ') gehen deshalb hoechstens einmal je Stunde mit '
+        . 'leerer Nutzlast unmittelbar vor dem gueltigen Wert hinaus. Siehe README.', 86400);
     return array('lage' => 'unbekannt', 'themen' => $liste);
 }
 
@@ -3884,19 +4436,28 @@ function cam_mqtt_altlast($praefix)
  */
 function cam_mqtt_leer_themen()
 {
+    $aus = array();
+    for ($id = 1; $id <= CAM_MAX; $id++) {
+        foreach (cam_mqtt_leer_themen_kamera($id) as $t) { $aus[] = $t; }
+    }
+    return $aus;
+}
+
+/** Dieselben Themen fuer EINEN Kameraplatz (M4: ausgetragene Kamera). */
+function cam_mqtt_leer_themen_kamera($id)
+{
     $felder = cam_basisfelder();
     $alt = cam_mqtt_altlast_staemme();
     $aus = array();
-    for ($id = 1; $id <= CAM_MAX; $id++) {
-        $sx = cam_sx($id);
-        foreach ($felder as $n => $d) {
-            if (empty($d[5])) { continue; }
-            if (empty($d[6]) && $id !== 1) { continue; }
-            if (!empty($d[7]) || in_array($n, $alt, true)) { $aus[] = $n . $sx; }
-        }
-        foreach (cam_mqtt_zusatzthemen() as $k => $r) {
-            if ($r && $k !== 'online' && $k !== 'ts') { $aus[] = $k . $sx; }
-        }
+    $id = (int) $id;
+    $sx = cam_sx($id);
+    foreach ($felder as $n => $d) {
+        if (empty($d[5])) { continue; }
+        if (empty($d[6]) && $id !== 1) { continue; }
+        if (!empty($d[7]) || in_array($n, $alt, true)) { $aus[] = $n . $sx; }
+    }
+    foreach (cam_mqtt_zusatzthemen() as $k => $r) {
+        if ($r && $k !== 'online' && $k !== 'ts') { $aus[] = $k . $sx; }
     }
     return $aus;
 }
@@ -3921,32 +4482,52 @@ function cam_mqtt_leer_themen()
  */
 function cam_mqtt_leeren($runden = 3, $pause_us = 1000000)
 {
-    $w = cam_mqtt_praefix(cam_config(false));
+    /* Seit 1.9.23 steht der Lauf in cam_mqtt_leeren_lauf(): die Oberflaeche
+       leert damit beim Praefixwechsel und beim Abschalten (M2/M3) und der
+       Minutentakt eine ausgetragene Kamera (M4). Die Ausgabe hier - die der
+       Deinstallation - ist Wort fuer Wort dieselbe wie bis 1.9.22. */
+    $l = cam_mqtt_leeren_lauf(cam_mqtt_praefix(cam_config(false)), null, $runden, $pause_us);
+    foreach ($l['zeilen'] as $z) {
+        echo $z . "\n";
+    }
+    return $l['rc'];
+}
+
+/**
+ * Zurueckbehaltene Themen unter $w/ leeren und beim Broker nachlesen.
+ * $themen null = alle aus cam_mqtt_leer_themen(), sonst diese (ohne Praefix).
+ * Rueckgabe array('rc' => 0|1|2 wie cam_mqtt_leeren(), 'zeilen' => Meldungen
+ * mit <OK>/<INFO>/<WARNING> vorn, ohne Zeilenende).
+ */
+function cam_mqtt_leeren_lauf($w, $themen = null, $runden = 3, $pause_us = 1000000)
+{
+    $w = (string) $w;
+    $aus = array();
     $gw = cam_mqtt_zustand_pruefen();
     if (empty($gw['udpport'])) {
-        echo '<INFO> MQTT: in der general.json steht kein UDP-Eingangsport des Gateways - '
-           . 'zurueckbehaltene Themen unter ' . $w . '/ wurden nicht geleert.' . "\n";
-        return 2;
+        $aus[] = '<INFO> MQTT: in der general.json steht kein UDP-Eingangsport des Gateways - '
+           . 'zurueckbehaltene Themen unter ' . $w . '/ wurden nicht geleert.';
+        return array('rc' => 2, 'zeilen' => $aus);
     }
     $alle = array();
-    foreach (cam_mqtt_leer_themen() as $t) { $alle[] = $w . '/' . $t; }
+    foreach (($themen === null ? cam_mqtt_leer_themen() : (array) $themen) as $t) { $alle[] = $w . '/' . $t; }
     $n = count($alle);
     $f = cam_mqtt_behalten_liste($alle);
     $nachgelesen = ($f['lage'] === 'ok');
     $offen = $nachgelesen ? array_keys($f['belegt']) : $alle;
     if ($nachgelesen && !$offen) {
-        echo '<OK> MQTT: der Broker bestaetigt: keines der ' . $n . ' Themen unter ' . $w
-           . '/ steht zurueckbehalten - nichts zu leeren.' . "\n";
-        return 0;
+        $aus[] = '<OK> MQTT: der Broker bestaetigt: keines der ' . $n . ' Themen unter ' . $w
+           . '/ steht zurueckbehalten - nichts zu leeren.';
+        return array('rc' => 0, 'zeilen' => $aus);
     }
     $eno = 0;
     $etxt = '';
     $fp = @stream_socket_client('udp://127.0.0.1:' . (int) $gw['udpport'], $eno, $etxt, 2);
     if (!$fp) {
-        echo '<WARNING> MQTT: der UDP-Eingang des Gateways ist nicht erreichbar (Port '
+        $aus[] = '<WARNING> MQTT: der UDP-Eingang des Gateways ist nicht erreichbar (Port '
            . (int) $gw['udpport'] . ') - zurueckbehaltene Themen unter ' . $w
-           . '/ wurden nicht geleert.' . "\n";
-        return 1;
+           . '/ wurden nicht geleert.';
+        return array('rc' => 1, 'zeilen' => $aus);
     }
     $zu_leeren = count($offen);
     $datagramme = 0;
@@ -3970,24 +4551,24 @@ function cam_mqtt_leeren($runden = 3, $pause_us = 1000000)
         }
     }
     fclose($fp);
-    echo '<INFO> MQTT: ' . $zu_leeren . ' von ' . $n . ' Themen unter ' . $w . '/ mit leerer Nutzlast '
+    $aus[] = '<INFO> MQTT: ' . $zu_leeren . ' von ' . $n . ' Themen unter ' . $w . '/ mit leerer Nutzlast '
        . 'an den UDP-Eingang ' . (int) $gw['udpport'] . ' des Gateways gesendet (' . $gelaufen
-       . ' Runde(n), ' . $datagramme . ' Datagramme).' . "\n";
+       . ' Runde(n), ' . $datagramme . ' Datagramme).';
     if ($nachgelesen && !$offen) {
-        echo '<OK> MQTT: der Broker bestaetigt: keines der ' . $n . ' Themen steht mehr '
-           . 'zurueckbehalten.' . "\n";
-        return 0;
+        $aus[] = '<OK> MQTT: der Broker bestaetigt: keines der ' . $n . ' Themen steht mehr '
+           . 'zurueckbehalten.';
+        return array('rc' => 0, 'zeilen' => $aus);
     }
     if ($nachgelesen) {
-        echo '<WARNING> MQTT: ' . count($offen) . ' Themen stehen noch zurueckbehalten im Broker ('
+        $aus[] = '<WARNING> MQTT: ' . count($offen) . ' Themen stehen noch zurueckbehalten im Broker ('
            . implode(', ', array_slice($offen, 0, 5)) . (count($offen) > 5 ? ', ...' : '')
-           . '). Von Hand: mosquitto_pub -r -n -t <thema> (mit den Broker-Zugangsdaten).' . "\n";
-        return 1;
+           . '). Von Hand: mosquitto_pub -r -n -t <thema> (mit den Broker-Zugangsdaten).';
+        return array('rc' => 1, 'zeilen' => $aus);
     }
-    echo '<INFO> MQTT: der Broker liess sich nicht befragen - nicht nachgelesen. Der UDP-Eingang '
+    $aus[] = '<INFO> MQTT: der Broker liess sich nicht befragen - nicht nachgelesen. Der UDP-Eingang '
        . 'verwirft unter Last Datagramme; was stehen bleibt, laesst sich mit '
-       . 'mosquitto_pub -r -n -t <thema> von Hand loeschen.' . "\n";
-    return 0;
+       . 'mosquitto_pub -r -n -t <thema> von Hand loeschen.';
+    return array('rc' => 0, 'zeilen' => $aus);
 }
 
 /* ==================================================================
@@ -4067,14 +4648,22 @@ function cam_t($schluessel)
  * Unbekannte Schluessel sind eine Beanstandung, kein stiller Verlust: sie
  * stammen aus einer anderen Fassung oder einem anderen Plugin.
  *
- * Rueckgabe: array(Konfiguration|null, Beanstandungen[], uebernommene Werte).
+ * Rueckgabe: array(Konfiguration|null, Beanstandungen[], uebernommene Werte,
+ *                  Hinweise[]) - die Hinweise seit 1.9.23 (C1).
  */
 function cam_sicherung_lesen($roh)
 {
     $mangel = array();
+    $hinweise = array();
     $daten = json_decode((string) $roh, true);
     if (!is_array($daten)) {
-        return array(null, array(cam_t('TEXT.SICH_KEIN_JSON')), 0);
+        return array(null, array(cam_t('TEXT.SICH_KEIN_JSON')), 0, array());
+    }
+    /* Eine JSON-LISTE ist keine Sicherung (U15). Bis 1.9.22 lief [1,2] in
+       die Schleife, und $k[0] auf einem ganzzahligen Schluessel gab unter
+       PHP 8 eine Warnung mitten in der Seite. */
+    if ($daten && array_keys($daten) === range(0, count($daten) - 1)) {
+        return array(null, array(cam_t('TEXT.SICH_KEIN_JSON')), 0, array());
     }
     /* Grundlage ist der BESTEHENDE Stand, nicht die nackte Vorgabenliste.
      *
@@ -4093,6 +4682,11 @@ function cam_sicherung_lesen($roh)
     foreach ($daten as $k => $w) {
         /* Der lesbare Kopf (_hinweis, _stand) wird UEBERGANGEN, nicht
            beanstandet - er ist keine Einstellung. */
+        if (!is_string($k)) {
+            // {"0":1}: ein ganzzahliger Schluessel ist keine Einstellung (U15).
+            $mangel[] = sprintf(cam_t('TEXT.SICH_FREMD'), (string) $k);
+            continue;
+        }
         if ($k !== '' && $k[0] === '_') {
             continue;
         }
@@ -4105,6 +4699,19 @@ function cam_sicherung_lesen($roh)
         $grund = cam_wert_pruefen($k, $w);
         if ($grund !== '') {
             $mangel[] = sprintf(cam_t('TEXT.SICH_WERT'), (string) $k, $grund);
+            continue;
+        }
+        /* Ein LEERES Aktions- oder Ausloese-Token heisst "kein Token
+         * gesichert" (C1/U4, Regeln/05): das geltende bleibt, und die Meldung
+         * sagt es. Bis 1.9.22 wurde es leer geschrieben; im selben Aufruf
+         * heilte cam_config() aus der Zweitschrift, alle zurueckgespielten
+         * Werte fielen auf den alten Stand, und die Seite meldete
+         * "uebernommen". Leere Ausloese-Token wuerfelte die Seite beim
+         * naechsten Aufbau still neu. Behalten statt Abweisen wie Renault-NG
+         * 2.1.13: eine sonst gueltige Sicherung bleibt zurueckspielbar, und die
+         * Adressen in Loxone gelten weiter. */
+        if ($w === '' && in_array($k, cam_selbsterzeugte_schluessel(), true)) {
+            $hinweise[] = sprintf(cam_t('TEXT.SICH_TOKEN_BEHALTEN'), $k);
             continue;
         }
         $neu[$k] = $w;
@@ -4141,7 +4748,7 @@ function cam_sicherung_lesen($roh)
         $mangel[] = sprintf(cam_t('TEXT.SICH_FEHLEND'), count($fehlend),
             htmlspecialchars(implode(', ', $fehlend), ENT_QUOTES, 'UTF-8'));
     }
-    return array($mangel ? null : $neu, $mangel, $anzahl);
+    return array($mangel ? null : $neu, $mangel, $anzahl, $hinweise);
 }
 
 /* Der Escape-Helfer gehoert in die Bibliothek, nicht in

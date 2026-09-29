@@ -100,8 +100,32 @@ AC_GESICHERT=0; ac_hat_adresse "$SICHER/cam.json" && AC_GESICHERT=1
 # Nach INHALT, nicht nach Groesse: bis 1.9.21 genuegte "[ -s ]", und eine
 # Sicherung "{}" ueberschrieb die eben aus der Zweitschrift eingespielte
 # Konfiguration und wurde als "zurueckgeholt" gemeldet (Fall Z4).
+# Eine UNLESBARE Sicherung (abgeschnittenes JSON) mit mehr als leer/{}/[]
+# wird als config/plugins/<ordner>/cam.json.kaputt.<zeit> (0600)
+# beiseitegelegt, nicht geloescht (I6, README "Was verdraengt wird, bleibt als
+# .kaputt"). Bis 1.9.22 loeschte der Aufraeumschritt unten den Ordner, und
+# Adresse, Benutzer und Passwort waren nirgends mehr (Fall F3b).
+AC_KAPUTT=0
 if [ -f "$SICHER/cam.json" ]; then
-    if ! ac_inhalt "$SICHER/cam.json"; then
+    ac_rest=$(tr -d ' \t\r\n' < "$SICHER/cam.json" 2>/dev/null)
+    if ! ac_json_ok "$SICHER/cam.json" && [ -n "$ac_rest" ] && [ "$ac_rest" != "{}" ] && [ "$ac_rest" != "[]" ]; then
+        AC_K="$BASE/config/plugins/$PFOLDER/cam.json.kaputt.$(date +%Y%m%d%H%M%S)"
+        if cp -p "$SICHER/cam.json" "$AC_K" 2>/dev/null && chmod 0600 "$AC_K" 2>/dev/null \
+           && cmp -s "$SICHER/cam.json" "$AC_K"; then
+            AC_KAPUTT=1
+            if ac_inhalt "$CF"; then
+                # Die Konfiguration kam schon aus der Zweitschrift (postinstall.sh).
+                echo "<INFO> Die Upgrade-Sicherung der Konfiguration ist kein lesbares JSON (abgeschnitten?) - die Konfiguration kam aus der Zweitschrift. Die Sicherung liegt als $AC_K (0600) daneben."
+            else
+                echo "<WARNING> Die Upgrade-Sicherung der Konfiguration ist kein lesbares JSON (abgeschnitten?) - nichts zurueckgeholt."
+                echo "<WARNING> Sie liegt als $AC_K (0600) bereit; Adresse, Benutzer und Passwort lassen sich daraus abschreiben."
+            fi
+        else
+            AC_KAPUTT=2
+            echo "<WARNING> Die Upgrade-Sicherung der Konfiguration ist kein lesbares JSON und liess sich nicht"
+            echo "<WARNING> als .kaputt ablegen - sie bleibt unter $SICHER liegen."
+        fi
+    elif ! ac_inhalt "$SICHER/cam.json"; then
         echo "<INFO> Die Upgrade-Sicherung traegt keine eingerichtete Konfiguration (weder Adresse noch Aktionstoken) - nichts zurueckgeholt."
     elif cp -p "$SICHER/cam.json" "$CF" 2>/dev/null && chmod 0600 "$CF" 2>/dev/null \
          && cmp -s "$SICHER/cam.json" "$CF"; then
@@ -152,6 +176,8 @@ fi
 if [ -d "$SICHER" ] && ac_inhalt "$SICHER/cam.json" && ! cmp -s "$SICHER/cam.json" "$CF"; then
     echo "<WARNING> Die Upgrade-Sicherung bleibt liegen - ihre Konfiguration ist nicht angekommen:"
     echo "<WARNING>   $SICHER"
+elif [ "$AC_KAPUTT" = "2" ]; then
+    : # gemeldet oben; die unlesbare Sicherung ist die einzige Abschrift
 else
     rm -rf "$SICHER" 2>/dev/null
 fi

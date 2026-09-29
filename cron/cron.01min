@@ -6,15 +6,29 @@
 # hielt den Herzschlag frisch, an dem Loxone einen toten Minutentakt erkennt,
 # und konnte Aufnahme und Archiv-Bereinigung ausloesen.
 #
-# Als loxberry starten, nicht als root: der Cron laeuft als root, die
-# Oberflaeche als loxberry, und beide schreiben in dieselben Archivordner.
-# Faellt su aus, laeuft es wie bisher weiter - melden ist richtig, blockieren
-# nicht.
+# Der Cron laeuft als loxberry (Regeln/06, am Geraet gemessen), wie die
+# Oberflaeche. Bis 1.9.22 stand hier, er laufe als root - der su-Zweig unten
+# greift nur, falls ihn doch einmal root startet: dann gehoerten sonst neue
+# Archivordner root, und die Oberflaeche koennte nicht mehr hineinschreiben.
+#
+# Die FEHLERAUSGABE geht nach cron.err im Protokollordner des Plugins, nicht
+# nach /dev/null (Befund I7; Bauform Funkwacht 1.0.8, Regeln/06). Bis 1.9.22
+# blieb von einem abbrechenden Minutentakt keine Spur (gemessen: cam_lib.php
+# entfernt, rc 0, 0 Byte). Das Verzeichnis wird vorher angelegt, sonst
+# scheitert schon die Umlenkung; touch frischt die Aenderungszeit auf, sonst
+# raeumt die Logwartung die Datei weg; ueber 256 kB wird gekappt, denn log/
+# liegt im Arbeitsspeicher.
 if [ -f "REPLACELBPBINDIR/cam_cron.php" ]; then
+  ERR="REPLACELBPLOGDIR/cron.err"
+  mkdir -p "REPLACELBPLOGDIR" 2>/dev/null
+  if [ -f "$ERR" ] && [ "$(stat -c %s "$ERR" 2>/dev/null || echo 0)" -gt 262144 ]; then
+    tail -n 300 "$ERR" > "$ERR.neu" 2>/dev/null && mv -f "$ERR.neu" "$ERR"
+  fi
+  touch "$ERR" 2>/dev/null
   if command -v su >/dev/null 2>&1 && [ "$(id -u)" = "0" ]; then
-    su loxberry -s /bin/sh -c '/usr/bin/php "REPLACELBPBINDIR/cam_cron.php"' >/dev/null 2>&1
+    su loxberry -s /bin/sh -c '/usr/bin/php "REPLACELBPBINDIR/cam_cron.php"' >/dev/null 2>>"$ERR"
   else
-    /usr/bin/php "REPLACELBPBINDIR/cam_cron.php" >/dev/null 2>&1
+    /usr/bin/php "REPLACELBPBINDIR/cam_cron.php" >/dev/null 2>>"$ERR"
   fi
 fi
 exit 0

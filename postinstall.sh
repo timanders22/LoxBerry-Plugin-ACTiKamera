@@ -83,6 +83,16 @@ ac_zweitschrift_einspielen() {
         echo "<WARNING> Die Zweitschrift liess sich nicht einspielen: $1"
     fi
 }
+# Die Marke "Aktualisierung laeuft" (Entscheidung 1 vom 29.09.2026, Befund I1).
+# preupgrade.sh legt sie an, und preupgrade.sh laeuft nur bei einem Update;
+# postupgrade.sh entfernt sie. Liegt sie, ist dies eine Aktualisierung, sonst
+# eine Neuinstallation. Entschieden wird ALLEIN am Vorhandensein, ohne
+# Altersvergleich: mit Altersgrenze galt ein Update mit mehr als einer Stunde
+# zwischen preupgrade.sh und diesem Skript als Neuinstallation (Praezisierung
+# des Hausherrn, gemessen an der Funkwacht).
+MARKE="$BASE/data/plugins/$PFOLDER.upgrade_laeuft"
+AC_UPGRADE=0
+if [ -f "$MARKE" ]; then AC_UPGRADE=1; fi
 mkdir -p "$BASE/config/plugins/$PFOLDER" "$BASE/data/plugins/$PFOLDER" 2>/dev/null
 # Das Archiv liegt NEBEN dem Datenverzeichnis, damit es das naechste
 # Update ueberlebt - der Installer raeumt data/plugins/$PFOLDER/ ab.
@@ -103,7 +113,60 @@ fi
 # hierhin, nicht erst an das naechste Speichern aus der Oberflaeche.
 chmod 0600 "$CF" 2>/dev/null
 BK="$BASE/config/plugins/$PFOLDER.backup.json"
-ac_zweitschrift_einspielen "$BK" "$CF" "<OK> Konfiguration aus Sicherung wiederhergestellt."
+if [ "$AC_UPGRADE" = "1" ]; then
+    ac_zweitschrift_einspielen "$BK" "$CF" "<OK> Konfiguration aus Sicherung wiederhergestellt."
+else
+    # NEUINSTALLATION: Liegengebliebenes beiseitelegen, nicht einspielen
+    # (Entscheidung 1, Befunde I1/I2). Bis 1.9.22 spielte dieses Skript eine
+    # liegengebliebene Zweitschrift ein - Kamerapasswort und Aktionstoken
+    # einer frueheren Installation kamen zurueck, und alte Loxone-Adressen
+    # galten wieder (in WSL gemessen, Fall F4). Das trifft jede Anlage, die
+    # eine Fassung bis 1.9.19 deinstalliert hat: deren Deinstallation lief nie.
+    # Verschoben nach <name>.alt - die Bibliothek liest .alt nie, ihr Pfad
+    # 'backup' ist fest - und EINE <WARNING>-Zeile mit allen Pfaden. Die
+    # Deinstallation raeumt .alt mit ab.
+    #
+    # Aus dem Archivordner gehen die BETRIEBSDATEIEN mit (Entscheidung 6):
+    # betrieb<N>.json (Erreichbarkeit, Fehlerzaehler), letztesbild<N>.json
+    # (Anlass, Zeit, Objekte der letzten Aufnahme), letztesbild<N>.jpg (die
+    # Kopie der letzten Aufnahme fuer ?letztes=1) und herzschlag.json - sonst
+    # gaelte ein alter Stand als frisch (ALTER, ERREICHBAR, HERZ, PERSON). Die
+    # Aufnahmen in bilder*/, clips*/ und timelapse*/ bleiben, wie die README
+    # zusagt. Einen Ordner betrieb/ gibt es in dieser Linie nicht.
+    AC_BEISEITE=""
+    ac_beiseite() { # $1 Pfad
+        if [ -d "$1" ] && [ ! -L "$1" ]; then
+            case "$1.alt" in
+                */data/plugins/?*.upgrade_sicherung.alt) rm -rf "$1.alt" 2>/dev/null ;;
+            esac
+        else
+            rm -f "$1.alt" 2>/dev/null
+        fi
+        if mv -f "$1" "$1.alt" 2>/dev/null; then
+            if [ -f "$1.alt" ] && [ ! -L "$1.alt" ]; then chmod 0600 "$1.alt" 2>/dev/null; fi
+            AC_BEISEITE="$AC_BEISEITE $1.alt"
+        else
+            echo "<WARNING> $1 liess sich nicht beiseitelegen - bitte von Hand entfernen."
+        fi
+    }
+    if [ -e "$BK" ] || [ -L "$BK" ]; then ac_beiseite "$BK"; fi
+    AC_US="$BASE/data/plugins/$PFOLDER.upgrade_sicherung"
+    if [ -e "$AC_US" ] || [ -L "$AC_US" ]; then ac_beiseite "$AC_US"; fi
+    AC_AR="$BASE/data/plugins/$PFOLDER.archiv"
+    if [ -d "$AC_AR" ]; then
+        for I in "" 2 3 4; do
+            for E in "betrieb$I.json" "letztesbild$I.json" "letztesbild$I.jpg"; do
+                if [ -f "$AC_AR/$E" ] || [ -L "$AC_AR/$E" ]; then ac_beiseite "$AC_AR/$E"; fi
+            done
+        done
+        if [ -f "$AC_AR/herzschlag.json" ] || [ -L "$AC_AR/herzschlag.json" ]; then
+            ac_beiseite "$AC_AR/herzschlag.json"
+        fi
+    fi
+    if [ -n "$AC_BEISEITE" ]; then
+        echo "<WARNING> Neuinstallation: aus einer frueheren Installation lagen Einstellungen (mit Kamerapasswort und Aktionstoken) bzw. Betriebsdateien da. Sie werden NICHT eingespielt und liegen beiseite:$AC_BEISEITE - die Aufnahmen im Archiv bleiben; die Deinstallation raeumt die .alt-Dateien mit ab."
+    fi
+fi
 # Die Erstanleitung nur, wenn keine eingerichtete Konfiguration vorliegt.
 # postinstall.sh laeuft auch bei jedem Upgrade (Regeln/06); danach war der
 # Rat, die Zugangsdaten einzutragen, falsch und legte nahe, sie seien weg.
@@ -114,9 +177,13 @@ ac_zweitschrift_einspielen "$BK" "$CF" "<OK> Konfiguration aus Sicherung wiederh
 # (ac_hat_adresse() steht oben bei ac_inhalt().)
 if ac_hat_adresse "$CF"; then
     echo "<OK> Installation abgeschlossen, die Einstellungen der Kamera sind uebernommen. Es ist nichts weiter zu tun."
-elif ac_hat_adresse "$BASE/data/plugins/$PFOLDER.upgrade_sicherung/cam.json"; then
+elif [ "$AC_UPGRADE" = "1" ] && ac_inhalt "$BASE/data/plugins/$PFOLDER.upgrade_sicherung/cam.json"; then
     # Ohne Zweitschrift holt erst postupgrade.sh die Konfiguration zurueck
-    # und meldet dort, ob es gelang.
+    # und meldet dort, ob es gelang. Nur bei einer Aktualisierung (Marke) und
+    # mit DERSELBEN Inhaltspruefung wie postupgrade.sh (I5): bis 1.9.22 stand
+    # die Zusage auch bei einer Neuinstallation, nach der postupgrade.sh gar
+    # nicht laeuft, und bei einer abgeschnittenen Sicherung, die postupgrade.sh
+    # danach verwarf (Faelle F5, F3b).
     echo "<OK> Installation abgeschlossen. Die Einstellungen der Kamera holt postupgrade.sh gleich aus der Upgrade-Sicherung zurueck."
 else
     echo "<OK> Installation abgeschlossen. Bitte die Plugin-Oberflaeche oeffnen und Adresse, Benutzer und Passwort der Kamera eintragen."

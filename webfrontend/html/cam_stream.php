@@ -218,8 +218,13 @@ $ac_rtsp = $ac_ffmpeg !== '' ? cam_rtsp_url(false, $ac_kam) : '';
 
 if ($ac_ffmpeg !== '' && $ac_rtsp !== '') {
     $ac_gute = max(2, min(15, (int) $ac_cfg['rtsp_quality']));
+    /* -timeout statt -stimeout (C9): ffmpeg ab 5 kennt -stimeout nicht mehr.
+       Am Geraet (ffmpeg 7.1.5, 29.09.2026) brach der Aufruf sofort mit
+       "Unrecognized option 'stimeout'" ab, stderr ging nach /dev/null, und
+       der RTSP-Weg lief bis 1.9.22 nie. Die RTSP-Eingabe nimmt -timeout in
+       Mikrosekunden. */
     $ac_cmd = escapeshellarg($ac_ffmpeg)
-        . ' -nostdin -loglevel error -rtsp_transport tcp -stimeout 5000000'
+        . ' -nostdin -loglevel error -rtsp_transport tcp -timeout 5000000'
         . ' -i ' . escapeshellarg($ac_rtsp)
         . ' -an -f mjpeg -q:v ' . $ac_gute
         . ' -r ' . escapeshellarg((string) $ac_fps)

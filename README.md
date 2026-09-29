@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.22 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.23 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -12,6 +12,56 @@ in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxo
 nur noch `cam.php?foto=1&token=…` auf; die Zugangsdaten bleiben auf dem LoxBerry.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
+
+## Neu in 1.9.23
+
+Die Durchsicht vom 29.09.2026 hatte vier Prüfer (Code, Oberfläche, Installer, MQTT). Jeder Punkt ist gemessen. Zu
+jedem gibt es eine Gegenprobe, die an 1.9.22 rot und an 1.9.23 grün ist. Gemessen wurde in WSL mit Attrappen für
+Kamera und Broker; der Videoweg zusätzlich am LoxBerry.
+
+**Der Videoweg über RTSP lief nie.**
+- `cam_stream.php` rief ffmpeg mit `-stimeout` auf. ffmpeg 7.1.5 auf dem LoxBerry kennt diese Option nicht mehr und
+  brach sofort ab. Das Plugin fiel still auf Einzelbilder zurück.
+- Jetzt heißt die Option `-timeout`. Am Gerät gemessen: Gegen eine Adresse, die nicht antwortet, endet der Aufruf
+  nach 5,4 s mit „Connection timed out“.
+
+**Ausfall wird erkannt.** Steht der Minutentakt, geht `ERREICHBAR` auf 0, sobald die letzte Prüfung älter ist als
+der dreifache Prüftakt. `OK` heißt weiter „Adresse eingetragen“.
+
+**Einstellungen und Sicherung.**
+- Ein Zurückspielen wurde bisher still rückgängig gemacht:
+  - Hatte die Sicherung kein Aktionstoken, stellte die nächste Selbstheilung den alten Stand wieder her.
+  - Ein Speichern auf der Seite danach löschte das Kennwort des Bildstroms.
+- Jetzt bleiben die zurückgespielten Werte stehen, und die Seite zeigt sie gleich an.
+- Formular und Sicherung haben dieselben Grenzen. Die eigene Sicherung ist nach jedem Wert, den das Formular annimmt,
+  zurückspielbar, auch mit einem Thema wie `haus/acti`.
+- Eingaben werden beanstandet, statt still zurechtgebogen zu werden.
+- Das Kamera-Kennwort steht nicht mehr im HTML, auch nicht in Schnappschuss- oder RTSP-Adresse.
+- Benutzer und Kennwort lassen sich mit einem Haken löschen.
+- Bei voller Speicherkarte bleibt die Konfiguration heil, und im Archiv bleiben keine halben Bilder.
+- Nach jedem Absenden wird umgeleitet. F5 löst keine zweite Aufnahme mehr aus.
+- Der Knopf „Letztes Bild öffnen“ funktioniert jetzt auch mit gesetztem Stromkennwort.
+- Der Reiter Test hat neue Prüfzeilen für das Formularmerkmal, den eigenen Endpunkt und eine heile Konfiguration.
+- PHP 8.5 meldet keine Verfallswarnung mehr.
+
+**MQTT.**
+- `objekte` ohne erkannte Objekte geht als `-` hinaus, nie leer.
+- Die zurückbehaltenen Themen werden geleert und beim Broker nachgelesen. Das gilt beim Wechsel des Themas, beim
+  Ausschalten von MQTT und für eine ausgetragene Kamera. Bisher blieben sie für immer stehen.
+- Zwischen den Datagrammen liegen 5 ms.
+- Die Prüfzeile „Themen“ prüft in beide Richtungen.
+- `mqtt_subscriptions.cfg` wird geschrieben.
+
+**Installation.**
+- Eine Neuinstallation spielt keine Zugangsdaten einer früheren Installation mehr ein. Sie werden als `.alt`
+  beiseitegelegt und einmal genannt. Betroffen war jede Anlage, die eine Fassung bis 1.9.19 deinstalliert hatte,
+  denn deren Deinstallation lief nie.
+- Im Archivordner bleiben die Bilder. Betriebsdateien einer früheren Installation gehen nach `.alt`.
+- Die Deinstallation lässt keine Upgrade-Sicherung mit Klartextkennwort mehr liegen und meldet erst nach dem
+  Nachzählen.
+- Ein alter Sicherungsbestand wird vor dem neuen Sichern geräumt.
+- Eine abgeschnittene Sicherung bleibt als `.kaputt.<Zeit>` erhalten.
+- Fehler des Minutentakts stehen in `cron.err`.
 
 ## Neu in 1.9.18
 
@@ -36,7 +86,9 @@ Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
   mit gesetztem Stromkennwort nur mit Token
 - **Ausfallerkennung**: das Plugin fragt die Kamera in einstellbarem Takt, ob sie
   antwortet, und meldet `ERREICHBAR` sowie `FEHLER` (fehlgeschlagene Prüfungen in
-  Folge) an Loxone. Bleibt der Minutentakt selbst stehen, wächst `HERZ`
+  Folge) an Loxone. Bleibt der Minutentakt selbst stehen, wächst `HERZ`, und
+  seit 1.9.23 steht `ERREICHBAR` auf 0, sobald die letzte Prüfung älter ist als
+  das Dreifache des Prüftakts (`OK` heißt weiter nur „Adresse eingetragen“)
 - **Push-Auslöser für Loxone**: `PUSHAKTIV=1` für ein einstellbares Zeitfenster
   nach jeder Aufnahme
 - **Zeitraffer**: täglich zur eingestellten Uhrzeit ein Bild in den Unterordner
@@ -231,10 +283,9 @@ und nicht die Diagnose lesen.
 - Die Deinstallation überschreibt und löscht die Zweitschrift mit den
   Zugangsdaten, räumt die Marke `data/plugins/actikamera.upgrade_laeuft`
   weg und leert seit 1.9.22 die zurückbehaltenen MQTT-Themen des Plugins;
-  die Aufnahmen bleiben absichtlich stehen. Das Skript liegt seit 1.9.20
-  zweimal byteweise gleich im Archiv: als `uninstall/uninstall` (der Ort, von
-  dem gemessen ist, dass LoxBerry ihn ausführt) und weiterhin als
-  `uninstall.sh` an der Wurzel
+  die Aufnahmen bleiben absichtlich stehen. Das Skript liegt als
+  `uninstall/uninstall` im Archiv — nur diesen Ort führt LoxBerry aus. Die
+  frühere Wurzeldatei `uninstall.sh` lief nie und ist seit 1.9.23 entfernt
 - Musste die Konfiguration aus der Zweitschrift geheilt werden, bleibt der
   verdrängte Stand als `config/plugins/actikamera/cam.json.kaputt` mit
   `chmod 600` liegen — er kann Zugangsdaten tragen. Der Installer räumt ihn
@@ -288,10 +339,10 @@ Anmeldung (CONNACK ≠ 0) oder ein abgelehnter Filter (SUBACK 0x80) heißt „ni
 zu fragen", nie „nichts da".
 
 **Grenze:** Ist der Broker nicht zu fragen, gibt es keinen Beleg und damit
-keinen Merker. Dann geht in **jedem** Minutentakt vor jedem der alten Themen
-ein leeres `retain` hinaus, dazu der Wert selbst (bei einer Kamera zehn
-Datagramme mehr je Minute),
-und am Miniserver kann dabei kurz ein leerer Wert ankommen, unmittelbar gefolgt
+keinen Merker. Dann geht seit 1.9.23 **höchstens einmal je Stunde** vor jedem
+der alten Themen ein leeres `retain` hinaus, dazu der Wert selbst (bis 1.9.22
+in jedem Minutentakt: bei einer Kamera zehn Datagramme mehr je Minute), und am
+Miniserver kann dabei kurz ein leerer Wert ankommen, unmittelbar gefolgt
 vom gültigen. Das Protokoll sagt das einmal am Tag. Was stehen bleibt, lässt
 sich mit `mosquitto_pub -r -n -t <thema>` von Hand löschen.
 
@@ -446,11 +497,10 @@ Gemessen ist aber (`Regeln/06`, Abschnitt *Deinstallation*, am Gerät am
 17.09.2026 in `sbin/plugininstall.pl` nachgesehen): der Installer kopiert
 `uninstall/uninstall` nach `data/system/uninstall/<ordner>` und ruft **diese**
 Datei auf. Von 306 Plugin-Ordnern im Arbeitsordner führen 304 genau diese
-Form; die sechs Ausnahmen waren alle Fassungen dieser Linie. Ob die
-Wurzeldatei überhaupt je ausgeführt wurde, ist **nicht gemessen** — sie bleibt
-deshalb liegen, und der gemessene Ort kommt daneben. Beide Dateien sind
-byteweise gleich, jeder Schritt hängt an einem `[ -f ]`, ein zweiter Lauf
-findet nichts mehr und sagt nichts.
+Form; die sechs Ausnahmen waren alle Fassungen dieser Linie. Die
+Wurzeldatei lief nie: der Installer sucht nur `uninstall/uninstall*`
+(`plugininstall.pl:1152`, Prüfung vom 29.09.2026) und hat `uninstall.sh`
+weder kopiert noch ausgeführt. Seit 1.9.23 ist sie entfernt.
 
 ## Fassung 1.9.19 — am Gerät nachgemessen (06.09.2026)
 

@@ -182,6 +182,12 @@ if ($ac_takt > 0) {
  * beantwortet das nicht, ein Prozess kann dastehen und nichts mehr tun. */
 cam_herzschlag();
 
+/* ---------------- Abo-Datei des Gateways (M7) ----------------
+ * Nur bei eingeschaltetem MQTT und nur, wenn sie fehlt oder ein anderes
+ * Praefix traegt. Ein Update raeumt den Konfigordner ab; dieser Takt legt sie
+ * wieder an. */
+cam_mqtt_abo_datei(true);
+
 /* ---------------- Zustand nach MQTT ----------------
  * Der Minutentakt ist auch der Herzschlag fuer die Statuswerte: nur so
  * bekommt Loxone mit, dass die Kamera seit einer Stunde schweigt. Gesendet

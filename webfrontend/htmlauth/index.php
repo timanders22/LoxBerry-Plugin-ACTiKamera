@@ -220,16 +220,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && function_exists('cam_formtoken')) {
 // und Zugangsdaten anschliessend auf ihren Vorgabewerten.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mqtt'])) {
     $ac_m = cam_config();
+    $ac_m_alt_ein = !empty($ac_m['mqtt_enabled']);
+    $ac_m_alt_praefix = cam_mqtt_praefix($ac_m);
     $ac_m['mqtt_enabled'] = isset($_POST['mqtt_enabled']) ? 1 : 0;
-    $ac_mt = preg_replace('#[^\w/\-]#', '', ac_post('mqtt_topic'));
+    /* Beanstanden statt still kuerzen (M5, U5). Bis 1.9.22 filterte hier
+       preg_replace('#[^\w/\-]#'): aus "Kueche" wurde "Kche", aus "haus#1"
+       "haus1", "hof/" ergab hof//OK, und auf "#" antwortete die Seite, das
+       Thema sei leer. Dieselbe Regel wie beim Zurueckspielen:
+       cam_thema_pruefen(). */
+    $ac_mt = trim(ac_post('mqtt_topic'));
+    $ac_mg = cam_thema_pruefen($ac_mt);
     if ($ac_mt === '') {
         $ac_err = cam_t('MQTT.FEHLER_TOPIC');
+    } elseif ($ac_mg !== '') {
+        $ac_err = sprintf(cam_t('MQTT.FEHLER_TOPIC_ZEICHEN'), ac_e($ac_mt), ac_e($ac_mg), ac_e($ac_m_alt_praefix));
     } else {
         $ac_m['mqtt_topic'] = $ac_mt;
         if (cam_config_save($ac_m)) {
             $ac_saved = true;
-            // Nach dem Umstellen alles einmal frisch senden, damit der Broker
-            // nicht auf Werten unter dem alten Thema sitzenbleibt.
+            /* Praefixwechsel (M2) und Abschalten (M3): die zurueckbehaltenen
+               Themen unter dem BISHERIGEN Praefix werden geleert und beim
+               Broker nachgelesen, das Ergebnis steht in der Meldung. Bis
+               1.9.22 stand hier der Satz, ein Vollversand halte den Broker
+               davon ab, auf Werten unter dem alten Thema sitzenzubleiben - er
+               sendete aber nur unter dem NEUEN; unter dem alten blieben alle
+               Themen fuer immer stehen, auch nach der Deinstallation
+               (gemessen, Faelle F5 und F6). Bauform KODI-NG 1.2.12. */
+            $ac_m_wechsel = ($ac_mt !== $ac_m_alt_praefix);
+            if ($ac_m_alt_ein && ($ac_m_wechsel || empty($ac_m['mqtt_enabled']))) {
+                $ac_l = cam_mqtt_leeren_lauf($ac_m_alt_praefix, null, 3, 500000);
+                $ac_zeilen = array();
+                foreach ($ac_l['zeilen'] as $ac_z) {
+                    $ac_zeilen[] = ac_e(preg_replace('/^<[A-Z]+> /', '', $ac_z));
+                }
+                $ac_note = sprintf(cam_t($ac_m_wechsel ? 'MQTT.M_LEEREN_WECHSEL' : 'MQTT.M_LEEREN_AUS'),
+                                   ac_e($ac_m_alt_praefix), ac_e($ac_mt)) . ' ' . implode(' ', $ac_zeilen);
+                $ac_note_rot = ((int) $ac_l['rc'] !== 0);
+                cam_log('MQTT: ' . ($ac_m_wechsel ? 'Praefix ' . $ac_m_alt_praefix . ' -> ' . $ac_mt : 'ausgeschaltet')
+                    . ', Themen unter ' . $ac_m_alt_praefix . '/ geleert: ' . implode(' ', $ac_l['zeilen']));
+            }
+            // Die Abo-Datei des Gateways auf das Praefix nachziehen (M7).
+            cam_mqtt_abo_datei(true);
+            // Unter dem neuen Praefix einmal den vollen Satz senden.
             cam_mqtt_zustand(true);
         } else {
             $ac_err = cam_t('MQTT.FEHLER_SPEICHERN');
@@ -328,7 +360,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cleanupnow']) && func
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_exists('cam_config')) {
     $ac_new = cam_config();
-    /* Eingaben nur von Steuerzeichen und Anfuehrungszeichen befreien - NICHT von
+    $ac_alt = $ac_new;
+    /* Adressfelder nur von Steuerzeichen und Anfuehrungszeichen befreien - NICHT von
        Doppelpunkt, Schraegstrich oder Punkt. Ein zu strenger Filter hat aus einer
        eingefuegten URL frueher "http19216817817cgi-binencoder..." gemacht. */
     $ac_saeubern = function ($wert) {
@@ -336,10 +369,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         return trim((string) $wert);
     };
 
+    /* BEANSTANDEN STATT ZURECHTBIEGEN (U3, U5; Pruefung 29.09.2026).
+     *
+     * Bis 1.9.22 klemmte dieser Handler jede Zahl still an ihre Grenzen
+     * (keep_days 5000 -> 3650, rtsp_port 99999 -> 65535, push_minutes 999 -> 30),
+     * entfernte Zeichen aus Stromkennwort und Aufloesung (strom.1 -> strom1)
+     * und kannte fuer Name und Schnappschuss-URL keine Laengengrenze - die
+     * eigene Sicherung wurde danach abgewiesen. Jetzt prueft jedes Feld gegen
+     * DIESELBE Regel wie das Zurueckspielen (cam_wert_pruefen). Was nicht
+     * passt, wird gemeldet, und der bisherige Wert bleibt stehen; alle
+     * uebrigen Felder werden gespeichert. */
+    $ac_fehler = array();
+    $ac_hinweise = array();
+    $ac_setzen = function ($schluessel, $wert) use (&$ac_new, &$ac_fehler) {
+        $g = cam_wert_pruefen($schluessel, $wert);
+        if ($g !== '') {
+            $zeige = (strpos($schluessel, 'pass') === 0) ? '***' : cam_zugang_maske((string) $wert);
+            $ac_fehler[] = sprintf(cam_t('TEXT.WERT_ABGEWIESEN'), ac_e($schluessel), ac_e($zeige), ac_e($g));
+            return false;
+        }
+        $ac_new[$schluessel] = $wert;
+        return true;
+    };
+    /* Zahlen: leer heisst $leer (null = leer ist unzulaessig). */
+    $ac_zahl = function ($schluessel, $roh, $leer) use ($ac_setzen, &$ac_fehler) {
+        $roh = trim((string) $roh);
+        if ($roh === '' && $leer === null) {
+            $ac_fehler[] = sprintf(cam_t('TEXT.WERT_ABGEWIESEN'), ac_e($schluessel), '&laquo;&raquo;', 'leer');
+            return false;
+        }
+        $w = ($roh === '') ? (string) $leer : $roh;
+        if (cam_wert_pruefen($schluessel, $w) === '') {
+            $r = cam_regel($schluessel);
+            $w = ($r !== null && $r['art'] === 'komma') ? (float) $w : (int) $w;
+        }
+        return $ac_setzen($schluessel, $w);
+    };
+
     /* Eine Schleife ueber alle Kameras statt eines Blocks je Kamera.
        Kamera 1 traegt die Feldnamen ohne Nummer - so, wie sie seit jeher
        heissen. */
-    $ac_fehler = array();
     $ac_namen = array();
     for ($ac_i = 1; $ac_i <= CAM_MAX; $ac_i++) {
         $ac_s = $ac_i > 1 ? (string) $ac_i : '';
@@ -350,13 +419,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
             return (isset($_POST[$k]) && is_string($_POST[$k])) ? $_POST[$k] : '';
         };
 
-        $ac_new['host' . $ac_s] = trim((string) $ac_f('host'));
+        $ac_setzen('host' . $ac_s, trim((string) $ac_f('host')));
 
         /* Leeres Benutzerfeld loescht NICHT den gespeicherten Wert - genau das
            ist hier schon einmal passiert und fuehrte zu USER=&PWD=… und damit
-           zu HTTP 401. */
+           zu HTTP 401. Geloescht wird ueber den Haken daneben (U7). */
         $ac_u = trim((string) $ac_f('user'));
-        if ($ac_u !== '') { $ac_new['user' . $ac_s] = $ac_u; }
+        if ($ac_u !== '') { $ac_setzen('user' . $ac_s, $ac_u); }
 
         /* Passwortfeld leer lassen = bisheriges Passwort behalten.
            trim() ist kein Schoenheitsfehler: Passwortverwaltungen im Browser
@@ -364,26 +433,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
            gelassenes Feld. Ohne trim() wuerde damit das gespeicherte Passwort
            durch ein Leerzeichen ersetzt - und die Kamera meldet nur noch 401. */
         $ac_pw = trim((string) $ac_f('pass'));
-        if ($ac_pw !== '') { $ac_new['pass' . $ac_s] = $ac_pw; }
+        if ($ac_pw !== '') { $ac_setzen('pass' . $ac_s, $ac_pw); }
+
+        /* Loesch-Haken (U7, Regeln/04 "geloescht wird ueber einen Haken
+           daneben"): bis 1.9.22 liess sich ein gespeichertes Kennwort ueber die
+           Oberflaeche nie mehr entfernen. Er wirkt nur in diesem Formular. */
+        if ($ac_f('zugang_loeschen') !== '') {
+            $ac_new['user' . $ac_s] = '';
+            $ac_new['pass' . $ac_s] = '';
+            $ac_hinweise[] = sprintf(cam_t('TEXT.M_ZUGANG_GELOESCHT'), $ac_i);
+        }
 
         /* Doppelte Namen weist die Hausform ab. Abgewiesen wird der NAME, nicht
            das ganze Formular: ein Speichern, das wegen einer Kleinigkeit gar
            nichts uebernimmt, hat hier schon einmal Schaden angerichtet. */
-        $ac_nm = trim(preg_replace('/[\x00-\x1F\x7F"<>]/', '', (string) $ac_f('name')));
+        $ac_nm = trim((string) $ac_f('name'));
         if ($ac_nm !== '' && in_array(strtolower($ac_nm), $ac_namen, true)) {
             $ac_fehler[] = sprintf(cam_t('TEXT.NAME_DOPPELT'), $ac_i, ac_e($ac_nm));
-        } else {
-            $ac_new['name' . $ac_s] = $ac_nm;
-            if ($ac_nm !== '') { $ac_namen[] = strtolower($ac_nm); }
+        } elseif ($ac_setzen('name' . $ac_s, $ac_nm) && $ac_nm !== '') {
+            $ac_namen[] = strtolower($ac_nm);
         }
 
-        $ac_new['channel' . $ac_s] = max(cam_min('channel'), min(cam_max('channel'), (int) ($ac_f('channel') !== '' ? $ac_f('channel') : 1)));
-        $ac_res = preg_replace('/[^A-Za-z0-9x,]/', '', (string) $ac_f('resolution'));
-        if (stripos($ac_res, 'http') === 0) { $ac_res = ''; }
-        $ac_new['resolution' . $ac_s] = $ac_res;
+        $ac_zahl('channel' . $ac_s, $ac_f('channel'), 1);
+        $ac_res = trim((string) $ac_f('resolution'));
+        if ($ac_res !== '' && (!preg_match('/^[A-Za-z0-9x,]+\z/', $ac_res) || stripos($ac_res, 'http') === 0)) {
+            $ac_fehler[] = sprintf(cam_t('TEXT.WERT_ABGEWIESEN'), ac_e('resolution' . $ac_s), ac_e($ac_res),
+                                   cam_t('TEXT.RES_ABGEWIESEN'));
+        } else {
+            $ac_setzen('resolution' . $ac_s, $ac_res);
+        }
 
-        $ac_cmd = $ac_saeubern($ac_f('snapcmd'));
-        $ac_su = $ac_saeubern($ac_f('snapurl'));
+        /* Die Masken aus dem Formular (U6) werden hier wieder durch den
+           gespeicherten Wert ersetzt. */
+        $ac_cmd = cam_zugang_entmaske($ac_saeubern($ac_f('snapcmd')), $ac_alt['snapcmd' . $ac_s]);
+        $ac_su = cam_zugang_entmaske($ac_saeubern($ac_f('snapurl')), $ac_alt['snapurl' . $ac_s]);
         // Wer die komplette Adresse ins Befehlsfeld einfuegt, meint die vollstaendige URL
         if ($ac_su === '' && stripos($ac_cmd, '://') !== false) {
             $ac_su = $ac_cmd;
@@ -393,112 +476,117 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         if ($ac_su !== '' && !preg_match('#^https?://#i', $ac_su)) {
             $ac_su = 'http://' . ltrim($ac_su, '/');
         }
-        $ac_new['snapcmd' . $ac_s] = $ac_cmd;
-        $ac_new['snapurl' . $ac_s] = $ac_su;
+        $ac_setzen('snapcmd' . $ac_s, $ac_cmd);
+        $ac_setzen('snapurl' . $ac_s, $ac_su);
 
         $ac_a = (string) $ac_f('auth');
-        $ac_new['auth' . $ac_s] = in_array($ac_a, array('auto', 'url', 'basic', 'digest'), true) ? $ac_a : 'auto';
-        $ac_new['timeout' . $ac_s] = max(cam_min('timeout'), min(cam_max('timeout'), (int) ($ac_f('timeout') !== '' ? $ac_f('timeout') : 8)));
+        $ac_setzen('auth' . $ac_s, $ac_a === '' ? 'auto' : $ac_a);
+        $ac_zahl('timeout' . $ac_s, $ac_f('timeout'), 8);
 
         /* Eine Adresse, die dem Muster nicht entspricht, wird gemeldet statt
-           stillschweigend geleert - bis 1.9.8 verschwand sie wortlos. */
-        $ac_mu = trim((string) $ac_f('mjpeg_url'));
+           stillschweigend geleert - bis 1.9.8 verschwand sie wortlos. In der
+           Meldung steht sie maskiert (U6). */
+        $ac_mu = cam_zugang_entmaske(trim((string) $ac_f('mjpeg_url')), $ac_alt['mjpeg_url' . $ac_s]);
         if ($ac_mu !== '' && !preg_match('#^https?://#i', $ac_mu)) {
-            $ac_fehler[] = sprintf(cam_t('TEXT.ADRESSE_VERWORFEN'), $ac_i, 'http://', ac_e($ac_mu));
+            $ac_fehler[] = sprintf(cam_t('TEXT.ADRESSE_VERWORFEN'), $ac_i, 'http://', ac_e(cam_zugang_maske($ac_mu)));
         } else {
-            $ac_new['mjpeg_url' . $ac_s] = $ac_mu;
+            $ac_setzen('mjpeg_url' . $ac_s, $ac_mu);
         }
-        $ac_ru = trim((string) $ac_f('rtsp_url'));
+        $ac_ru = cam_zugang_entmaske(trim((string) $ac_f('rtsp_url')), $ac_alt['rtsp_url' . $ac_s]);
         if ($ac_ru !== '' && !preg_match('#^rtsp://#i', $ac_ru)) {
-            $ac_fehler[] = sprintf(cam_t('TEXT.ADRESSE_VERWORFEN'), $ac_i, 'rtsp://', ac_e($ac_ru));
+            $ac_fehler[] = sprintf(cam_t('TEXT.ADRESSE_VERWORFEN'), $ac_i, 'rtsp://', ac_e(cam_zugang_maske($ac_ru)));
         } else {
-            $ac_new['rtsp_url' . $ac_s] = $ac_ru;
+            $ac_setzen('rtsp_url' . $ac_s, $ac_ru);
         }
-        $ac_new['rtsp_stream' . $ac_s] = ((int) ($ac_f('rtsp_stream') !== '' ? $ac_f('rtsp_stream') : 2)) === 1 ? 1 : 2;
-        $ac_new['rtsp_port' . $ac_s] = max(cam_min('rtsp_port'), min(cam_max('rtsp_port'), (int) ($ac_f('rtsp_port') !== '' ? $ac_f('rtsp_port') : 7070)));
-        $ac_new['rtsp_quality' . $ac_s] = max(cam_min('rtsp_quality'), min(cam_max('rtsp_quality'), (int) ($ac_f('rtsp_quality') !== '' ? $ac_f('rtsp_quality') : 5)));
+        $ac_zahl('rtsp_stream' . $ac_s, $ac_f('rtsp_stream'), 2);
+        $ac_zahl('rtsp_port' . $ac_s, $ac_f('rtsp_port'), 7070);
+        $ac_zahl('rtsp_quality' . $ac_s, $ac_f('rtsp_quality'), 5);
     }
-    $ac_new['stream_fps'] = max(cam_min('stream_fps'), min(cam_max('stream_fps'), (float) (isset($_POST['stream_fps']) ? $_POST['stream_fps'] : 2)));
+    $ac_zahl('stream_fps', ac_post('stream_fps'), null);
     // 900 s statt 21600: jeder offene Strom belegt einen PHP-Arbeitsprozess,
     // und davon hat ein LoxBerry nur eine Handvoll. Siehe cam_stream.php.
-    $ac_new['stream_maxsec'] = max(cam_min('stream_maxsec'), min(cam_max('stream_maxsec'), (int) (isset($_POST['stream_maxsec']) ? $_POST['stream_maxsec'] : 900)));
-    $ac_sm = (string) (isset($_POST['stream_mode']) ? $_POST['stream_mode'] : 'auto');
-    $ac_new['stream_mode'] = in_array($ac_sm, array('auto', 'mjpeg', 'jpeg', 'rtsp'), true) ? $ac_sm : 'auto';
-    $ac_new['stream_token'] = preg_replace('/[^A-Za-z0-9_\-]/', '', (string) (isset($_POST['stream_token']) ? $_POST['stream_token'] : ''));
-    $ac_new['clip_seconds'] = max(cam_min('clip_seconds'), min(cam_max('clip_seconds'), (int) (isset($_POST['clip_seconds']) ? $_POST['clip_seconds'] : 10)));
-    $ac_new['clip_fps'] = max(cam_min('clip_fps'), min(cam_max('clip_fps'), (int) (isset($_POST['clip_fps']) ? $_POST['clip_fps'] : 2)));
-    $ac_new['notify'] = array(
-        'push' => isset($_POST['notify_push']) ? 1 : 0,
-        'push_minutes' => max(cam_min('push_minutes'), min(cam_max('push_minutes'), (int) (isset($_POST['push_minutes']) ? $_POST['push_minutes'] : 2))),
-    );
+    $ac_zahl('stream_maxsec', ac_post('stream_maxsec'), null);
+    $ac_sm = ac_post('stream_mode', 'auto');
+    $ac_setzen('stream_mode', $ac_sm === '' ? 'auto' : $ac_sm);
+    /* EINE Positivliste fuer das Stromkennwort (U3, B7): die Regel "marke"
+       aus cam_wertregeln(). Bis 1.9.22 entfernte das Formular den Punkt, die
+       Sicherung liess ihn zu - aus strom.1 wurde beim naechsten Speichern
+       still strom1, und jede Loxone-Adresse mit t=strom.1 bekam 403. */
+    $ac_setzen('stream_token', trim(ac_post('stream_token')));
+    $ac_zahl('clip_seconds', ac_post('clip_seconds'), null);
+    $ac_zahl('clip_fps', ac_post('clip_fps'), null);
+    $ac_notify = is_array($ac_alt['notify']) ? $ac_alt['notify'] : array();
+    $ac_notify['push'] = isset($_POST['notify_push']) ? 1 : 0;
+    $ac_pm = trim(ac_post('push_minutes'));
+    $ac_pmg = cam_wert_pruefen('push_minutes', $ac_pm);
+    if ($ac_pmg === '') {
+        $ac_notify['push_minutes'] = (int) $ac_pm;
+    } else {
+        $ac_fehler[] = sprintf(cam_t('TEXT.WERT_ABGEWIESEN'), 'push_minutes', ac_e($ac_pm), ac_e($ac_pmg));
+    }
+    $ac_new['notify'] = $ac_notify;
     /* mqtt_enabled und mqtt_topic werden hier NICHT mehr angefasst: die
      * Felder stehen nur noch im Reiter MQTT und haben dort einen eigenen
      * Handler (save_mqtt). $ac_new kommt aus cam_config(), die Werte
      * ueberleben also unveraendert. Stuende die Zeile hier weiter, schaltete
      * jedes Speichern der Einstellungen MQTT stillschweigend ab. */
-    $ac_new['keep_max'] = max(cam_min('keep_max'), min(cam_max('keep_max'), (int) (isset($_POST['keep_max']) ? $_POST['keep_max'] : 0)));
-    $ac_new['keep_mb'] = max(cam_min('keep_mb'), min(cam_max('keep_mb'), (int) (isset($_POST['keep_mb']) ? $_POST['keep_mb'] : 0)));
-    $ac_new['keep_days'] = max(cam_min('keep_days'), min(cam_max('keep_days'), (int) (isset($_POST['keep_days']) ? $_POST['keep_days'] : 90)));
-    $ac_new['pruef_minuten'] = max(cam_min('pruef_minuten'), min(cam_max('pruef_minuten'), (int) (isset($_POST['pruef_minuten']) ? $_POST['pruef_minuten'] : 5)));
-    $ac_new['mindestpause'] = max(cam_min('mindestpause'), min(cam_max('mindestpause'), (int) (isset($_POST['mindestpause']) ? $_POST['mindestpause'] : 0)));
+    // "0 oder leer = unbegrenzt" bzw. "aus": leer heisst hier 0.
+    $ac_zahl('keep_max', ac_post('keep_max'), 0);
+    $ac_zahl('keep_mb', ac_post('keep_mb'), 0);
+    $ac_zahl('keep_days', ac_post('keep_days'), 0);
+    $ac_zahl('pruef_minuten', ac_post('pruef_minuten'), 0);
+    $ac_zahl('mindestpause', ac_post('mindestpause'), 0);
     $ac_new['timelapse'] = isset($_POST['timelapse']) ? 1 : 0;
     /* Kaestchen an = feste Adresse bedienen, wie seit jeher. Das Kaestchen
        steht im selben Formular wie timelapse; ein fehlendes Feld heisst
        deshalb wirklich "abgewaehlt" und nicht "anderes Formular". */
     $ac_new['bild_fest'] = isset($_POST['bild_fest']) ? 1 : 0;
-    $ac_new['timelapse_time'] = preg_match('/^\d{1,2}:\d{2}$/', (string) (isset($_POST['timelapse_time']) ? $_POST['timelapse_time'] : '')) ? $_POST['timelapse_time'] : '12:00';
-    $ac_new['ai_url'] = trim((string) (isset($_POST['ai_url']) ? $_POST['ai_url'] : ''));
-    $ac_new['ai_min'] = max(cam_min('ai_min'), min(cam_max('ai_min'), (int) (isset($_POST['ai_min']) ? $_POST['ai_min'] : 50)));
-    $ac_new['webhook1'] = trim((string) (isset($_POST['webhook1']) ? $_POST['webhook1'] : ''));
-    $ac_new['webhook2'] = trim((string) (isset($_POST['webhook2']) ? $_POST['webhook2'] : ''));
+    /* 00:00 bis 23:59 - dieselbe Pruefung wie beim Zurueckspielen (U3, B6).
+       Bis 1.9.22 nahm das Formular 25:77 an, und der Zeitraffer lief nie. */
+    $ac_setzen('timelapse_time', trim(ac_post('timelapse_time')));
+    $ac_setzen('ai_url', trim(ac_post('ai_url')));
+    $ac_zahl('ai_min', ac_post('ai_min'), null);
+    $ac_setzen('webhook1', trim(ac_post('webhook1')));
+    $ac_setzen('webhook2', trim(ac_post('webhook2')));
     if (cam_config_save($ac_new)) {
         $ac_saved = true;
         /* Beanstandungen werden GEMELDET, nicht verschwiegen - und sie
-           verhindern das Speichern nicht. Alle auf einmal, damit niemand einen
-           Fehler nach dem anderen korrigiert. */
+           verhindern das Speichern der uebrigen Felder nicht. Alle auf einmal,
+           damit niemand einen Fehler nach dem anderen korrigiert. */
         if ($ac_fehler) {
             $ac_err = implode(' ', $ac_fehler);
+        }
+        if ($ac_hinweise) {
+            $ac_note = trim($ac_note . ' ' . implode(' ', $ac_hinweise));
         }
     } else {
         $ac_err = cam_t('TEXT.M_NICHT_GESPEICHERT');
     }
 }
 
-$ac_cfg = function_exists('cam_config') ? cam_config() : array();
-if (!is_array($ac_cfg)) { $ac_cfg = array(); }
-$ac_notify = is_array($ac_cfg['notify']) ? $ac_cfg['notify'] : array();
-$ac_notify += array('push' => 1, 'push_minutes' => 2);
-$ac_st = function_exists('cam_state') ? cam_state() : array();
-$ac_paths = function_exists('cam_paths') ? cam_paths() : array();
-
-$ac_loglines = array();
-if (is_file($ac_logfile)) {
-    $ac_loglines = array_slice(array_reverse(file($ac_logfile, FILE_IGNORE_NEW_LINES) ?: array()), 0, 300);
-}
-$ac_host = (isset($_SERVER['HTTP_HOST']) && $_SERVER['HTTP_HOST'] !== '')
-           ? $_SERVER['HTTP_HOST'] : 'loxberry';
-$ac_token = isset($ac_cfg['aktionstoken']) ? (string) $ac_cfg['aktionstoken'] : '';
-
-/* Ist ein Token fuer den Bildstrom hinterlegt, gilt es fuer JEDE Adresse, die
-   auf cam_stream.php oder das Archiv zeigt - auch fuer die beiden, die weiter
-   unten nur zum Abschreiben nach Loxone angezeigt werden, und fuer den Knopf
-   "Livebild ansehen". Fehlt es dort, weist der eigene Endpunkt die eigene
-   Anleitung ab: Loxone zeigt dann still kein Bild, ohne Fehlermeldung.
-   Zwei Formen, weil eine Adresse schon ein Fragezeichen traegt und die
-   andere nicht. */
-$ac_stok = isset($ac_cfg['stream_token']) ? trim((string) $ac_cfg['stream_token']) : '';
-$ac_bt  = $ac_stok !== '' ? '&amp;t=' . rawurlencode($ac_stok) : '';
-$ac_bt1 = $ac_stok !== '' ? '?t=' . rawurlencode($ac_stok) : '';
-
-
 /* ---------------- Einstellungen sichern ----------------
  *
  * Ausgegeben wird die VOLLE Konfiguration - samt Aktionstoken. Ohne ihn
  * stuenden nach dem Zurueckspielen alle Felder richtig, und das Plugin
  * kaeme trotzdem nicht an die Anlage; die Datei waere wertlos. Damit
- * traegt sie ein Geheimnis, und der Hinweis am Knopf sagt das. */
+ * traegt sie ein Geheimnis, und der Hinweis am Knopf sagt das.
+ *
+ * Seit 1.9.23 mit lesbarem Kopf (U14, Regeln/05 Punkt 2): _hinweis, _plugin,
+ * _stand. Das Zurueckspielen uebergeht Schluessel, die mit _ beginnen.
+ *
+ * Sichern und Zurueckspielen stehen seit 1.9.23 VOR dem Lesen der
+ * Konfiguration fuer die Seite (U2, B2): bis 1.9.22 las die Seite sie vorher,
+ * zeigte nach dem Zurueckspielen die ALTEN Werte und das alte Token, und ein
+ * anschliessendes "Speichern" machte das Zurueckspielen still rueckgaengig
+ * (keep_days fiel zurueck, stream_token wurde leer). */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_sichern'])) {
-    $cam_js = json_encode(cam_config(),
+    $ac_fass = function_exists('cam_fassung') ? cam_fassung() : '';
+    $ac_kopf = array(
+        '_hinweis' => cam_t('TEXT.SICH_KOPF_HINWEIS'),
+        '_plugin'  => 'ACTi Kamera (' . $ac_plugin . ')' . ($ac_fass !== '' ? ', Fassung ' . $ac_fass : ''),
+        '_stand'   => date('c'),
+    );
+    $cam_js = json_encode($ac_kopf + cam_config(),
         JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($cam_js !== false) {
         header('Content-Type: application/json; charset=utf-8');
@@ -527,21 +615,98 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_zurueck'])) {
         $ac_note = cam_t('TEXT.SICH_ZU_GROSS');
         $ac_note_rot = true;
     } else {
-        list($cam_neu, $cam_fehler, $cam_n) = cam_sicherung_lesen(
+        $ac_sl = cam_sicherung_lesen(
             (string) @file_get_contents($_FILES['cam_sicherung']['tmp_name']));
+        list($cam_neu, $cam_fehler, $cam_n) = $ac_sl;
+        $cam_hinw = isset($ac_sl[3]) ? (array) $ac_sl[3] : array();
         if ($cam_neu === null) {
             /* ALLE Beanstandungen, nicht nur die erste - und geaendert
              * wird nichts. */
             $ac_note = cam_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', array_map('ac_e', $cam_fehler));
             $ac_note_rot = true;
-        } elseif (cam_config_save($cam_neu)) {
-            $ac_note = sprintf(cam_t('TEXT.SICH_UEBERNOMMEN'), $cam_n);
-        } else {
+        } elseif (!cam_config_save($cam_neu)) {
             $ac_note = cam_t('TEXT.SICH_SCHREIBFEHLER');
             $ac_note_rot = true;
+        } else {
+            /* Erfolg erst nach dem ZURUECKLESEN (C1, CLAUDE.md 2: Wirkung statt
+             * Rueckgabewert). Bis 1.9.22 stand hier "uebernommen", sobald
+             * cam_config_save() true lieferte - mit leerem Token heilte
+             * cam_config() im selben Aufruf aus der Zweitschrift, und alle
+             * Werte fielen still auf den alten Stand zurueck. Verglichen wird
+             * die Datei (roh) gegen den geschriebenen Stand, dann noch einmal
+             * nach cam_config(), die heilen koennte. */
+            $ac_rueck = cam_config_roh();
+            $ac_rueck2 = cam_config();
+            $ac_angekommen = ($ac_rueck == $cam_neu)
+                && (string) $ac_rueck2['aktionstoken'] === (string) $cam_neu['aktionstoken']
+                && cam_config_roh() == $cam_neu;
+            if ($ac_angekommen) {
+                $ac_note = sprintf(cam_t('TEXT.SICH_UEBERNOMMEN'), $cam_n)
+                    . ($cam_hinw ? ' ' . implode(' ', array_map('ac_e', $cam_hinw)) : '');
+            } else {
+                $ac_note = cam_t('TEXT.SICH_NICHT_ANGEKOMMEN');
+                $ac_note_rot = true;
+                cam_log('Zurueckspielen: geschrieben, aber beim Zuruecklesen nicht so angekommen.');
+            }
         }
     }
 }
+
+/* ==================================================================
+ * JEDER POST ENDET MIT EINER UMLEITUNG (U1, Regeln/04)
+ *
+ * Bis 1.9.22 antwortete jeder der sieben Zweige mit 200: F5 auf "Jetzt ein
+ * Bild aufnehmen" nahm erneut auf (Protokollzeilen 3 -> 4 -> 5 gemessen),
+ * ebenso Aufraeumen, Zeitraffer und Protokoll leeren. Jetzt reist das
+ * Ergebnis als Einmalmeldung (cam_einmal_schreiben, 0600, 120 s, ohne
+ * Geheimnisse), und die Antwort ist 303 auf den Reiter. Die Downloads
+ * (Vorlagen, Sicherung) haben oben schon mit exit geendet. Liess sich die
+ * Meldung nicht ablegen, wird wie bisher ohne Umleitung gezeigt - eine
+ * verlorene Meldung waere schlimmer als ein wiederholtes Absenden.
+ * ================================================================== */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && function_exists('cam_einmal_schreiben')) {
+    if (cam_einmal_schreiben(array('saved' => $ac_saved, 'note' => $ac_note,
+                                   'note_rot' => $ac_note_rot, 'err' => $ac_err))) {
+        header('Location: index.php?form=' . substr($ac_tab, 4), true, 303);
+        exit;
+    }
+} elseif (function_exists('cam_einmal_lesen')) {
+    $ac_em = cam_einmal_lesen();
+    if ($ac_em !== null) {
+        $ac_saved = !empty($ac_em['saved']);
+        $ac_note = (string) $ac_em['note'];
+        $ac_note_rot = !empty($ac_em['note_rot']);
+        $ac_err = (string) $ac_em['err'];
+    }
+}
+
+/* Die Konfiguration fuer die Seite wird NACH allen Handlern gelesen (U2),
+   ebenso das Formularmerkmal (cam_formtoken() in jedem Formular unten). */
+$ac_cfg = function_exists('cam_config') ? cam_config() : array();
+if (!is_array($ac_cfg)) { $ac_cfg = array(); }
+$ac_notify = is_array($ac_cfg['notify']) ? $ac_cfg['notify'] : array();
+$ac_notify += array('push' => 1, 'push_minutes' => 2);
+$ac_st = function_exists('cam_state') ? cam_state() : array();
+$ac_paths = function_exists('cam_paths') ? cam_paths() : array();
+
+$ac_loglines = array();
+if (is_file($ac_logfile)) {
+    $ac_loglines = array_slice(array_reverse(file($ac_logfile, FILE_IGNORE_NEW_LINES) ?: array()), 0, 300);
+}
+$ac_host = (isset($_SERVER['HTTP_HOST']) && $_SERVER['HTTP_HOST'] !== '')
+           ? $_SERVER['HTTP_HOST'] : 'loxberry';
+$ac_token = isset($ac_cfg['aktionstoken']) ? (string) $ac_cfg['aktionstoken'] : '';
+
+/* Ist ein Token fuer den Bildstrom hinterlegt, gilt es fuer JEDE Adresse, die
+   auf cam_stream.php oder das Archiv zeigt - auch fuer die beiden, die weiter
+   unten nur zum Abschreiben nach Loxone angezeigt werden, und fuer den Knopf
+   "Livebild ansehen". Fehlt es dort, weist der eigene Endpunkt die eigene
+   Anleitung ab: Loxone zeigt dann still kein Bild, ohne Fehlermeldung.
+   Zwei Formen, weil eine Adresse schon ein Fragezeichen traegt und die
+   andere nicht. */
+$ac_stok = isset($ac_cfg['stream_token']) ? trim((string) $ac_cfg['stream_token']) : '';
+$ac_bt  = $ac_stok !== '' ? '&amp;t=' . rawurlencode($ac_stok) : '';
+$ac_bt1 = $ac_stok !== '' ? '?t=' . rawurlencode($ac_stok) : '';
 
 
 /* Einmal feststellen, Kopf UND Fuss daran haengen. function_exists() kennt
@@ -756,6 +921,11 @@ foreach ($ac_zeigen as $ac_i):
         <label><?php echo cam_t('TEXT.PASSWORT'); ?></label>
         <input data-role="none" type="password" name="pass<?= $ac_s ?>" value="" placeholder="<?= ac_e($ac_k['pass'] !== '' ? cam_t('TEXT.P_PASS_GESETZT') : cam_t('TEXT.P_PASS_LEER')) ?>">
     </div>
+<?php if ((string) $ac_k['user'] !== '' || (string) $ac_k['pass'] !== '') { ?>
+    <div>
+        <label style="font-weight:400;"><input data-role="none" type="checkbox" name="zugang_loeschen<?= $ac_s ?>" value="1"> <?php echo cam_t('TEXT.L_ZUGANG_LOESCHEN'); ?></label>
+    </div>
+<?php } ?>
 </div>
 <div class="sm-row" style="margin-top:8px;">
     <div style="max-width:340px;">
@@ -776,7 +946,7 @@ foreach ($ac_zeigen as $ac_i):
 <div class="sm-row" style="margin-top:10px;">
     <div class="acw-breit">
         <label><?php echo cam_t('TEXT.VOLLSTNDIGE_SCHNAPPSCHUSS_URL_EMPF'); ?></label>
-        <input data-role="none" type="text" name="snapurl<?= $ac_s ?>" value="<?= ac_e($ac_k['snapurl']) ?>" placeholder="<?php echo cam_t('TEXT.HTTP'); ?>KAMERA/cgi-bin/encoder?<?php echo cam_t('TEXT.USER_PWD'); ?>SNAPSHOT=N1920x1080,100<?php echo cam_t('TEXT.DUMMY_N'); ?>">
+        <input data-role="none" type="text" name="snapurl<?= $ac_s ?>" value="<?= ac_e(cam_zugang_maske($ac_k['snapurl'])) ?>" placeholder="<?php echo cam_t('TEXT.HTTP'); ?>KAMERA/cgi-bin/encoder?<?php echo cam_t('TEXT.USER_PWD'); ?>SNAPSHOT=N1920x1080,100<?php echo cam_t('TEXT.DUMMY_N'); ?>">
 <?php if ($ac_i === 1) { ?>
         <div class="sm-small"><?php echo cam_t('TEXT.IST_DIESES_FELD_GEFLLT_NUTZT_DAS_P'); ?> <b><?php echo cam_t('TEXT.GENAU_DIESE_ADRESSE'); ?></b> <?php echo cam_t('TEXT.OHNE_EIGENES_ZUSAMMENBAUEN_OHNE_UM'); ?> <span class="sm-mono">ERROR: not authorized</span>.<br>
         <b><?php echo cam_t('TEXT.HINWEIS'); ?></b> <?php echo cam_t('TEXT.DIESE_URL_ENTHLT_DAS_KAMERA_PASSWO'); ?><span class="sm-mono">chmod 600</span><?php echo cam_t('TEXT.UND_WIRD_IN_PROTOKOLL_UND_DIAGNOSE'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CAM_PHP'); ?></span> <?php echo cam_t('TEXT.OHNE_ZUGANGSDATEN'); ?></div>
@@ -784,7 +954,7 @@ foreach ($ac_zeigen as $ac_i):
     </div>
     <div class="acw-breit">
         <label><?php echo cam_t('TEXT.SCHNAPPSCHUSS_BEFEHL_NUR_DER_TEIL_'); ?> <span class="sm-mono">USER=…&amp;PWD=…&amp;</span> <?php echo cam_t('TEXT.WIRD_IGNORIERT_WENN_OBEN_EINE_URL_'); ?></label>
-        <input data-role="none" type="text" name="snapcmd<?= $ac_s ?>" value="<?= ac_e($ac_k['snapcmd']) ?>" placeholder="SNAPSHOT=N1920x1080,100&amp;DUMMY=n">
+        <input data-role="none" type="text" name="snapcmd<?= $ac_s ?>" value="<?= ac_e(cam_zugang_maske($ac_k['snapcmd'])) ?>" placeholder="SNAPSHOT=N1920x1080,100&amp;DUMMY=n">
 <?php if ($ac_i === 1) { ?>
         <div class="sm-small"><?php echo cam_t('TEXT.DAS_IST_DER_TEIL_HINTER'); ?> <span class="sm-mono">USER=…&amp;PWD=…&amp;</span><?php echo cam_t('TEXT.DER_VORGABEWERT_STAMMT_AUS_EINER_R'); ?><span class="sm-mono">,100</span><?php echo cam_t('TEXT.UND_DEM_ABSCHLIESSENDEN'); ?> <span class="sm-mono">&amp;DUMMY=n</span><?php echo cam_t('TEXT.DAS_MANCHE_FIRMWARE_ERWARTET_WER_E'); ?></div>
 <?php } ?>
@@ -805,11 +975,11 @@ foreach ($ac_zeigen as $ac_i):
 <div class="sm-row" style="margin-top:8px;">
     <div class="acw-breit">
         <label><?php echo cam_t('TEXT.ADRESSE_DES_KAMERASTROMS_LEER'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CGI_BIN_CMD_SYSTEM_GET_STREAM'); ?></span>)</label>
-        <input type="text" data-role="none" name="mjpeg_url<?= $ac_s ?>" value="<?= ac_e((string) $ac_k['mjpeg_url']) ?>">
+        <input type="text" data-role="none" name="mjpeg_url<?= $ac_s ?>" value="<?= ac_e(cam_zugang_maske((string) $ac_k['mjpeg_url'])) ?>">
     </div>
     <div class="acw-breit">
         <label><?php echo cam_t('TEXT.RTSP_ADRESSE_LEER_BEI_DER_KAMERA_E'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.GET_STREAM'); ?></span>)</label>
-        <input type="text" data-role="none" name="rtsp_url<?= $ac_s ?>" placeholder="<?php echo ac_e(cam_t('TEXT.P_RTSP')); ?>" value="<?= ac_e((string) $ac_k['rtsp_url']) ?>">
+        <input type="text" data-role="none" name="rtsp_url<?= $ac_s ?>" placeholder="<?php echo ac_e(cam_t('TEXT.P_RTSP')); ?>" value="<?= ac_e(cam_zugang_maske((string) $ac_k['rtsp_url'])) ?>">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.RTSP_PORT'); ?></label>
@@ -1029,6 +1199,10 @@ if ($ac_gwf >= 2) { ?>
 <?php } else { ?>
 <div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_UNBEKANNT'); ?></div>
 <?php } ?>
+<?php list($ac_abo_pfad, $ac_abo_da) = cam_mqtt_abo_datei(false); ?>
+<div class="sm-small"><?= sprintf(cam_t($ac_abo_da ? 'MQTT.ABO_DATEI_JA' : 'MQTT.ABO_DATEI_NEIN'),
+    '<span class="sm-mono">' . ac_e($ac_abo_pfad) . '</span>',
+    '<span class="sm-mono">' . ac_e(cam_mqtt_praefix($ac_cfg)) . '/#</span>') ?></div>
 
 <h3 class="sm-h3"><?php echo cam_t('MQTT.H_THEMEN'); ?></h3>
 <table class="sm-tbl">
@@ -1055,7 +1229,7 @@ if ($ac_gwf >= 2) { ?>
 <div class="sm-row"><label><input data-role="none" type="checkbox" name="mqtt_enabled" value="1"<?= !empty($ac_cfg['mqtt_enabled']) ? ' checked' : '' ?>> <?php echo cam_t('MQTT.L_EIN'); ?></label></div>
 <div class="sm-row"><label><?php echo cam_t('MQTT.L_TOPIC'); ?></label>
 <input data-role="none" type="text" name="mqtt_topic" value="<?= ac_e($ac_cfg['mqtt_topic']) ?>" size="24"></div>
-<div class="sm-legende"><span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION_AUFNAHME'); ?></span></div>
+<div class="sm-legende"><span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span></div>
 <div class="sm-knopfreihe">
 <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button>
 </div>
@@ -1082,15 +1256,16 @@ if ($ac_gwf >= 2) { ?>
 <div class="sm-small" style="margin-top:6px;"><b><?php echo cam_t('TOKEN.PRUEFEN'); ?></b><br>
 <span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?>/cam.php?selftest=1&amp;token=<?= ac_e($ac_token) ?></span><br>
 <?php echo cam_t('TOKEN.PRUEFEN_ANTWORT'); ?></div>
+<div class="sm-warnung"><?php echo cam_t('TOKEN.K_NEU_WARNUNG'); ?></div>
 <div class="sm-legende">
-<span><i class="sm-punkt sm-b-technik"></i> <?php echo cam_t('LEGENDE.TECHNIK'); ?></span>
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span>
 </div>
 <div class="sm-knopfreihe">
 <form action="index.php" method="post" style="margin:0;">
     <input data-role="none" type="hidden" name="neuestoken" value="1">
     <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
     <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
-    <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo cam_t('TOKEN.K_NEU'); ?></button>
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TOKEN.K_NEU'); ?></button>
 </form>
 </div>
 </div>
@@ -1104,7 +1279,7 @@ if ($ac_gwf >= 2) { ?>
          virtueller Ausgang die Antwort nicht auswertet. */
 foreach (cam_ausgangsbefehle() as $ac_bf) { ?>
 <tr><td><span class="sm-mono"><?= ac_e($ac_bf['on']) ?></span></td>
-    <td><?= ac_e($ac_bf['comment']) ?></td></tr>
+    <td><?= ac_e(isset($ac_bf['hint']) ? $ac_bf['hint'] : $ac_bf['comment']) ?></td></tr>
 <?php } ?>
 </table>
 <div class="sm-small"><b><?php echo cam_t('TEXT.AUS_DER_PRAXIS'); ?></b> <?php echo cam_t('TEXT.ZWISCHEN_KLINGELSIGNAL_UND_BILD_GE'); ?></div>
@@ -1225,9 +1400,6 @@ $ac_letztes_adr = 'http://' . ac_e($ac_host) . '/plugins/' . ac_e($ac_plugin)
 <!-- ================= Aufnahmen ================= -->
 <div class="sm-pane<?= $ac_tab === 'tab-shots' ? ' sm-active' : '' ?>" id="tab-shots">
 <h2><?php echo cam_t('TEXT.LETZTE_AUFNAHMEN'); ?></h2>
-<div class="sm-legende">
-<span><i class="sm-punkt sm-b-technik"></i> <?php echo cam_t('LEGENDE.TECHNIK'); ?></span>
-</div>
 <?php
 /* Ist ein Token fuer den Bildstrom hinterlegt, tragen auch die Archivadressen
    es mit - sonst wiese der eigene Endpunkt die eigene Galerie ab. $ac_bt wird
@@ -1291,11 +1463,15 @@ foreach (cam_kameras() as $ac_kamgal):
     if ($ac_stufe === $ac_zeige) { ?><b><?= (int) $ac_stufe ?></b>
 <?php } else { ?><a href="index.php?form=shots&amp;zeige=<?= (int) $ac_stufe ?>"><?= (int) $ac_stufe ?></a>
 <?php } } ?></div>
+<div class="sm-warnung"><?php echo cam_t('TEXT.AUFRAEUMEN_WARNUNG'); ?></div>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span>
+</div>
 <form action="index.php" method="post" style="margin-top:10px;">
     <input data-role="none" type="hidden" name="cleanupnow" value="1">
     <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
     <input data-role="none" type="hidden" name="activetab" value="tab-shots">
-    <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo cam_t('TEXT.ALTE_AUFNAHMEN_JETZT_AUFRUMEN'); ?></button>
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.ALTE_AUFNAHMEN_JETZT_AUFRUMEN'); ?></button>
 </form>
 </div>
 
@@ -1342,7 +1518,7 @@ foreach ($ac_pr as $ac_z) {
 <div class="sm-knopfreihe">
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?test=1&amp;token=<?= ac_e($ac_token) ?>" target="_blank"><?php echo cam_t('TEXT.VERBINDUNG_PRFEN_2'); ?></a>
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam_stream.php<?= $ac_bt1 ?>" target="_blank"><?php echo cam_t('TEXT.LIVEBILD_ANSEHEN'); ?></a>
-<a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?letztes=1" target="_blank"><?php echo cam_t('TEXT.LETZTES_BILD_FFNEN'); ?></a>
+<a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?letztes=1<?= $ac_bt ?>" target="_blank"><?php echo cam_t('TEXT.LETZTES_BILD_FFNEN'); ?></a>
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php" target="_blank"><?php echo cam_t('TEXT.LOXONE_ZEILE_ABRUFEN'); ?></a>
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?json=1" target="_blank"><?php echo cam_t('TEXT.JSON_ANSICHT'); ?></a>
 </div>
@@ -1392,17 +1568,21 @@ foreach ($ac_pr as $ac_z) {
 <div class="sm-pane<?= $ac_tab === 'tab-log' ? ' sm-active' : '' ?>" id="tab-log">
 <h2><?php echo cam_t('REITER.LOG'); ?></h2>
 <div class="sm-small" style="margin-bottom:8px;"><?php echo cam_t('TEXT.PROTOKOLLIERT_WERDEN_AUFNAHMEN_AUF'); ?><br>
+<?php echo cam_t('TEXT.LOG_NEUSTART'); ?><br>
 <?php echo cam_t('TEXT.DATEI'); ?> <span class="sm-mono"><?= ac_e($ac_logfile) ?></span></div>
 <?php if ($ac_loglines) { ?>
 <div class="sm-log"><?= ac_e(implode("\n", $ac_loglines)) ?></div>
 <?php } else { ?>
 <div class="sm-alert sm-info"><?php echo cam_t('TEXT.NOCH_KEINE_PROTOKOLL_EINTRGE_VORHA'); ?></div>
 <?php } ?>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span>
+</div>
 <form action="index.php" method="post" style="margin-top:10px;">
     <input data-role="none" type="hidden" name="clearlog" value="1">
     <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
     <input data-role="none" type="hidden" name="activetab" value="tab-log">
-    <button data-role="none" class="sm-btn" type="submit" style="background:#c62828;"><?php echo cam_t('TEXT.PROTOKOLL_LEEREN'); ?></button>
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.PROTOKOLL_LEEREN'); ?></button>
 </form>
 <?php if (class_exists('LBWeb', false) && method_exists('LBWeb', 'loglist_html')) { echo LBWeb::loglist_html(); } ?>
 </div>
