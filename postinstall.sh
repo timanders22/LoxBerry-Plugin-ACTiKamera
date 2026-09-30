@@ -129,7 +129,9 @@ else
     # Aus dem Archivordner gehen die BETRIEBSDATEIEN mit (Entscheidung 6):
     # betrieb<N>.json (Erreichbarkeit, Fehlerzaehler), letztesbild<N>.json
     # (Anlass, Zeit, Objekte der letzten Aufnahme), letztesbild<N>.jpg (die
-    # Kopie der letzten Aufnahme fuer ?letztes=1) und herzschlag.json - sonst
+    # Kopie der letzten Aufnahme fuer ?letztes=1), herzschlag.json und
+    # mqtt_kameras.json (die zuletzt gesendeten Kameraplaetze, ACTiKamera-a2:
+    # sonst bekaeme eine neue Anlage "-" fuer Plaetze der frueheren) - sonst
     # gaelte ein alter Stand als frisch (ALTER, ERREICHBAR, HERZ, PERSON). Die
     # Aufnahmen in bilder*/, clips*/ und timelapse*/ bleiben, wie die README
     # zusagt. Einen Ordner betrieb/ gibt es in dieser Linie nicht.
@@ -159,9 +161,9 @@ else
                 if [ -f "$AC_AR/$E" ] || [ -L "$AC_AR/$E" ]; then ac_beiseite "$AC_AR/$E"; fi
             done
         done
-        if [ -f "$AC_AR/herzschlag.json" ] || [ -L "$AC_AR/herzschlag.json" ]; then
-            ac_beiseite "$AC_AR/herzschlag.json"
-        fi
+        for E in herzschlag.json mqtt_kameras.json; do
+            if [ -f "$AC_AR/$E" ] || [ -L "$AC_AR/$E" ]; then ac_beiseite "$AC_AR/$E"; fi
+        done
     fi
     if [ -n "$AC_BEISEITE" ]; then
         echo "<WARNING> Neuinstallation: aus einer frueheren Installation lagen Einstellungen (mit Kamerapasswort und Aktionstoken) bzw. Betriebsdateien da. Sie werden NICHT eingespielt und liegen beiseite:$AC_BEISEITE - die Aufnahmen im Archiv bleiben; die Deinstallation raeumt die .alt-Dateien mit ab."

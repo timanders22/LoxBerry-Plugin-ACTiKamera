@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.24 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.25 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -12,6 +12,33 @@ in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxo
 nur noch `cam.php?foto=1&token=…` auf; die Zugangsdaten bleiben auf dem LoxBerry.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
+
+## Neu in 1.9.25
+
+Verbesserungen aus dem Durchgang vom 30.09.2026 (Verbesserungsliste
+`Pruefung-Durchgang-2026-09-29/VERBESSERUNGEN_OFFEN.md`). Gemessen an Attrappen
+unter PHP 7.4, 8.3 und 8.5; der RTSP-Prüfweg zusätzlich am LoxBerry mit echtem
+ffmpeg 7.1 gegen die echte Kamera (nur lesend).
+
+* **Reiter Test: neuer Knopf „RTSP-Weg prüfen“** mit Prüfzeile: ffmpeg holt
+  einmal höchstens 8 s lang ein Bild, gespeichert wird nichts. Das Kennwort geht
+  über eine Datei (0600, danach gelöscht) an ffmpeg, nie über die
+  Kommandozeile. Scheitert es, steht die aussagekräftigste Meldung von ffmpeg da.
+  Am Gerät gemessen: die Kamera antwortet, ihr RTSP-Strom (MJPEG) ist für ffmpeg
+  aber nicht lesbar („Picture size 0x0 / Invalid data“) – dann die Kodierung in
+  der Kamera prüfen, z. B. H.264 statt MJPEG.
+* **Eine ausgetragene Kamera wird auch nach Neustart oder Update erkannt.** Ihre
+  retained Themen gehen einmal als `-` hinaus (Merker `mqtt_kameras.json` im
+  Archivordner; bei Neuinstallation nach `.alt`). Bis 1.9.24 blieben die
+  Altwerte nach einem Neustart im Broker stehen.
+* Der rote Abo-Hinweis im Reiter MQTT erscheint nur noch, wenn
+  `mqtt_subscriptions.cfg` fehlt.
+* **Nach einer Beanstandung wird nichts gespeichert** – auch die übrigen Felder
+  nicht (bis 1.9.24 wurden sie übernommen). Die eingetippten Werte stehen wieder
+  im Formular, das beanstandete Feld ist rot umrandet; Kennwörter kommen nie
+  zurück.
+* „Einstellungen sichern“ warnt gelb und schreibt `_warnung` in die Datei, wenn
+  das Zurückspielen sie abweisen würde; die Datei kommt trotzdem.
 
 ## Neu in 1.9.24
 
@@ -143,6 +170,12 @@ hielte ihn für vier Messungen.
 Eingerichtet wird eine weitere Kamera im Reiter *Einstellungen*: dort steht
 unter der letzten Kamera immer ein leerer Abschnitt. Sobald eine Adresse
 eingetragen und gespeichert ist, führt das Plugin die Kamera mit.
+
+Ausgetragen wird sie, indem man ihre Adresse leert und speichert. Ihre
+zurückbehaltenen MQTT-Themen (`BILDER2`, `letztes_bild2` …) gehen dann im
+nächsten Minutentakt einmal als `-` hinaus, auch wenn der LoxBerry dazwischen
+neu gestartet wurde. Welche Kameras zuletzt gesendet wurden, merkt sich das
+Plugin in `data/plugins/actikamera.archiv/mqtt_kameras.json`.
 
 ## Auslösung durch die Kamera selbst
 
@@ -285,6 +318,11 @@ und nicht die Diagnose lesen.
   für RTSP keine getrennte Anmeldung, das Kennwort steht deshalb in der
   Kommandozeile und ist unter `/proc` für jeden lokalen Benutzer lesbar.
   Die Oberfläche sagt das am Auswahlfeld; *Nur Kamerastrom* kommt ohne aus.
+  Der Knopf *RTSP-Weg prüfen* im Reiter Test übergibt die Adresse dagegen
+  über eine Datei (`chmod 600`, danach gelöscht); dort steht das Kennwort
+  nicht in der Kommandozeile. Meldet die Prüfzeile „Picture size 0x0“ oder
+  „Invalid data“, antwortet die Kamera, aber ihr RTSP-Strom ist für ffmpeg
+  nicht lesbar – Kodierung in der Kamera prüfen (z. B. H.264 statt MJPEG).
 - `?diag=1` nennt Länge sowie erstes und letztes Zeichen des Passworts und ist
   deshalb seit 1.9.8 tokenpflichtig
 - Die Formulare der Oberfläche tragen ein Merkmal gegen fremde Absender

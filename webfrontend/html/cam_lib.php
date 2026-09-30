@@ -1318,6 +1318,11 @@ function cam_einmal_schreiben(array $m)
         'note_rot' => empty($m['note_rot']) ? 0 : 1,
         'err' => cam_geheim_tilgen(isset($m['err']) ? $m['err'] : ''),
     );
+    /* X-2: die abgewiesenen Eingaben EINES Formulars (cam_eingaben_sammeln()
+       laesst Kennwoerter und Token nie hinein). */
+    if (isset($m['eingaben']) && is_array($m['eingaben'])) {
+        $d['eingaben'] = $m['eingaben'];
+    }
     $js = json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     return $js !== false && cam_datei_schreiben(cam_einmal_datei(), $js, 0600);
 }
@@ -1334,7 +1339,179 @@ function cam_einmal_lesen()
     if (!is_array($d) || !isset($d['zeit']) || abs(time() - (int) $d['zeit']) > 120) {
         return null;
     }
-    return $d + array('saved' => 0, 'note' => '', 'note_rot' => 0, 'err' => '');
+    return $d + array('saved' => 0, 'note' => '', 'note_rot' => 0, 'err' => '', 'eingaben' => null);
+}
+
+/* ==================================================================
+ * Nach einer Beanstandung stehen die eingetippten Werte wieder im Formular
+ * (X-2, Regeln/04, Hausregel seit 30.09.2026). Bis 1.9.25 zeigte der GET
+ * nach der Umleitung die gespeicherten Werte; wer drei Felder richtig und
+ * eines falsch eingab, tippte alle neu.
+ * ================================================================== */
+
+/** Die Felder je Formular, deren Eingabe zurueckreisen darf - nie Kennwort, nie Token. */
+function cam_eingabe_felder($formular)
+{
+    if ($formular === 'mqtt') {
+        return array('mqtt_enabled', 'mqtt_topic');
+    }
+    if ($formular !== 'settings') {
+        return array();
+    }
+    $aus = array();
+    for ($i = 1; $i <= CAM_MAX; $i++) {
+        foreach (array('name', 'host', 'user', 'zugang_loeschen', 'auth', 'snapurl', 'snapcmd',
+                       'resolution', 'timeout', 'channel', 'mjpeg_url', 'rtsp_url', 'rtsp_port',
+                       'rtsp_stream', 'rtsp_quality') as $f) {
+            $aus[] = $f . cam_sx($i);
+        }
+    }
+    foreach (array('pruef_minuten', 'mindestpause', 'keep_days', 'clip_seconds', 'clip_fps',
+                   'keep_max', 'keep_mb', 'timelapse', 'timelapse_time', 'ai_url', 'ai_min',
+                   'webhook1', 'webhook2', 'notify_push', 'push_minutes', 'stream_fps',
+                   'stream_maxsec', 'stream_mode', 'bild_fest') as $f) {
+        $aus[] = $f;
+    }
+    return $aus;
+}
+
+/** Die geheimen Felder eines Formulars: sie werden markiert, ihr Wert reist nie. */
+function cam_eingabe_geheimfelder($formular)
+{
+    if ($formular !== 'settings') {
+        return array();
+    }
+    $aus = array('stream_token');
+    for ($i = 1; $i <= CAM_MAX; $i++) {
+        $aus[] = 'pass' . cam_sx($i);
+    }
+    return $aus;
+}
+
+/** Ein Haken: fehlt er im POST, war er abgewaehlt. */
+function cam_eingabe_haken($feld)
+{
+    return in_array(preg_replace('/[2-9]\z/', '', (string) $feld),
+                    array('mqtt_enabled', 'zugang_loeschen', 'timelapse', 'notify_push', 'bild_fest'), true);
+}
+
+/** Ein Adressfeld, in dem ein Kennwort stehen kann (im Formular maskiert, U6). */
+function cam_eingabe_zugangsfeld($feld)
+{
+    return in_array(preg_replace('/[2-9]\z/', '', (string) $feld),
+                    array('snapurl', 'snapcmd', 'mjpeg_url', 'rtsp_url'), true);
+}
+
+/**
+ * Die abgewiesenen Eingaben EINES Formulars aus $_POST einsammeln.
+ * $falsch: die beanstandeten Felder, $alt: die gespeicherte Konfiguration
+ * (fuer die Masken der Adressfelder). Rueckgabe array(formular, werte,
+ * falsch, neu_eintragen).
+ */
+function cam_eingaben_sammeln($formular, array $falsch, array $alt)
+{
+    $werte = array();
+    $neu = array();
+    foreach (cam_eingabe_felder($formular) as $f) {
+        if (cam_eingabe_haken($f)) {
+            $werte[$f] = isset($_POST[$f]) ? '1' : '0';
+            continue;
+        }
+        if (!isset($_POST[$f]) || !is_string($_POST[$f])) {
+            continue;
+        }
+        $v = $_POST[$f];
+        if (strlen($v) > 1024 || !preg_match('//u', $v)) {
+            continue;   // zu lang oder kein UTF-8: das Feld zeigt den gespeicherten Wert
+        }
+        if (cam_eingabe_zugangsfeld($f)) {
+            /* Die Maske muss beim naechsten Absenden wieder DENSELBEN Wert
+               ergeben. Traegt die Eingabe ein neues Kennwort, setzte die
+               Maske das alte ein, und das neue ginge still verloren - dann
+               reist das Feld nicht, und die Meldung nennt es. */
+            $a = isset($alt[$f]) ? (string) $alt[$f] : '';
+            $e = cam_zugang_entmaske($v, $a);
+            $m = cam_zugang_maske($e);
+            if (cam_zugang_entmaske($m, $a) !== $e) {
+                $neu[] = $f;
+                continue;
+            }
+            $v = $m;
+        }
+        // Ein Wert, der ein gespeichertes Geheimnis enthaelt, reist nicht.
+        if (cam_geheim_tilgen($v) !== $v) {
+            $neu[] = $f;
+            continue;
+        }
+        $werte[$f] = $v;
+    }
+    $markierbar = array_merge(cam_eingabe_felder($formular), cam_eingabe_geheimfelder($formular));
+    $falsch_ok = array();
+    foreach (array_merge($falsch, $neu) as $f) {
+        if (in_array($f, $markierbar, true) && !in_array($f, $falsch_ok, true)) {
+            $falsch_ok[] = $f;
+        }
+    }
+    return array('formular' => (string) $formular, 'werte' => $werte, 'falsch' => $falsch_ok,
+                 'neu_eintragen' => $neu);
+}
+
+/**
+ * Die zurueckgereisten Eingaben fuer DIESEN Seitenaufbau setzen (Feld) bzw.
+ * lesen (ohne Argument). Beim Setzen wird nachgeprueft: nur bekannte Felder
+ * des genannten Formulars, nur Zeichenketten, nie ein geheimes Feld als Wert.
+ */
+function cam_eingaben_aktiv($setzen = null)
+{
+    static $e = array('formular' => '', 'werte' => array(), 'falsch' => array());
+    if (is_array($setzen)) {
+        $f = (isset($setzen['formular']) && is_string($setzen['formular'])) ? $setzen['formular'] : '';
+        $erlaubt = cam_eingabe_felder($f);
+        $markierbar = array_merge($erlaubt, cam_eingabe_geheimfelder($f));
+        $w = array();
+        $fa = array();
+        $roh_w = (isset($setzen['werte']) && is_array($setzen['werte'])) ? $setzen['werte'] : array();
+        $roh_f = (isset($setzen['falsch']) && is_array($setzen['falsch'])) ? $setzen['falsch'] : array();
+        foreach ($roh_w as $k => $v) {
+            if (is_string($k) && in_array($k, $erlaubt, true) && is_string($v)) {
+                $w[$k] = $v;
+            }
+        }
+        foreach ($roh_f as $k) {
+            if (is_string($k) && in_array($k, $markierbar, true)) {
+                $fa[] = $k;
+            }
+        }
+        $e = array('formular' => $erlaubt ? $f : '', 'werte' => $w, 'falsch' => $fa);
+    }
+    return $e;
+}
+
+/** Der Wert fuer ein Formularfeld: die zurueckgereiste Eingabe oder der gespeicherte. */
+function cam_eingabe($feld, $gespeichert)
+{
+    $e = cam_eingaben_aktiv();
+    return array_key_exists((string) $feld, $e['werte']) ? $e['werte'][(string) $feld] : $gespeichert;
+}
+
+/**
+ * Eine Konfigurationssicht mit den Eingaben ueberlagern - fuer die Felder
+ * $felder (ohne Kennziffer) der Kamera mit dem Suffix $sx. Gilt nur fuer das
+ * Formular; Anzeigen ausserhalb lesen weiter die gespeicherten Werte.
+ */
+function cam_eingaben_ueberlagern(array $sicht, $sx, array $felder)
+{
+    foreach ($felder as $f) {
+        $sicht[$f] = cam_eingabe($f . $sx, isset($sicht[$f]) ? $sicht[$f] : '');
+    }
+    return $sicht;
+}
+
+/** Das Merkmal am beanstandeten Feld: rot umrandet und fuer Vorleseprogramme markiert. */
+function cam_markierung($feld)
+{
+    $e = cam_eingaben_aktiv();
+    return in_array((string) $feld, $e['falsch'], true) ? ' class="sm-beanstandet" aria-invalid="true"' : '';
 }
 
 /* ==================================================================
@@ -1778,6 +1955,201 @@ function cam_ffmpeg()
 {
     $pfad = trim((string) @shell_exec('command -v ffmpeg 2>/dev/null'));
     return $pfad !== '' ? $pfad : '';
+}
+
+/** Frist der RTSP-Pruefung (ACTiKamera-b1), Sekunden. */
+define('CAM_RTSP_FRIST_S', 8);
+
+/** Eine Messung gilt im Reiter Test so lange als aktuell (Sekunden). */
+define('CAM_RTSP_AKTUELL_S', 900);
+
+/** Wo das letzte Ergebnis der RTSP-Pruefung liegt (Datenordner, ohne Kennwort). */
+function cam_rtsp_pruefdatei()
+{
+    return cam_paths()['datadir'] . '/rtsp_pruefung.json';
+}
+
+/** Eine Adresse oder ffmpeg-Zeile fuer die Anzeige: ohne jedes Kennwort. */
+function cam_rtsp_zeigbar($s)
+{
+    return cam_geheim_tilgen(cam_zugang_maske(cam_rtsp_maske((string) $s)));
+}
+
+/**
+ * Ist der RTSP-Weg dieser Kamera erreichbar? (ACTiKamera-b1)
+ *
+ * ffmpeg EINMAL gegen die Adresse aus cam_rtsp_url() - dieselbe, die der
+ * Bildstrom nimmt -, -t 1, Ausgabe nach -f null (gespeichert wird nichts),
+ * Frist CAM_RTSP_FRIST_S. Das KENNWORT STEHT NIE AUF DER KOMMANDOZEILE: ffmpeg
+ * kennt fuer RTSP keine getrennte Anmeldung (siehe cam_rtsp_url()), die
+ * Adresse geht deshalb ueber eine ffconcat-Datei (0600, danach geloescht) an
+ * ffmpeg; rtsp_transport und timeout reisen als "option"-Zeilen darin mit.
+ * Gestartet wird ohne Schale (proc_open mit Feld), die Prozessliste zeigt
+ * nur den Pfad der Datei.
+ *
+ * Rueckgabe array(kamera, zeit, stand 1|0|-1, grund, dauer_ms, adresse) -
+ * adresse und grund ohne Kennwort. stand -1 = nicht pruefbar (kein ffmpeg,
+ * keine Adresse).
+ */
+function cam_rtsp_pruefen($id = 1)
+{
+    $t0 = microtime(true);
+    $aus = array('kamera' => (int) $id, 'zeit' => date('c'), 'stand' => -1,
+                 'grund' => '', 'dauer_ms' => 0, 'adresse' => '');
+    $ff = cam_ffmpeg();
+    if ($ff === '') {
+        $aus['grund'] = cam_t('TEST.G_RTSP_FFMPEG');
+        return $aus;
+    }
+    $url = cam_rtsp_url(false, $id);
+    if ($url === '') {
+        $aus['grund'] = cam_t('TEST.G_RTSP_ADRESSE');
+        return $aus;
+    }
+    $aus['adresse'] = cam_rtsp_zeigbar($url);
+    $p = cam_paths();
+    $datei = $p['datadir'] . '/rtsp_pruefung.' . getmypid() . '.' . mt_rand(100000, 999999) . '.ffconcat';
+    /* ffconcat: in einfachen Anfuehrungszeichen gilt nichts als Sonderzeichen;
+       ein Anfuehrungszeichen selbst wird als '\'' geschrieben. */
+    $inhalt = "ffconcat version 1.0\n"
+        . "file '" . str_replace("'", "'\\''", $url) . "'\n"
+        . "option rtsp_transport tcp\n"
+        . "option timeout 5000000\n";
+    if (!cam_datei_schreiben($datei, $inhalt, 0600)) {
+        $aus['stand'] = 0;
+        $aus['grund'] = cam_t('TEST.G_RTSP_DATEI');
+        return $aus;
+    }
+    $befehl = array($ff, '-nostdin', '-hide_banner', '-loglevel', 'error',
+        '-f', 'concat', '-safe', '0', '-protocol_whitelist', 'file,rtsp,rtp,tcp,udp',
+        '-i', $datei, '-t', '1', '-an', '-f', 'null', '-progress', 'pipe:1', '-nostats', '-');
+    $rohre = array();
+    $pr = @proc_open($befehl, array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'),
+                                    2 => array('pipe', 'w')), $rohre);
+    if (!is_resource($pr)) {
+        @unlink($datei);
+        $aus['stand'] = 0;
+        $aus['grund'] = cam_t('TEST.G_RTSP_START');
+        return $aus;
+    }
+    fclose($rohre[0]);
+    stream_set_blocking($rohre[1], false);
+    stream_set_blocking($rohre[2], false);
+    $fehler = '';
+    $ausg = '';
+    $rc = null;
+    $zeit_um = false;
+    $ende = $t0 + CAM_RTSP_FRIST_S;
+    while (true) {
+        $st = proc_get_status($pr);
+        $fehler .= (string) stream_get_contents($rohre[2]);
+        $ausg .= (string) stream_get_contents($rohre[1]);
+        if (strlen($fehler) > 16384) { $fehler = substr($fehler, -8192); }
+        if (strlen($ausg) > 16384) { $ausg = substr($ausg, -8192); }
+        if (!$st['running']) {
+            $rc = (int) $st['exitcode'];
+            break;
+        }
+        if (microtime(true) >= $ende) {
+            $zeit_um = true;
+            proc_terminate($pr, 15);
+            usleep(300000);
+            $st2 = proc_get_status($pr);
+            if ($st2['running']) { proc_terminate($pr, 9); }
+            break;
+        }
+        $r = array($rohre[1], $rohre[2]);
+        $w = null;
+        $e = null;
+        @stream_select($r, $w, $e, 0, 200000);
+    }
+    $fehler .= (string) stream_get_contents($rohre[2]);
+    $ausg .= (string) stream_get_contents($rohre[1]);
+    fclose($rohre[1]);
+    fclose($rohre[2]);
+    $rc_zu = proc_close($pr);
+    if ($rc === null) { $rc = $rc_zu; }
+    @unlink($datei);
+    $aus['dauer_ms'] = (int) round((microtime(true) - $t0) * 1000);
+    if ($zeit_um) {
+        $aus['stand'] = 0;
+        $ac_m = cam_rtsp_meldung($fehler, $datei);
+        $aus['grund'] = ($ac_m !== ''
+            ? sprintf(cam_t('TEST.G_RTSP_FRIST_MELDUNG'), CAM_RTSP_FRIST_S, $ac_m)
+            : sprintf(cam_t('TEST.G_RTSP_FRIST'), CAM_RTSP_FRIST_S)) . cam_rtsp_deutung($fehler);
+        return $aus;
+    }
+    if ((int) $rc === 0) {
+        /* Erreichbar heisst: es kam mindestens ein Bild (-progress meldet
+           frame=N). Ein Ende ohne Bild ist kein Haken. */
+        $bilder = preg_match_all('/^frame=([0-9]+)/m', $ausg, $fm) ? (int) $fm[1][count($fm[1]) - 1] : 0;
+        if ($bilder > 0) {
+            $aus['stand'] = 1;
+        } else {
+            $aus['stand'] = 0;
+            $aus['grund'] = cam_t('TEST.G_RTSP_KEINBILD');
+        }
+        return $aus;
+    }
+    $ac_m = cam_rtsp_meldung($fehler, $datei);
+    $aus['stand'] = 0;
+    $aus['grund'] = ($ac_m !== '' ? $ac_m : sprintf(cam_t('TEST.G_RTSP_RC'), (int) $rc))
+        . cam_rtsp_deutung($fehler);
+    return $aus;
+}
+
+/**
+ * Die aussagekraeftigste ffmpeg-Zeile fuer den Grund - maskiert, ohne den Pfad
+ * der Uebergabedatei (Nachtrag nach der Geraetemessung vom 30.09.2026).
+ * Uebergangen werden Zeilen, die nur "Error opening input file <pfad>" bzw.
+ * "Error opening input files: ..." sagen (ffmpeg 7 wiederholt damit die Zeile
+ * davor) und jede Zeile mit dem Pfad der ffconcat-Datei. Gewaehlt wird die
+ * letzte uebrige Zeile; '' = keine. Die Kennung "[mjpeg @ 0x55...]" wird zu
+ * "[mjpeg]" gekuerzt.
+ */
+function cam_rtsp_meldung($fehler, $datei)
+{
+    $zeilen = array_values(array_filter(array_map('trim', preg_split('/\r?\n/', (string) $fehler)), 'strlen'));
+    for ($i = count($zeilen) - 1; $i >= 0; $i--) {
+        $z = $zeilen[$i];
+        if (($datei !== '' && strpos($z, (string) $datei) !== false) || strpos($z, '.ffconcat') !== false
+            || preg_match('/^Error opening (input|output) files?\b/i', $z)) {
+            continue;
+        }
+        $z = preg_replace('/^\[([^\]@]+?) @ 0x[0-9a-fA-F]+\]\s*/', '[$1] ', $z);
+        return substr(cam_rtsp_zeigbar($z), 0, 240);
+    }
+    return '';
+}
+
+/**
+ * Zusatz, wenn ffmpeg die Kamera erreicht, ihren Strom aber nicht lesen kann
+ * ("Picture size 0x0", "Invalid data found") - am Geraet am 30.09.2026 mit
+ * einer ACTi-Kamera gemessen, die per RTSP MJPEG liefert.
+ */
+function cam_rtsp_deutung($fehler)
+{
+    return preg_match('/Picture size 0x0|Invalid data found/i', (string) $fehler)
+        ? ' – ' . cam_t('TEST.G_RTSP_KODIERUNG') : '';
+}
+
+/** Die Ergebnisse einer Pruefung ablegen (je Kamera, ohne Kennwort). */
+function cam_rtsp_pruefung_merken(array $erg)
+{
+    $js = json_encode(array_values($erg), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    return $js !== false && cam_datei_schreiben(cam_rtsp_pruefdatei(), $js, 0600);
+}
+
+/** Das letzte Ergebnis: array(kamera => Ergebnis) oder leer. */
+function cam_rtsp_pruefung_lesen()
+{
+    $aus = array();
+    foreach (cam_json_lesen(cam_rtsp_pruefdatei()) as $r) {
+        if (is_array($r) && isset($r['kamera'], $r['zeit'], $r['stand'])) {
+            $aus[(int) $r['kamera']] = $r + array('grund' => '', 'dauer_ms' => 0, 'adresse' => '');
+        }
+    }
+    return $aus;
 }
 
 /**
@@ -3224,21 +3596,45 @@ function cam_mqtt_zustand($erzwingen = false)
     $merker = cam_paths()['tmp'] . '/mqtt_letzte.json';
     $vorher = cam_json_lesen($merker);
     $praefix = cam_mqtt_praefix($cfg);
-    /* Eine AUSGETRAGENE Kamera (M4): stand ihr Feld im letzten gesendeten Satz
-       und ist sie jetzt nicht mehr eingerichtet, werden ihre zurueckbehaltenen
-       Themen einmal abgeraeumt - mit Rueckfrage beim Broker vorher und nach
-       jeder Runde (cam_mqtt_leeren_lauf). Bis 1.9.22 blieben BILDER2, PERSON2,
-       letztes_bild2 ... fuer immer im Broker stehen (gemessen, Fall F7). Der
-       naechste Satz traegt das Feld nicht mehr - der Anlass verschwindet mit
-       ihm. */
+    /* Eine AUSGETRAGENE Kamera (M4, ACTiKamera-a2): stand ihr Platz im
+       Kameramerker (bzw. ohne ihn ihr Feld im letzten gesendeten Satz) und ist
+       sie jetzt nicht mehr eingerichtet, gehen ihre zurueckbehaltenen Themen
+       EINMAL als "-" retained hinaus (Entscheidungen 5 und 8 vom 29./30.09.2026:
+       "-" gibt es fuer ein entferntes Geraet). Bis 1.9.22 blieben BILDER2,
+       PERSON2, letztes_bild2 ... fuer immer im Broker stehen (gemessen, Fall
+       F7); 1.9.23 bis 1.9.25 leerten sie, erkannten die Kamera aber nur am
+       /tmp-Merker - ein Neustart zwischen Austragen und Takt liess sie aus.
+       Der Kameramerker liegt im Archivordner und uebersteht Neustart und
+       Update; ein Platz verlaesst ihn erst, wenn das Senden gelang. */
     $ac_jetzt_k = cam_kameras();
+    $ac_gemerkt = cam_mqtt_kameras_gemerkt($praefix);
+    $ac_offen = array();
+    $ac_weg = 0;
     for ($ac_i = 2; $ac_i <= CAM_MAX; $ac_i++) {
-        if (!in_array($ac_i, $ac_jetzt_k, true) && array_key_exists('OK' . $ac_i, $vorher)) {
-            $ac_l = cam_mqtt_leeren_lauf($praefix, cam_mqtt_leer_themen_kamera($ac_i), 3, 300000);
-            cam_log('MQTT: Kameraplatz ' . $ac_i . ' ist ausgetragen - seine zurueckbehaltenen '
-                . 'Themen unter ' . $praefix . '/ werden abgeraeumt: '
-                . implode(' ', $ac_l['zeilen']));
+        if (in_array($ac_i, $ac_jetzt_k, true)) {
+            continue;
         }
+        $ac_war = ($ac_gemerkt !== null) ? in_array($ac_i, $ac_gemerkt, true)
+                                         : array_key_exists('OK' . $ac_i, $vorher);
+        if (!$ac_war) {
+            continue;
+        }
+        $ac_strich = cam_mqtt_strich_werte($ac_i);
+        $ac_n = cam_mqtt($ac_strich);
+        if ($ac_n > 0) {
+            $ac_weg++;
+            cam_log('MQTT: Kameraplatz ' . $ac_i . ' ist ausgetragen - seine ' . count($ac_strich)
+                . ' zurueckbehaltenen Themen unter ' . $praefix . '/ gehen einmal als "-" hinaus: '
+                . implode(' ', array_keys($ac_strich)));
+        } else {
+            $ac_offen[] = $ac_i;
+            cam_log_selten('ausgetragen_' . $ac_i, 'MQTT: Kameraplatz ' . $ac_i . ' ist ausgetragen, '
+                . 'seine Themen liessen sich noch nicht als "-" senden - der naechste Takt versucht es wieder.');
+        }
+    }
+    $ac_soll_k = array_values(array_unique(array_merge($ac_jetzt_k, $ac_offen)));
+    if ($ac_gemerkt === null || $ac_weg > 0) {
+        cam_mqtt_kameras_merken($praefix, $ac_soll_k);
     }
     /* Der VOLLE Satz geht hinaus, wenn der Merker eine andere Form traegt
        (Vorfassung, anderes Praefix, geaenderte Retain-Tabelle) und
@@ -3282,6 +3678,8 @@ function cam_mqtt_zustand($erzwingen = false)
     $ablage['_voll'] = $voll ? $jetzt : $voll_alt;
     $js = json_encode($ablage);
     if ($js !== false) { @file_put_contents($merker, $js, LOCK_EX); }
+    // Der Satz ging hinaus: diese Plaetze stehen jetzt im Broker (a2).
+    cam_mqtt_kameras_merken($praefix, $ac_soll_k);
     return count($neu);
 }
 
@@ -3787,6 +4185,35 @@ function cam_pruefungen()
     $ff = cam_ffmpeg();
     $zeile($ff !== '' ? 1 : -1, cam_t('TEST.F_FFMPEG'),
         $ff !== '' ? cam_e($ff) : cam_t('TEST.A_FFMPEG_FEHLT'));
+
+    /* RTSP erreichbar? (ACTiKamera-b1) - je Kamera, aus der letzten Messung
+       ueber den Knopf "RTSP-Weg pruefen". Gemessen wird NUR auf den Knopf
+       (bis zu 8 s je Kamera); ein Seitenaufbau startet kein ffmpeg. Ein Haken
+       nur fuer eine Messung, die hoechstens CAM_RTSP_AKTUELL_S alt ist -
+       sonst "i" mit dem alten Ergebnis (Fehlerklasse 8: kein Haken fuer etwas
+       nicht Gemessenes). */
+    $ac_rp = cam_rtsp_pruefung_lesen();
+    foreach (cam_kameras() as $ac_kid) {
+        $ac_frage = cam_t('TEST.F_RTSP') . ($ac_mehrere ? ' (' . cam_e(cam_kname($ac_kid)) . ')' : '');
+        $ac_r = isset($ac_rp[$ac_kid]) ? $ac_rp[$ac_kid] : null;
+        $ac_ts = $ac_r !== null ? strtotime((string) $ac_r['zeit']) : false;
+        if ($ff === '') {
+            $zeile(-1, $ac_frage, cam_t('TEST.A_RTSP_OHNE_FFMPEG'));
+        } elseif ($ac_r === null || $ac_ts === false) {
+            $zeile(-1, $ac_frage, cam_t('TEST.A_RTSP_NIE'));
+        } elseif ((int) $ac_r['stand'] === -1) {
+            $zeile(-1, $ac_frage, sprintf(cam_t('TEST.A_RTSP_NICHT'), cam_e((string) $ac_r['grund'])));
+        } elseif (abs(time() - $ac_ts) > CAM_RTSP_AKTUELL_S) {
+            $zeile(-1, $ac_frage, sprintf(cam_t('TEST.A_RTSP_ALT'), cam_e(date('d.m.Y H:i', $ac_ts)),
+                cam_t((int) $ac_r['stand'] === 1 ? 'TEST.A_RTSP_ALT_JA' : 'TEST.A_RTSP_ALT_NEIN')));
+        } elseif ((int) $ac_r['stand'] === 1) {
+            $zeile(1, $ac_frage, sprintf(cam_t('TEST.A_RTSP_JA'), cam_e(date('d.m.Y H:i:s', $ac_ts)),
+                (int) $ac_r['dauer_ms'], cam_e((string) $ac_r['adresse'])));
+        } else {
+            $zeile(0, $ac_frage, sprintf(cam_t('TEST.A_RTSP_NEIN'), cam_e(date('d.m.Y H:i:s', $ac_ts)),
+                cam_e((string) $ac_r['grund']), cam_e((string) $ac_r['adresse'])));
+        }
+    }
 
     /* MQTT */
     $m = cam_mqtt_zustand_pruefen();
@@ -4463,6 +4890,74 @@ function cam_mqtt_leer_themen_kamera($id)
 }
 
 /**
+ * Der Kameramerker (ACTiKamera-a2): welche Kameraplaetze hat der Minutentakt
+ * zuletzt unter welchem Praefix gesendet? Er liegt im ARCHIVORDNER
+ * (cam_datadir()) und nicht unter /tmp - dort war er nach jedem Neustart weg,
+ * und eine ausgetragene Kamera blieb mit ihren Werten im Broker stehen. Den
+ * Datenordner raeumt der Installer bei jedem Update ab; der Archivordner
+ * bleibt. Bei einer Neuinstallation legt postinstall.sh ihn nach .alt.
+ */
+function cam_mqtt_kameramerker()
+{
+    return cam_datadir() . '/mqtt_kameras.json';
+}
+
+/**
+ * Die gemerkten Kameraplaetze fuer dieses Praefix. null = kein Merker, ein
+ * unlesbarer oder einer fuer ein anderes Praefix (dessen Themen hat der
+ * Praefixwechsel in der Oberflaeche schon geleert).
+ */
+function cam_mqtt_kameras_gemerkt($praefix)
+{
+    $d = cam_json_lesen(cam_mqtt_kameramerker());
+    if (!isset($d['praefix'], $d['kameras']) || !is_array($d['kameras'])
+        || (string) $d['praefix'] !== (string) $praefix) {
+        return null;
+    }
+    $aus = array();
+    foreach ($d['kameras'] as $i) {
+        if (is_int($i) && $i >= 1 && $i <= CAM_MAX && !in_array($i, $aus, true)) {
+            $aus[] = $i;
+        }
+    }
+    sort($aus);
+    return $aus;
+}
+
+/** Den Kameramerker schreiben - nur, wenn er sich aendert, und unteilbar. */
+function cam_mqtt_kameras_merken($praefix, array $ids)
+{
+    $liste = array();
+    foreach ($ids as $i) {
+        $i = (int) $i;
+        if ($i >= 1 && $i <= CAM_MAX && !in_array($i, $liste, true)) { $liste[] = $i; }
+    }
+    sort($liste);
+    if (cam_mqtt_kameras_gemerkt($praefix) === $liste) {
+        return true;
+    }
+    $js = json_encode(array('praefix' => (string) $praefix, 'kameras' => $liste));
+    return $js !== false && cam_datei_schreiben(cam_mqtt_kameramerker(), $js . "\n", 0644);
+}
+
+/**
+ * Die retained Themen EINES ausgetragenen Kameraplatzes mit dem Wert "-"
+ * (Entscheidungen 5 und 8). Nur, was retained geht - die frueheren
+ * Stammthemen (OK, ERREICHBAR ...) gehen seit 1.9.22 fluechtig und bekommen
+ * keinen Strich.
+ */
+function cam_mqtt_strich_werte($id)
+{
+    $aus = array();
+    foreach (cam_mqtt_leer_themen_kamera($id) as $t) {
+        if (cam_mqtt_retained($t)) {
+            $aus[$t] = '-';
+        }
+    }
+    return $aus;
+}
+
+/**
  * Die zurueckbehaltenen Themen leeren - fuer uninstall/uninstall
  * (bin/cam_cron.php --mqtt-leeren). Schreibt kein Protokoll und legt nichts an.
  *
@@ -4651,8 +5146,11 @@ function cam_t($schluessel)
  * Rueckgabe: array(Konfiguration|null, Beanstandungen[], uebernommene Werte,
  *                  Hinweise[]) - die Hinweise seit 1.9.23 (C1).
  */
-function cam_sicherung_lesen($roh)
+function cam_sicherung_lesen($roh, &$namen = null)
 {
+    /* $namen (X-3): die Namen der beanstandeten Schluessel, fuer die Warnung
+       am Knopf "Einstellungen sichern" - Namen, nie Werte. */
+    $namen = array();
     $mangel = array();
     $hinweise = array();
     $daten = json_decode((string) $roh, true);
@@ -4685,6 +5183,7 @@ function cam_sicherung_lesen($roh)
         if (!is_string($k)) {
             // {"0":1}: ein ganzzahliger Schluessel ist keine Einstellung (U15).
             $mangel[] = sprintf(cam_t('TEXT.SICH_FREMD'), (string) $k);
+            $namen[] = (string) $k;
             continue;
         }
         if ($k !== '' && $k[0] === '_') {
@@ -4692,6 +5191,7 @@ function cam_sicherung_lesen($roh)
         }
         if (!in_array($k, $bekannt, true)) {
             $mangel[] = sprintf(cam_t('TEXT.SICH_FREMD'), (string) $k);
+            $namen[] = (string) $k;
             continue;
         }
         /* Jeder WERT wird geprueft, nicht nur der Schluessel. Bis 1.9.16
@@ -4699,6 +5199,7 @@ function cam_sicherung_lesen($roh)
         $grund = cam_wert_pruefen($k, $w);
         if ($grund !== '') {
             $mangel[] = sprintf(cam_t('TEXT.SICH_WERT'), (string) $k, $grund);
+            $namen[] = (string) $k;
             continue;
         }
         /* Ein LEERES Aktions- oder Ausloese-Token heisst "kein Token
@@ -4747,8 +5248,35 @@ function cam_sicherung_lesen($roh)
     if ($fehlend) {
         $mangel[] = sprintf(cam_t('TEXT.SICH_FEHLEND'), count($fehlend),
             htmlspecialchars(implode(', ', $fehlend), ENT_QUOTES, 'UTF-8'));
+        foreach ($fehlend as $fk) { $namen[] = $fk; }
     }
     return array($mangel ? null : $neu, $mangel, $anzahl, $hinweise);
+}
+
+/**
+ * Bestuende die EIGENE Sicherung jetzt das Zurueckspielen? (X-3)
+ *
+ * Gebaut wie der Knopf "Einstellungen sichern" (Kopf + cam_config()) und durch
+ * DIESELBE cam_sicherung_lesen() geschickt. Rueckgabe: die Namen der
+ * Einstellungen, an denen es scheitern wuerde (leer = geht durch) - nie Werte.
+ * Bis 1.9.25 merkte man das erst beim Umzug auf den zweiten LoxBerry: ein
+ * gespeicherter Wert ausserhalb der Grenzen (von Hand oder aus einer alten
+ * Fassung) liess die eigene Datei abweisen.
+ */
+function cam_rueckspiel_befund()
+{
+    $js = json_encode(array('_stand' => date('c')) + cam_config(),
+        JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($js === false) {
+        return array('JSON');
+    }
+    $namen = array();
+    $r = cam_sicherung_lesen($js, $namen);
+    if ($r[0] !== null) {
+        return array();
+    }
+    $namen = array_values(array_unique($namen));
+    return $namen ? $namen : array('?');
 }
 
 /* Der Escape-Helfer gehoert in die Bibliothek, nicht in

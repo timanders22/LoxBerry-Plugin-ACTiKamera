@@ -108,6 +108,8 @@ function ac_grenzen()
 }
 
 $ac_saved = false; $ac_note = ''; $ac_err = '';
+/* X-2: die abgewiesenen Eingaben eines Formulars (cam_eingaben_sammeln()). */
+$ac_eingaben = null;
 /* Ob eine Meldung rot oder gruen erscheint, entscheidet dieser Schalter -
    nicht die Suche nach einem deutschen Wort im Text (bis 1.9.16). */
 $ac_note_rot = false;
@@ -231,9 +233,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mqtt'])) {
     $ac_mt = trim(ac_post('mqtt_topic'));
     $ac_mg = cam_thema_pruefen($ac_mt);
     if ($ac_mt === '') {
-        $ac_err = cam_t('MQTT.FEHLER_TOPIC');
+        $ac_err = cam_t('MQTT.FEHLER_TOPIC') . ' ' . cam_t('TEXT.EINGABEN_ZURUECK');
+        $ac_eingaben = cam_eingaben_sammeln('mqtt', array('mqtt_topic'), cam_config());
     } elseif ($ac_mg !== '') {
-        $ac_err = sprintf(cam_t('MQTT.FEHLER_TOPIC_ZEICHEN'), ac_e($ac_mt), ac_e($ac_mg), ac_e($ac_m_alt_praefix));
+        $ac_err = sprintf(cam_t('MQTT.FEHLER_TOPIC_ZEICHEN'), ac_e($ac_mt), ac_e($ac_mg), ac_e($ac_m_alt_praefix))
+            . ' ' . cam_t('TEXT.EINGABEN_ZURUECK');
+        $ac_eingaben = cam_eingaben_sammeln('mqtt', array('mqtt_topic'), cam_config());
     } else {
         $ac_m['mqtt_topic'] = $ac_mt;
         if (cam_config_save($ac_m)) {
@@ -341,6 +346,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['shotnow']) && functio
     $ac_note_rot = !$ac_ok;
     $ac_tab = 'tab-test';
 }
+/* RTSP-Weg pruefen (ACTiKamera-b1): ffmpeg einmal je Kamera, hoechstens
+   8 s, nichts wird gespeichert. Ergebnis in der Meldung und in der
+   Pruefzeile "RTSP erreichbar?"; Adresse und Fehlerzeile ohne Kennwort. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['rtsppruefen']) && function_exists('cam_rtsp_pruefen')) {
+    @set_time_limit(20 + 12 * CAM_MAX);
+    $ac_rpe = array();
+    $ac_teile = array();
+    $ac_rot = false;
+    foreach (cam_kameras() as $ac_kid) {
+        $ac_r = cam_rtsp_pruefen($ac_kid);
+        $ac_rpe[$ac_kid] = $ac_r;
+        if ((int) $ac_r['stand'] === 1) {
+            $ac_teile[] = sprintf(cam_t('TEST.M_RTSP_JA'), ac_e(cam_kname($ac_kid)), (int) $ac_r['dauer_ms']);
+        } elseif ((int) $ac_r['stand'] === 0) {
+            $ac_rot = true;
+            $ac_teile[] = sprintf(cam_t('TEST.M_RTSP_NEIN'), ac_e(cam_kname($ac_kid)), ac_e($ac_r['grund']));
+        } else {
+            $ac_teile[] = sprintf(cam_t('TEST.M_RTSP_NICHT'), ac_e(cam_kname($ac_kid)), ac_e($ac_r['grund']));
+        }
+        cam_log('RTSP-Pruefung ' . cam_kname($ac_kid) . ': '
+            . ((int) $ac_r['stand'] === 1 ? 'erreichbar' : ((int) $ac_r['stand'] === 0 ? 'nicht erreichbar' : 'nicht pruefbar'))
+            . ($ac_r['grund'] !== '' ? ' (' . $ac_r['grund'] . ')' : '')
+            . ($ac_r['adresse'] !== '' ? ', ' . $ac_r['adresse'] : '') . ', ' . (int) $ac_r['dauer_ms'] . ' ms');
+    }
+    cam_rtsp_pruefung_merken($ac_rpe);
+    $ac_note = cam_t('TEST.M_RTSP') . ' ' . implode(' ', $ac_teile);
+    $ac_note_rot = $ac_rot;
+    $ac_tab = 'tab-test';
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['timelapsenow']) && function_exists('cam_timelapse')) {
     list($ac_ok, $ac_info) = cam_timelapse();
     $ac_note = sprintf(cam_t($ac_ok ? 'TEXT.M_ZEITRAFFER_OK' : 'TEXT.M_BILD_FEHL'), ac_e($ac_info));
@@ -381,9 +415,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
      * uebrigen Felder werden gespeichert. */
     $ac_fehler = array();
     $ac_hinweise = array();
-    $ac_setzen = function ($schluessel, $wert) use (&$ac_new, &$ac_fehler) {
+    // X-2: die beanstandeten Felder, fuer die Markierung nach der Umleitung.
+    $ac_bean = array();
+    $ac_setzen = function ($schluessel, $wert) use (&$ac_new, &$ac_fehler, &$ac_bean) {
         $g = cam_wert_pruefen($schluessel, $wert);
         if ($g !== '') {
+            $ac_bean[] = $schluessel;
             $zeige = (strpos($schluessel, 'pass') === 0) ? '***' : cam_zugang_maske((string) $wert);
             $ac_fehler[] = sprintf(cam_t('TEXT.WERT_ABGEWIESEN'), ac_e($schluessel), ac_e($zeige), ac_e($g));
             return false;
@@ -392,9 +429,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         return true;
     };
     /* Zahlen: leer heisst $leer (null = leer ist unzulaessig). */
-    $ac_zahl = function ($schluessel, $roh, $leer) use ($ac_setzen, &$ac_fehler) {
+    $ac_zahl = function ($schluessel, $roh, $leer) use ($ac_setzen, &$ac_fehler, &$ac_bean) {
         $roh = trim((string) $roh);
         if ($roh === '' && $leer === null) {
+            $ac_bean[] = $schluessel;
             $ac_fehler[] = sprintf(cam_t('TEXT.WERT_ABGEWIESEN'), ac_e($schluessel), '&laquo;&raquo;', 'leer');
             return false;
         }
@@ -450,6 +488,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         $ac_nm = trim((string) $ac_f('name'));
         if ($ac_nm !== '' && in_array(strtolower($ac_nm), $ac_namen, true)) {
             $ac_fehler[] = sprintf(cam_t('TEXT.NAME_DOPPELT'), $ac_i, ac_e($ac_nm));
+            $ac_bean[] = 'name' . $ac_s;
         } elseif ($ac_setzen('name' . $ac_s, $ac_nm) && $ac_nm !== '') {
             $ac_namen[] = strtolower($ac_nm);
         }
@@ -459,6 +498,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         if ($ac_res !== '' && (!preg_match('/^[A-Za-z0-9x,]+\z/', $ac_res) || stripos($ac_res, 'http') === 0)) {
             $ac_fehler[] = sprintf(cam_t('TEXT.WERT_ABGEWIESEN'), ac_e('resolution' . $ac_s), ac_e($ac_res),
                                    cam_t('TEXT.RES_ABGEWIESEN'));
+            $ac_bean[] = 'resolution' . $ac_s;
         } else {
             $ac_setzen('resolution' . $ac_s, $ac_res);
         }
@@ -489,12 +529,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         $ac_mu = cam_zugang_entmaske(trim((string) $ac_f('mjpeg_url')), $ac_alt['mjpeg_url' . $ac_s]);
         if ($ac_mu !== '' && !preg_match('#^https?://#i', $ac_mu)) {
             $ac_fehler[] = sprintf(cam_t('TEXT.ADRESSE_VERWORFEN'), $ac_i, 'http://', ac_e(cam_zugang_maske($ac_mu)));
+            $ac_bean[] = 'mjpeg_url' . $ac_s;
         } else {
             $ac_setzen('mjpeg_url' . $ac_s, $ac_mu);
         }
         $ac_ru = cam_zugang_entmaske(trim((string) $ac_f('rtsp_url')), $ac_alt['rtsp_url' . $ac_s]);
         if ($ac_ru !== '' && !preg_match('#^rtsp://#i', $ac_ru)) {
             $ac_fehler[] = sprintf(cam_t('TEXT.ADRESSE_VERWORFEN'), $ac_i, 'rtsp://', ac_e(cam_zugang_maske($ac_ru)));
+            $ac_bean[] = 'rtsp_url' . $ac_s;
         } else {
             $ac_setzen('rtsp_url' . $ac_s, $ac_ru);
         }
@@ -523,6 +565,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         $ac_notify['push_minutes'] = (int) $ac_pm;
     } else {
         $ac_fehler[] = sprintf(cam_t('TEXT.WERT_ABGEWIESEN'), 'push_minutes', ac_e($ac_pm), ac_e($ac_pmg));
+        $ac_bean[] = 'push_minutes';
     }
     $ac_new['notify'] = $ac_notify;
     /* mqtt_enabled und mqtt_topic werden hier NICHT mehr angefasst: die
@@ -548,14 +591,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
     $ac_zahl('ai_min', ac_post('ai_min'), null);
     $ac_setzen('webhook1', trim(ac_post('webhook1')));
     $ac_setzen('webhook2', trim(ac_post('webhook2')));
-    if (cam_config_save($ac_new)) {
-        $ac_saved = true;
-        /* Beanstandungen werden GEMELDET, nicht verschwiegen - und sie
-           verhindern das Speichern der uebrigen Felder nicht. Alle auf einmal,
-           damit niemand einen Fehler nach dem anderen korrigiert. */
-        if ($ac_fehler) {
-            $ac_err = implode(' ', $ac_fehler);
+    if ($ac_fehler) {
+        /* Beanstandungen werden GEMELDET, alle auf einmal, damit niemand einen
+           Fehler nach dem anderen korrigiert - und GESPEICHERT WIRD NICHTS
+           (X-2, Regeln/04: "die Konfiguration ist unveraendert"; so fuer
+           Heimkino am 30.09.2026 entschieden, Entscheidung 15). Bis 1.9.25
+           wurden die uebrigen Felder trotzdem gespeichert, damit niemand alles
+           neu tippt; das leistet jetzt die Rueckreise der Eingaben, und
+           "gespeichert" neben "beanstandet" hatte nur verwirrt. */
+        $ac_eingaben = cam_eingaben_sammeln('settings', $ac_bean, $ac_alt);
+        $ac_err = implode(' ', $ac_fehler) . ' ' . cam_t('TEXT.EINGABEN_ZURUECK');
+        if ($ac_eingaben['neu_eintragen']) {
+            $ac_err .= ' ' . sprintf(cam_t('TEXT.EINGABEN_NEU_EINTRAGEN'),
+                                     ac_e(implode(', ', $ac_eingaben['neu_eintragen'])));
         }
+        $ac_note = '';
+    } elseif (cam_config_save($ac_new)) {
+        $ac_saved = true;
         if ($ac_hinweise) {
             $ac_note = trim($ac_note . ' ' . implode(' ', $ac_hinweise));
         }
@@ -586,6 +638,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_sichern'])) {
         '_plugin'  => 'ACTi Kamera (' . $ac_plugin . ')' . ($ac_fass !== '' ? ', Fassung ' . $ac_fass : ''),
         '_stand'   => date('c'),
     );
+    /* X-3: Wuerde das Zurueckspielen diese Datei abweisen, sagt es der Kopf -
+       mit den Namen, nie mit Werten. Geliefert wird sie trotzdem. */
+    $ac_x3 = cam_rueckspiel_befund();
+    if ($ac_x3) {
+        $ac_kopf['_warnung'] = sprintf(cam_t('TEXT.SICH_X3_KOPF'), implode(', ', $ac_x3));
+    }
     $cam_js = json_encode($ac_kopf + cam_config(),
         JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($cam_js !== false) {
@@ -666,9 +724,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_zurueck'])) {
  * ================================================================== */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && function_exists('cam_einmal_schreiben')) {
     if (cam_einmal_schreiben(array('saved' => $ac_saved, 'note' => $ac_note,
-                                   'note_rot' => $ac_note_rot, 'err' => $ac_err))) {
+                                   'note_rot' => $ac_note_rot, 'err' => $ac_err,
+                                   'eingaben' => $ac_eingaben))) {
         header('Location: index.php?form=' . substr($ac_tab, 4), true, 303);
         exit;
+    }
+    // Ohne Umleitung (Meldung nicht ablegbar): die Eingaben gleich zeigen.
+    if (is_array($ac_eingaben)) {
+        cam_eingaben_aktiv($ac_eingaben);
     }
 } elseif (function_exists('cam_einmal_lesen')) {
     $ac_em = cam_einmal_lesen();
@@ -677,6 +740,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && function_exists('cam_einmal_schreib
         $ac_note = (string) $ac_em['note'];
         $ac_note_rot = !empty($ac_em['note_rot']);
         $ac_err = (string) $ac_em['err'];
+        // X-2: nur nach einer Beanstandung traegt die Meldung Eingaben.
+        if (is_array($ac_em['eingaben'])) {
+            cam_eingaben_aktiv($ac_em['eingaben']);
+        }
     }
 }
 
@@ -844,6 +911,9 @@ if ($ac_rahmen) {
     background-repeat: no-repeat; background-position: right 10px center;
     padding-right: 32px; cursor: pointer; }
 .sm-tbl select { padding-right: 28px; background-position: right 7px center; }
+/* Eigene Ergaenzung, nicht aus der Vorlage (X-2, Regeln/04): das Feld, das
+   nach einer Abweisung beanstandet ist. */
+.acw .sm-beanstandet { border: 2px solid #c62828 !important; background: #fff5f5 !important; }
 
 </style>
 <div class="acw">
@@ -883,6 +953,17 @@ if ($ac_rahmen) {
 
 <!-- ================= Einstellungen ================= -->
 <div class="sm-pane<?= $ac_tab === 'tab-settings' ? ' sm-active' : '' ?>" id="tab-settings">
+<?php
+/* X-2: nach einer Beanstandung zeigt das Formular die eingetippten Werte -
+   nur bis </form>, danach gelten wieder die gespeicherten. */
+$ac_cfg_gespeichert = $ac_cfg;
+$ac_notify_gespeichert = $ac_notify;
+$ac_cfg = cam_eingaben_ueberlagern($ac_cfg, '', array('pruef_minuten', 'mindestpause', 'keep_days',
+    'clip_seconds', 'clip_fps', 'keep_max', 'keep_mb', 'timelapse', 'timelapse_time', 'ai_url', 'ai_min',
+    'webhook1', 'webhook2', 'stream_fps', 'stream_maxsec', 'stream_mode', 'bild_fest'));
+$ac_notify['push'] = cam_eingabe('notify_push', $ac_notify['push']);
+$ac_notify['push_minutes'] = cam_eingabe('push_minutes', $ac_notify['push_minutes']);
+?>
 <form action="index.php" method="post">
 <input data-role="none" type="hidden" name="save" value="1">
 <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
@@ -900,6 +981,11 @@ foreach ($ac_zeigen as $ac_i):
     $ac_s = $ac_i > 1 ? (string) $ac_i : '';
     $ac_k = cam_kcfg($ac_i);
     $ac_neu = trim((string) $ac_k['host']) === '' && $ac_i > 1;
+    // Der Loesch-Haken haengt am GESPEICHERTEN Zugang, nicht an der Eingabe.
+    $ac_zugang_da = (string) $ac_k['user'] !== '' || (string) $ac_k['pass'] !== '';
+    $ac_k = cam_eingaben_ueberlagern($ac_k, $ac_s, array('name', 'host', 'user', 'auth', 'snapurl',
+        'snapcmd', 'resolution', 'timeout', 'channel', 'mjpeg_url', 'rtsp_url', 'rtsp_port',
+        'rtsp_stream', 'rtsp_quality'));
 ?>
 <h2><?= $ac_neu ? ac_e(sprintf(cam_t('TEXT.KAMERA_HINZU'), $ac_i))
        : ac_e(cam_t('TEXT.KAMERA') . ' ' . ($ac_i > 1 || count($ac_zeigen) > 1
@@ -907,30 +993,30 @@ foreach ($ac_zeigen as $ac_i):
 <div class="sm-row">
     <div>
         <label><?php echo cam_t('TEXT.L_KAMERANAME'); ?></label>
-        <input data-role="none" type="text" name="name<?= $ac_s ?>" value="<?= ac_e($ac_k['name']) ?>" placeholder="<?php echo cam_t('TEXT.P_KAMERANAME'); ?>">
+        <input data-role="none" type="text" name="name<?= $ac_s ?>"<?= cam_markierung('name' . $ac_s) ?> value="<?= ac_e($ac_k['name']) ?>" placeholder="<?php echo cam_t('TEXT.P_KAMERANAME'); ?>">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.ADRESSE_IP_ODER_HOSTNAME'); ?></label>
-        <input data-role="none" type="text" name="host<?= $ac_s ?>" value="<?= ac_e($ac_k['host']) ?>" placeholder="192.168.1.17">
+        <input data-role="none" type="text" name="host<?= $ac_s ?>"<?= cam_markierung('host' . $ac_s) ?> value="<?= ac_e($ac_k['host']) ?>" placeholder="192.168.1.17">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.BENUTZER'); ?></label>
-        <input data-role="none" type="text" name="user<?= $ac_s ?>" value="<?= ac_e($ac_k['user']) ?>" placeholder="admin">
+        <input data-role="none" type="text" name="user<?= $ac_s ?>"<?= cam_markierung('user' . $ac_s) ?> value="<?= ac_e($ac_k['user']) ?>" placeholder="admin">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.PASSWORT'); ?></label>
-        <input data-role="none" type="password" name="pass<?= $ac_s ?>" value="" placeholder="<?= ac_e($ac_k['pass'] !== '' ? cam_t('TEXT.P_PASS_GESETZT') : cam_t('TEXT.P_PASS_LEER')) ?>">
+        <input data-role="none" type="password" name="pass<?= $ac_s ?>"<?= cam_markierung('pass' . $ac_s) ?> value="" placeholder="<?= ac_e($ac_k['pass'] !== '' ? cam_t('TEXT.P_PASS_GESETZT') : cam_t('TEXT.P_PASS_LEER')) ?>">
     </div>
-<?php if ((string) $ac_k['user'] !== '' || (string) $ac_k['pass'] !== '') { ?>
+<?php if ($ac_zugang_da) { ?>
     <div>
-        <label style="font-weight:400;"><input data-role="none" type="checkbox" name="zugang_loeschen<?= $ac_s ?>" value="1"> <?php echo cam_t('TEXT.L_ZUGANG_LOESCHEN'); ?></label>
+        <label style="font-weight:400;"><input data-role="none" type="checkbox" name="zugang_loeschen<?= $ac_s ?>" value="1"<?= cam_eingabe('zugang_loeschen' . $ac_s, '0') === '1' ? ' checked' : '' ?>> <?php echo cam_t('TEXT.L_ZUGANG_LOESCHEN'); ?></label>
     </div>
 <?php } ?>
 </div>
 <div class="sm-row" style="margin-top:8px;">
     <div style="max-width:340px;">
         <label><?php echo cam_t('TEXT.ANMELDEVERFAHREN'); ?></label>
-        <select data-role="none" name="auth<?= $ac_s ?>">
+        <select data-role="none" name="auth<?= $ac_s ?>"<?= cam_markierung('auth' . $ac_s) ?>>
             <option value="auto"<?= $ac_k['auth'] === 'auto' ? ' selected' : '' ?>><?php echo cam_t('TEXT.AUTOMATISCH_AUSPROBIEREN_EMPFOHLEN'); ?></option>
             <option value="url"<?= $ac_k['auth'] === 'url' ? ' selected' : '' ?>><?php echo cam_t('TEXT.NUR_USER_PWD_IN_DER_URL_ACTI_STAND'); ?></option>
             <option value="basic"<?= $ac_k['auth'] === 'basic' ? ' selected' : '' ?>><?php echo cam_t('TEXT.HTTP_BASIC'); ?></option>
@@ -946,7 +1032,7 @@ foreach ($ac_zeigen as $ac_i):
 <div class="sm-row" style="margin-top:10px;">
     <div class="acw-breit">
         <label><?php echo cam_t('TEXT.VOLLSTNDIGE_SCHNAPPSCHUSS_URL_EMPF'); ?></label>
-        <input data-role="none" type="text" name="snapurl<?= $ac_s ?>" value="<?= ac_e(cam_zugang_maske($ac_k['snapurl'])) ?>" placeholder="<?php echo cam_t('TEXT.HTTP'); ?>KAMERA/cgi-bin/encoder?<?php echo cam_t('TEXT.USER_PWD'); ?>SNAPSHOT=N1920x1080,100<?php echo cam_t('TEXT.DUMMY_N'); ?>">
+        <input data-role="none" type="text" name="snapurl<?= $ac_s ?>"<?= cam_markierung('snapurl' . $ac_s) ?> value="<?= ac_e(cam_zugang_maske($ac_k['snapurl'])) ?>" placeholder="<?php echo cam_t('TEXT.HTTP'); ?>KAMERA/cgi-bin/encoder?<?php echo cam_t('TEXT.USER_PWD'); ?>SNAPSHOT=N1920x1080,100<?php echo cam_t('TEXT.DUMMY_N'); ?>">
 <?php if ($ac_i === 1) { ?>
         <div class="sm-small"><?php echo cam_t('TEXT.IST_DIESES_FELD_GEFLLT_NUTZT_DAS_P'); ?> <b><?php echo cam_t('TEXT.GENAU_DIESE_ADRESSE'); ?></b> <?php echo cam_t('TEXT.OHNE_EIGENES_ZUSAMMENBAUEN_OHNE_UM'); ?> <span class="sm-mono">ERROR: not authorized</span>.<br>
         <b><?php echo cam_t('TEXT.HINWEIS'); ?></b> <?php echo cam_t('TEXT.DIESE_URL_ENTHLT_DAS_KAMERA_PASSWO'); ?><span class="sm-mono">chmod 600</span><?php echo cam_t('TEXT.UND_WIRD_IN_PROTOKOLL_UND_DIAGNOSE'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CAM_PHP'); ?></span> <?php echo cam_t('TEXT.OHNE_ZUGANGSDATEN'); ?></div>
@@ -954,47 +1040,47 @@ foreach ($ac_zeigen as $ac_i):
     </div>
     <div class="acw-breit">
         <label><?php echo cam_t('TEXT.SCHNAPPSCHUSS_BEFEHL_NUR_DER_TEIL_'); ?> <span class="sm-mono">USER=…&amp;PWD=…&amp;</span> <?php echo cam_t('TEXT.WIRD_IGNORIERT_WENN_OBEN_EINE_URL_'); ?></label>
-        <input data-role="none" type="text" name="snapcmd<?= $ac_s ?>" value="<?= ac_e(cam_zugang_maske($ac_k['snapcmd'])) ?>" placeholder="SNAPSHOT=N1920x1080,100&amp;DUMMY=n">
+        <input data-role="none" type="text" name="snapcmd<?= $ac_s ?>"<?= cam_markierung('snapcmd' . $ac_s) ?> value="<?= ac_e(cam_zugang_maske($ac_k['snapcmd'])) ?>" placeholder="SNAPSHOT=N1920x1080,100&amp;DUMMY=n">
 <?php if ($ac_i === 1) { ?>
         <div class="sm-small"><?php echo cam_t('TEXT.DAS_IST_DER_TEIL_HINTER'); ?> <span class="sm-mono">USER=…&amp;PWD=…&amp;</span><?php echo cam_t('TEXT.DER_VORGABEWERT_STAMMT_AUS_EINER_R'); ?><span class="sm-mono">,100</span><?php echo cam_t('TEXT.UND_DEM_ABSCHLIESSENDEN'); ?> <span class="sm-mono">&amp;DUMMY=n</span><?php echo cam_t('TEXT.DAS_MANCHE_FIRMWARE_ERWARTET_WER_E'); ?></div>
 <?php } ?>
     </div>
     <div>
         <label><?php echo cam_t('TEXT.AUFLSUNG_NUR_ALS_ERSATZ'); ?></label>
-        <input data-role="none" type="text" name="resolution<?= $ac_s ?>" value="<?= ac_e($ac_k['resolution']) ?>" placeholder="<?php echo ac_e(cam_t('TEXT.P_AUFLOESUNG')); ?>">
+        <input data-role="none" type="text" name="resolution<?= $ac_s ?>"<?= cam_markierung('resolution' . $ac_s) ?> value="<?= ac_e($ac_k['resolution']) ?>" placeholder="<?php echo ac_e(cam_t('TEXT.P_AUFLOESUNG')); ?>">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.ZEITLIMIT_JE_BILD_SEKUNDEN'); ?></label>
-        <input data-role="none" type="number" name="timeout<?= $ac_s ?>" value="<?= (int) $ac_k['timeout'] ?>" min="2" max="30">
+        <input data-role="none" type="number" name="timeout<?= $ac_s ?>"<?= cam_markierung('timeout' . $ac_s) ?> value="<?= ac_e((string) $ac_k['timeout']) ?>" min="2" max="30">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.KANAL'); ?></label>
-        <input data-role="none" type="number" name="channel<?= $ac_s ?>" value="<?= (int) $ac_k['channel'] ?>" min="1" max="16">
+        <input data-role="none" type="number" name="channel<?= $ac_s ?>"<?= cam_markierung('channel' . $ac_s) ?> value="<?= ac_e((string) $ac_k['channel']) ?>" min="1" max="16">
     </div>
 </div>
 <div class="sm-row" style="margin-top:8px;">
     <div class="acw-breit">
         <label><?php echo cam_t('TEXT.ADRESSE_DES_KAMERASTROMS_LEER'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CGI_BIN_CMD_SYSTEM_GET_STREAM'); ?></span>)</label>
-        <input type="text" data-role="none" name="mjpeg_url<?= $ac_s ?>" value="<?= ac_e(cam_zugang_maske((string) $ac_k['mjpeg_url'])) ?>">
+        <input type="text" data-role="none" name="mjpeg_url<?= $ac_s ?>"<?= cam_markierung('mjpeg_url' . $ac_s) ?> value="<?= ac_e(cam_zugang_maske((string) $ac_k['mjpeg_url'])) ?>">
     </div>
     <div class="acw-breit">
         <label><?php echo cam_t('TEXT.RTSP_ADRESSE_LEER_BEI_DER_KAMERA_E'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.GET_STREAM'); ?></span>)</label>
-        <input type="text" data-role="none" name="rtsp_url<?= $ac_s ?>" placeholder="<?php echo ac_e(cam_t('TEXT.P_RTSP')); ?>" value="<?= ac_e(cam_zugang_maske((string) $ac_k['rtsp_url'])) ?>">
+        <input type="text" data-role="none" name="rtsp_url<?= $ac_s ?>"<?= cam_markierung('rtsp_url' . $ac_s) ?> placeholder="<?php echo ac_e(cam_t('TEXT.P_RTSP')); ?>" value="<?= ac_e(cam_zugang_maske((string) $ac_k['rtsp_url'])) ?>">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.RTSP_PORT'); ?></label>
-        <input type="number" min="1" max="65535" data-role="none" name="rtsp_port<?= $ac_s ?>" value="<?= ac_e((string) $ac_k['rtsp_port']) ?>">
+        <input type="number" min="1" max="65535" data-role="none" name="rtsp_port<?= $ac_s ?>"<?= cam_markierung('rtsp_port' . $ac_s) ?> value="<?= ac_e((string) $ac_k['rtsp_port']) ?>">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.WELCHER_STROM'); ?></label>
-        <select data-role="none" name="rtsp_stream<?= $ac_s ?>">
+        <select data-role="none" name="rtsp_stream<?= $ac_s ?>"<?= cam_markierung('rtsp_stream' . $ac_s) ?>>
             <option value="2"<?= ((int) $ac_k['rtsp_stream']) !== 1 ? ' selected' : '' ?>><?php echo cam_t('TEXT.STREAM2_NEBENSTROM_KLEINER_UND_SPA'); ?></option>
             <option value="1"<?= ((int) $ac_k['rtsp_stream']) === 1 ? ' selected' : '' ?>><?php echo cam_t('TEXT.STREAM1_HAUPTSTROM_VOLLE_AUFLSUNG'); ?></option>
         </select>
     </div>
     <div>
         <label><?php echo cam_t('TEXT.BILDGTE_BEI_RTSP_2_FEIN_UND_GRO_15'); ?></label>
-        <input type="number" min="2" max="15" data-role="none" name="rtsp_quality<?= $ac_s ?>" value="<?= ac_e((string) $ac_k['rtsp_quality']) ?>">
+        <input type="number" min="2" max="15" data-role="none" name="rtsp_quality<?= $ac_s ?>"<?= cam_markierung('rtsp_quality' . $ac_s) ?> value="<?= ac_e((string) $ac_k['rtsp_quality']) ?>">
     </div>
 </div>
 <?php if ($ac_i === 1) { ?>
@@ -1009,23 +1095,23 @@ foreach ($ac_zeigen as $ac_i):
 <div class="sm-row">
     <div>
         <label><?php echo cam_t('TEXT.L_PRUEF_MINUTEN'); ?></label>
-        <input data-role="none" type="number" name="pruef_minuten" value="<?= (int) $ac_cfg['pruef_minuten'] ?>" min="0" max="1440">
+        <input data-role="none" type="number" name="pruef_minuten"<?= cam_markierung('pruef_minuten') ?> value="<?= ac_e((string) $ac_cfg['pruef_minuten']) ?>" min="0" max="1440">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.L_MINDESTPAUSE'); ?></label>
-        <input data-role="none" type="number" name="mindestpause" value="<?= (int) $ac_cfg['mindestpause'] ?>" min="0" max="3600">
+        <input data-role="none" type="number" name="mindestpause"<?= cam_markierung('mindestpause') ?> value="<?= ac_e((string) $ac_cfg['mindestpause']) ?>" min="0" max="3600">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.AUFBEWAHRUNG_TAGE'); ?></label>
-        <input data-role="none" type="number" name="keep_days" value="<?= (int) $ac_cfg['keep_days'] ?>" min="0" max="3650">
+        <input data-role="none" type="number" name="keep_days"<?= cam_markierung('keep_days') ?> value="<?= ac_e((string) $ac_cfg['keep_days']) ?>" min="0" max="3650">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.CLIPLAENGE_SEKUNDEN'); ?></label>
-        <input data-role="none" type="number" name="clip_seconds" value="<?= (int) $ac_cfg['clip_seconds'] ?>" min="2" max="60">
+        <input data-role="none" type="number" name="clip_seconds"<?= cam_markierung('clip_seconds') ?> value="<?= ac_e((string) $ac_cfg['clip_seconds']) ?>" min="2" max="60">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.BILDER_JE_SEKUNDE_IM_CLIP'); ?></label>
-        <input data-role="none" type="number" name="clip_fps" value="<?= (int) $ac_cfg['clip_fps'] ?>" min="1" max="5">
+        <input data-role="none" type="number" name="clip_fps"<?= cam_markierung('clip_fps') ?> value="<?= ac_e((string) $ac_cfg['clip_fps']) ?>" min="1" max="5">
     </div>
 </div>
 <div class="sm-small"><?php echo cam_t('TEXT.EIN_CLIP_IST_EINE_BILDSERIE_DAMIT_'); ?></div>
@@ -1035,11 +1121,11 @@ foreach ($ac_zeigen as $ac_i):
 <div class="sm-row" style="margin-top:10px;">
     <div>
         <label><?php echo cam_t('TEXT.HCHSTZAHL_DATEIEN_JE_ARCHIV'); ?></label>
-        <input data-role="none" type="number" name="keep_max" value="<?= (int) $ac_cfg['keep_max'] ?>" min="0" max="100000">
+        <input data-role="none" type="number" name="keep_max"<?= cam_markierung('keep_max') ?> value="<?= ac_e((string) $ac_cfg['keep_max']) ?>" min="0" max="100000">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.L_KEEP_MB'); ?></label>
-        <input data-role="none" type="number" name="keep_mb" value="<?= (int) $ac_cfg['keep_mb'] ?>" min="0" max="1000000">
+        <input data-role="none" type="number" name="keep_mb"<?= cam_markierung('keep_mb') ?> value="<?= ac_e((string) $ac_cfg['keep_mb']) ?>" min="0" max="1000000">
     </div>
 </div>
 <div class="sm-small"><?php echo cam_t('TEXT.DIE_BEREINIGUNG_LUFT_TGLICH_UM'); ?> <b><?php echo cam_t('TEXT.03_35_UHR'); ?></b> <?php echo cam_t('TEXT.UND_GREIFT_AUF_BILDER_BILDSERIEN_U'); ?> <b><?php echo cam_t('TEXT.0_ODER_LEER_UNBEGRENZT'); ?></b> <?php echo cam_t('TEXT.BEI_ALTER'); ?> <i>und</i> <?php echo cam_t('TEXT.ANZAHL_DIE_JEWEILS_NEUESTEN_DATEIE'); ?></div>
@@ -1051,7 +1137,7 @@ foreach ($ac_zeigen as $ac_i):
 <div class="sm-row" style="margin-top:6px;">
     <div style="max-width:220px;">
         <label><?php echo cam_t('TEXT.UHRZEIT_HH_MM'); ?></label>
-        <input data-role="none" type="text" name="timelapse_time" value="<?= ac_e($ac_cfg['timelapse_time']) ?>" placeholder="12:00">
+        <input data-role="none" type="text" name="timelapse_time"<?= cam_markierung('timelapse_time') ?> value="<?= ac_e($ac_cfg['timelapse_time']) ?>" placeholder="12:00">
     </div>
 </div>
 <div class="sm-small"><?php echo cam_t('TEXT.DIE_BILDER_LANDEN_IM_UNTERORDNER'); ?> <span class="sm-mono">timelapse</span><?php echo cam_t('TEXT.DER_DATEINAME_IST_DAS_DATUM_IST'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.FFMPEG'); ?></span> <?php echo cam_t('TEXT.AUF_DEM_LOXBERRY_VORHANDEN_WIRD_NA'); ?> 
@@ -1062,11 +1148,11 @@ foreach ($ac_zeigen as $ac_i):
 <div class="sm-row">
     <div>
         <label><?php echo cam_t('TEXT.ERKENNUNGS_ENDPUNKT'); ?></label>
-        <input data-role="none" type="text" name="ai_url" value="<?= ac_e($ac_cfg['ai_url']) ?>" placeholder="http://192.0.2.10:32168/v1/vision/detection">
+        <input data-role="none" type="text" name="ai_url"<?= cam_markierung('ai_url') ?> value="<?= ac_e($ac_cfg['ai_url']) ?>" placeholder="http://192.0.2.10:32168/v1/vision/detection">
     </div>
     <div style="max-width:220px;">
         <label><?php echo cam_t('TEXT.MINDEST_KONFIDENZ'); ?></label>
-        <input data-role="none" type="number" name="ai_min" value="<?= (int) $ac_cfg['ai_min'] ?>" min="1" max="99">
+        <input data-role="none" type="number" name="ai_min"<?= cam_markierung('ai_min') ?> value="<?= ac_e((string) $ac_cfg['ai_min']) ?>" min="1" max="99">
     </div>
 </div>
 <div class="sm-small"><?php echo cam_t('TEXT.BENTIGT_EINEN_ERKENNUNGSDIENST_AUF'); ?> 
@@ -1076,11 +1162,11 @@ foreach ($ac_zeigen as $ac_i):
 <div class="sm-row">
     <div>
         <label><?php echo cam_t('TEXT.WEBHOOK_1_POST_MIT_JSON'); ?></label>
-        <input data-role="none" type="text" name="webhook1" value="<?= ac_e($ac_cfg['webhook1']) ?>" placeholder="https://…">
+        <input data-role="none" type="text" name="webhook1"<?= cam_markierung('webhook1') ?> value="<?= ac_e($ac_cfg['webhook1']) ?>" placeholder="https://…">
     </div>
     <div>
         <label><?php echo cam_t('TEXT.WEBHOOK_2_GET_MIT_PARAMETERN'); ?></label>
-        <input data-role="none" type="text" name="webhook2" value="<?= ac_e($ac_cfg['webhook2']) ?>" placeholder="https://…">
+        <input data-role="none" type="text" name="webhook2"<?= cam_markierung('webhook2') ?> value="<?= ac_e($ac_cfg['webhook2']) ?>" placeholder="https://…">
     </div>
 </div>
 <div class="sm-small"><?php echo cam_t('TEXT.BEIDE_WERDEN_NACH_JEDER_AUFNAHME_A'); ?> 
@@ -1094,7 +1180,7 @@ foreach ($ac_zeigen as $ac_i):
 <div class="sm-row" style="margin-top:6px;">
     <div style="max-width:260px;">
         <label><?php echo cam_t('TEXT.MELDEFENSTER_NACH_EINER_AUFNAHME_M'); ?></label>
-        <input data-role="none" type="number" name="push_minutes" value="<?= (int) $ac_notify['push_minutes'] ?>" min="1" max="30">
+        <input data-role="none" type="number" name="push_minutes"<?= cam_markierung('push_minutes') ?> value="<?= ac_e((string) $ac_notify['push_minutes']) ?>" min="1" max="30">
     </div>
 </div>
 <div class="sm-small"><?php echo cam_t('TEXT.NACH_JEDER_AUFNAHME_STEHT'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.PUSHAKTIV_1'); ?></span> <?php echo cam_t('TEXT.FR_DIESE_ZEITSPANNE_DEN_PUSH_SELBS'); ?></div>
@@ -1115,11 +1201,11 @@ foreach ($ac_zeigen as $ac_i):
 <span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_STREAM_PHP'); ?><?= $ac_bt1 ?></span> <?php echo cam_t('TEXT.LIVEBILD_INTVIDEOURL'); ?><br>
 <span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_STREAM_PHP_EINZELN_1'); ?><?= $ac_bt ?></span> <?php echo cam_t('TEXT.EINZELBILD_INTALERTIMAGE'); ?></p>
 <label><?php echo cam_t('TEXT.BILDER_JE_SEKUNDE'); ?></label>
-<input type="number" step="0.1" min="0.2" max="10" data-role="none" name="stream_fps" value="<?= ac_e((string) $ac_cfg['stream_fps']) ?>">
+<input type="number" step="0.1" min="0.2" max="10" data-role="none" name="stream_fps"<?= cam_markierung('stream_fps') ?> value="<?= ac_e((string) $ac_cfg['stream_fps']) ?>">
 <label><?php echo cam_t('TEXT.HCHSTDAUER_EINES_STROMS_IN_SEKUNDE'); ?></label>
-<input type="number" min="5" max="900" data-role="none" name="stream_maxsec" value="<?= ac_e((string) $ac_cfg['stream_maxsec']) ?>">
+<input type="number" min="5" max="900" data-role="none" name="stream_maxsec"<?= cam_markierung('stream_maxsec') ?> value="<?= ac_e((string) $ac_cfg['stream_maxsec']) ?>">
 <label><?php echo cam_t('TEXT.BILDQUELLE'); ?></label>
-<select data-role="none" name="stream_mode">
+<select data-role="none" name="stream_mode"<?= cam_markierung('stream_mode') ?>>
 <option value="auto"<?= $ac_cfg['stream_mode'] === 'auto' ? ' selected' : '' ?>><?php echo cam_t('TEXT.AUTOMATISCH_KAMERASTROM_SONST_RTSP'); ?></option>
 <option value="mjpeg"<?= $ac_cfg['stream_mode'] === 'mjpeg' ? ' selected' : '' ?>><?php echo cam_t('TEXT.NUR_KAMERASTROM_GET_STREAM_EMPFOHL'); ?></option>
 <option value="rtsp"<?= $ac_cfg['stream_mode'] === 'rtsp' ? ' selected' : '' ?>><?php echo cam_t('TEXT.NUR_RTSP_FLSSIGES_VIDEO_BRAUCHT_FF'); ?></option>
@@ -1132,7 +1218,7 @@ foreach ($ac_zeigen as $ac_i):
 <p class="sm-hint"><?php echo cam_t('TEXT.BLEIBT_DAS_FELD_LEER_WIRD'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.RTSP_KAMERA_PORT_STREAMNR'); ?></span> <?php echo cam_t('TEXT.GEBILDET_BENUTZER_UND_PASSWORT_SET'); ?></p>
 <?php $ac_rr = cam_rtsp_url(true); if ($ac_rr === '') { $ac_rr = ''; } ?>
 <label><?php echo cam_t('TEXT.TOKEN_OPTIONAL_DANN_NUR_MIT'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.T_TOKEN'); ?></span> <?php echo cam_t('TEXT.ABRUFBAR'); ?></label>
-<input type="text" data-role="none" name="stream_token" value="<?= ac_e((string) $ac_cfg['stream_token']) ?>">
+<input type="text" data-role="none" name="stream_token"<?= cam_markierung('stream_token') ?> value="<?= ac_e((string) $ac_cfg['stream_token']) ?>">
 <p class="sm-hint"><?php echo cam_t('TEXT.TOKEN_HINWEIS_LOXONE'); ?></p>
 <div class="sm-row"><label><input data-role="none" type="checkbox" name="bild_fest" value="1"<?= !empty($ac_cfg['bild_fest']) ? ' checked' : '' ?>> <?php echo cam_t('TEXT.L_BILD_FEST'); ?></label></div>
 <p class="sm-hint"><?php echo cam_t('TEXT.H_BILD_FEST'); ?></p>
@@ -1141,10 +1227,16 @@ foreach ($ac_zeigen as $ac_i):
 <?php } ?>
 <div style="margin-top:16px;"><button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button></div>
 </form>
+<?php $ac_cfg = $ac_cfg_gespeichert; $ac_notify = $ac_notify_gespeichert; ?>
 
 <h2><?= cam_t('TEXT.H_SICHERUNG') ?></h2>
 <div class="sm-hinweis"><?= cam_t('TEXT.SICH_ERKLAERUNG') ?></div>
 <div class="sm-warnung"><?= cam_t('TEXT.SICH_WARNUNG') ?></div>
+<?php /* X-3: dieselbe Pruefung wie das Zurueckspielen, nur Namen. */
+$ac_x3 = cam_rueckspiel_befund();
+if ($ac_x3) { ?>
+<div class="sm-alert sm-warn"><?= sprintf(cam_t('TEXT.SICH_X3_WARNUNG'), ac_e(implode(', ', $ac_x3))) ?></div>
+<?php } ?>
 <div class="sm-legende">
 <span><i class="sm-punkt sm-b-lesen"></i> <?php echo cam_t('LEGENDE.LESEN'); ?></span>
 <span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span>
@@ -1186,20 +1278,30 @@ foreach ($ac_zeigen as $ac_i):
 <div class="sm-small"><?php echo cam_t('MQTT.ABO_TEXT'); ?></div>
 <div class="sm-mono" style="display:block;padding:8px;margin:6px 0;"><?= ac_e($ac_cfg['mqtt_topic']) ?>/#</div>
 <?php
-/* Drei Ausgaenge, nicht einer. Der V1-Satz gilt nur fuer Gateway V1; ab V2
+/* Vier Ausgaenge, nicht einer. Der V1-Satz gilt nur fuer Gateway V1; ab V2
  * erscheint die Themengruppe von selbst. Ist die Fassung nicht feststellbar,
- * werden BEIDE Faelle genannt statt einer behauptet. */
+ * werden BEIDE Faelle genannt statt einer behauptet.
+ *
+ * Die Abo-Datei zaehlt mit (ACTiKamera-a1, X-6): seit 1.9.23 schreibt das
+ * Plugin mqtt_subscriptions.cfg, und das Gateway abonniert daraus selbst
+ * (Regeln/07). Bis 1.9.25 stand unter V1 trotzdem immer der rote Satz, das
+ * Abo gehoere von Hand unter Subscriptions - auch wenn die Datei es schon
+ * trug. Rot ist er jetzt nur noch, wenn die Datei fehlt oder ein anderes
+ * Praefix traegt. */
 $ac_gwf = (int) $ac_mz['fassung'];
+list($ac_abo_pfad, $ac_abo_da) = cam_mqtt_abo_datei(false);
 if ($ac_gwf >= 2) { ?>
 <div class="sm-alert sm-ok"><?php echo cam_t('MQTT.ABO_V2'); ?> 
 <span class="sm-mono"><?= sprintf(cam_t('MQTT.ABO_GEMESSEN'), $ac_gwf) ?></span></div>
+<?php } elseif ($ac_abo_da) { ?>
+<div class="sm-alert sm-ok"><?php echo cam_t('MQTT.ABO_V1_DATEI'); ?><?php if ($ac_gwf === 1) { ?>
+<span class="sm-mono"><?= sprintf(cam_t('MQTT.ABO_GEMESSEN'), $ac_gwf) ?></span><?php } ?></div>
 <?php } elseif ($ac_gwf === 1) { ?>
 <div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_WARNUNG'); ?> 
 <span class="sm-mono"><?= sprintf(cam_t('MQTT.ABO_GEMESSEN'), $ac_gwf) ?></span></div>
 <?php } else { ?>
 <div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_UNBEKANNT'); ?></div>
 <?php } ?>
-<?php list($ac_abo_pfad, $ac_abo_da) = cam_mqtt_abo_datei(false); ?>
 <div class="sm-small"><?= sprintf(cam_t($ac_abo_da ? 'MQTT.ABO_DATEI_JA' : 'MQTT.ABO_DATEI_NEIN'),
     '<span class="sm-mono">' . ac_e($ac_abo_pfad) . '</span>',
     '<span class="sm-mono">' . ac_e(cam_mqtt_praefix($ac_cfg)) . '/#</span>') ?></div>
@@ -1226,9 +1328,9 @@ if ($ac_gwf >= 2) { ?>
 <input data-role="none" type="hidden" name="save_mqtt" value="1">
 <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
     <input data-role="none" type="hidden" name="activetab" value="tab-mqtt">
-<div class="sm-row"><label><input data-role="none" type="checkbox" name="mqtt_enabled" value="1"<?= !empty($ac_cfg['mqtt_enabled']) ? ' checked' : '' ?>> <?php echo cam_t('MQTT.L_EIN'); ?></label></div>
+<div class="sm-row"><label><input data-role="none" type="checkbox" name="mqtt_enabled" value="1"<?= cam_eingabe('mqtt_enabled', !empty($ac_cfg['mqtt_enabled']) ? '1' : '0') === '1' ? ' checked' : '' ?>> <?php echo cam_t('MQTT.L_EIN'); ?></label></div>
 <div class="sm-row"><label><?php echo cam_t('MQTT.L_TOPIC'); ?></label>
-<input data-role="none" type="text" name="mqtt_topic" value="<?= ac_e($ac_cfg['mqtt_topic']) ?>" size="24"></div>
+<input data-role="none" type="text" name="mqtt_topic"<?= cam_markierung('mqtt_topic') ?> value="<?= ac_e(cam_eingabe('mqtt_topic', $ac_cfg['mqtt_topic'])) ?>" size="24"></div>
 <div class="sm-legende"><span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span></div>
 <div class="sm-knopfreihe">
 <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button>
@@ -1527,7 +1629,14 @@ foreach ($ac_pr as $ac_z) {
 <div class="sm-knopfreihe">
 <a class="sm-btn sm-b-technik" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?diag=1&amp;token=<?= ac_e($ac_token) ?>" target="_blank"><?php echo cam_t('TEXT.DIAGNOSE_ALLE_VARIANTEN'); ?></a>
 <a class="sm-btn sm-b-technik" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?sys=1&amp;token=<?= ac_e($ac_token) ?>" target="_blank"><?php echo cam_t('TEXT.KAMERA_AUSKUNFT_2'); ?></a>
+<form action="index.php" method="post">
+    <input data-role="none" type="hidden" name="rtsppruefen" value="1">
+    <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
+    <input data-role="none" type="hidden" name="activetab" value="tab-test">
+    <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo cam_t('TEST.K_RTSP'); ?></button>
+</form>
 </div>
+<div class="sm-small"><?php echo cam_t('TEST.H_RTSP'); ?></div>
 
 <h3 class="sm-h3"><?php echo cam_t('TEXT.LST_ETWAS_AUS'); ?></h3>
 <div class="sm-knopfreihe">
