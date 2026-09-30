@@ -1837,7 +1837,7 @@ function cam_http($url, $timeout = 8, $auth = '', $id = 1)
         $body = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = ($body === false) ? ('cURL-Fehler: ' . curl_error($ch)) : '';
-        curl_close($ch);
+        if (PHP_VERSION_ID < 80000) { curl_close($ch); }
         return array($body, $code, $err);
     }
     /* ---------------- Rueckfall ohne cURL ----------------
@@ -2569,7 +2569,7 @@ function cam_ai($datei)
     ));
     $antwort = curl_exec($ch);
     $fehler = curl_error($ch);
-    curl_close($ch);
+    if (PHP_VERSION_ID < 80000) { curl_close($ch); }
     if ($antwort === false) {
         cam_log('FEHLER Objekterkennung: ' . $fehler);
         return array();
@@ -2655,7 +2655,7 @@ function cam_webhooks($name, $anlass, $objekte, $id = 1)
         $ac_a = curl_exec($ch);
         $ac_c = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $ac_f = curl_error($ch);
-        curl_close($ch);
+        if (PHP_VERSION_ID < 80000) { curl_close($ch); }
         if ($ac_a === false || $ac_c < 200 || $ac_c >= 300) {
             cam_log('Webhook 1 fehlgeschlagen: HTTP ' . $ac_c
                     . ($ac_f !== '' ? ' (' . $ac_f . ')' : ''));

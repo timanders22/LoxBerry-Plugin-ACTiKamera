@@ -199,7 +199,7 @@ if ($ac_mjpeg !== '' && function_exists('curl_init')) {
         });
     @curl_exec($ch);
     $ac_hcode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+    if (PHP_VERSION_ID < 80000) { curl_close($ch); }
 
     if ($ac_bekommen > 0) {
         echo "--" . $ac_grenze . "--\r\n";
