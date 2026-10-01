@@ -563,12 +563,19 @@ function cam_wertregeln()
         'pass'            => array('art' => 'text', 'max' => 128),
         'channel'         => array('art' => 'zahl', 'min' => 1, 'max' => 16),
         'resolution'      => array('art' => 'text', 'max' => 32),
-        'snapcmd'         => array('art' => 'text', 'max' => 512),
-        'snapurl'         => array('art' => 'text', 'max' => 512),
+        /* "streng": kein Leerraum, keine Anfuehrungszeichen, kein < > im Wert -
+           dieselbe Grenze wie das Formular (B-Nachzug 01.10.2026, Nr. 19).
+           "adresse": leer oder einer der genannten Anfaenge. Bis 1.9.26 waren
+           die drei Adressen hier "text": das Zurueckspielen nahm
+           "kamera/bild.jpg" an, das Formular wies es danach bei jedem
+           Speichern ab (gemessen, vb_acti2_bau_skripte/proben, Fall R1). */
+        'snapcmd'         => array('art' => 'text', 'max' => 512, 'streng' => true),
+        'snapurl'         => array('art' => 'adresse', 'max' => 512, 'streng' => true,
+                                   'anfang' => array('http://', 'https://')),
         'auth'            => array('art' => 'wahl', 'werte' => array('auto', 'url', 'basic', 'digest')),
         'timeout'         => array('art' => 'zahl', 'min' => 2, 'max' => 30),
-        'mjpeg_url'       => array('art' => 'text', 'max' => 512),
-        'rtsp_url'        => array('art' => 'text', 'max' => 512),
+        'mjpeg_url'       => array('art' => 'adresse', 'max' => 512, 'anfang' => array('http://', 'https://')),
+        'rtsp_url'        => array('art' => 'adresse', 'max' => 512, 'anfang' => array('rtsp://')),
         'rtsp_port'       => array('art' => 'zahl', 'min' => 1, 'max' => 65535),
         'rtsp_stream'     => array('art' => 'zahl', 'min' => 1, 'max' => 2),
         'rtsp_quality'    => array('art' => 'zahl', 'min' => 2, 'max' => 15),
@@ -739,7 +746,7 @@ function cam_wert_pruefen($schluessel, $wert)
     }
     /* Zeichenketten bleiben Zeichenketten: ein Token oder eine Adresse als
        Zahl wird nicht still umgedeutet. */
-    if (in_array($r['art'], array('text', 'marke', 'wahl', 'zeit', 'thema'), true) && !is_string($wert)) {
+    if (in_array($r['art'], array('text', 'adresse', 'marke', 'wahl', 'zeit', 'thema'), true) && !is_string($wert)) {
         return 'keine Zeichenkette';
     }
     $s = (string) $wert;
@@ -773,7 +780,20 @@ function cam_wert_pruefen($schluessel, $wert)
             return cam_uhrzeit_gueltig($s) ? '' : 'keine Uhrzeit 00:00 bis 23:59';
         case 'thema':
             return cam_thema_pruefen($s);
+        case 'adresse':
+            if (strlen($s) > (int) $r['max']) { return 'zu lang'; }
+            if (!empty($r['streng']) && preg_match('/["\'<>\s]/', $s)) {
+                return 'Leerraum, Anfuehrungszeichen oder < > im Wert';
+            }
+            if ($s === '') { return ''; }
+            foreach ($r['anfang'] as $ac_anf) {
+                if (stripos($s, $ac_anf) === 0) { return ''; }
+            }
+            return 'muss mit ' . implode(' oder ', $r['anfang']) . ' beginnen';
         default:
+            if (!empty($r['streng']) && preg_match('/["\'<>\s]/', $s)) {
+                return 'Leerraum, Anfuehrungszeichen oder < > im Wert';
+            }
             return strlen($s) <= (int) $r['max'] ? '' : 'zu lang';
     }
 }
@@ -3304,16 +3324,19 @@ function cam_basisfelder()
     return array(
         'OK'         => array(0, 0, 1, 'FELD.OK', '', 1, 1, 0),
         'ALTER'      => array(1, -1, 100000, 'FELD.ALTER', '<v.1> min', 0, 1, 0),
-        'BILDER'     => array(1, 0, 100000, 'FELD.BILDER', '', 1, 1, 1),
-        'CLIPS'      => array(1, 0, 100000, 'FELD.CLIPS', '', 1, 1, 1),
-        'ZEITRAFFER' => array(1, 0, 100000, 'FELD.ZEITRAFFER', '', 1, 1, 1),
+        /* Fuenfte Spalte: Unit der Vorlage. Die Zaehler tragen seit dem
+           B-Nachzug (01.10.2026) "<v.0>" - bis 1.9.26 stand dort "", und am
+           virtuellen Eingang stand eine nackte Zahl (Regeln/07). */
+        'BILDER'     => array(1, 0, 100000, 'FELD.BILDER', '<v.0>', 1, 1, 1),
+        'CLIPS'      => array(1, 0, 100000, 'FELD.CLIPS', '<v.0>', 1, 1, 1),
+        'ZEITRAFFER' => array(1, 0, 100000, 'FELD.ZEITRAFFER', '<v.0>', 1, 1, 1),
         'PERSON'     => array(0, 0, 1, 'FELD.PERSON', '', 1, 1, 1),
-        'OBJEKTE'    => array(1, 0, 100, 'FELD.OBJEKTE', '', 1, 1, 1),
+        'OBJEKTE'    => array(1, 0, 100, 'FELD.OBJEKTE', '<v.0>', 1, 1, 1),
         'PUSH'       => array(0, 0, 1, 'FELD.PUSH', '', 1, 0, 1),
         'PUSHAKTIV'  => array(0, 0, 1, 'FELD.PUSHAKTIV', '', 1, 1, 0),
         'PTEST'      => array(0, 0, 1, 'FELD.PTEST', '', 1, 0, 0),
         'ERREICHBAR' => array(0, -1, 1, 'FELD.ERREICHBAR', '', 1, 1, 0),
-        'FEHLER'     => array(1, 0, 100000, 'FELD.FEHLER', '', 1, 1, 0),
+        'FEHLER'     => array(1, 0, 100000, 'FELD.FEHLER', '<v.0>', 1, 1, 0),
         'HERZ'       => array(1, -1, 100000, 'FELD.HERZ', '<v.1> min', 0, 0, 0),
     );
 }

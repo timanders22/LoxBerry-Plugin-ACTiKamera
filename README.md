@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.25 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.26 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -12,6 +12,26 @@ in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxo
 nur noch `cam.php?foto=1&token=…` auf; die Zugangsdaten bleiben auf dem LoxBerry.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
+
+## Neu in 1.9.26
+
+Verbesserungen aus dem Durchgang (Verbesserungsliste
+`Pruefung-Durchgang-2026-09-29/VERBESSERUNGEN_OFFEN.md`, Entscheidungen 16 und 19).
+Gemessen an einer Kamera-Attrappe unter PHP 7.4, 8.3 und 8.5; nicht an der Kamera.
+
+* **Neuinstallation:** Reste einer früheren Installation werden schon in
+  `preinstall.sh` beiseitegelegt. Kamerakennwort und altes Token kommen nicht mehr
+  über die Selbstheilung zurück, und eine saubere Neuinstallation warnt nicht mehr
+  fälschlich.
+* **Nach einer Beanstandung wird nichts gespeichert:** Schnappschuss-URL ohne
+  `http://`/`https://` (bisher wurde still `http://` vorgesetzt, auch vor
+  `ftp://` oder `rtsp://`), Leerzeichen oder Anführungszeichen in Adressen, ein
+  geleerter Benutzer (gelöscht wird über den Haken) und geleerte Zahlenfelder
+  werden beanstandet; das Feld ist markiert und die Eingabe steht wieder da.
+* Dieselbe Adressregel gilt beim Zurückspielen einer Sicherung und bei
+  „Einstellungen sichern“ (gelbe Warnung).
+* Die Loxone-Vorlage gibt Bildern, Bildserien, Zeitraffer, Objekten und Fehlern
+  eine Einheit; wer sie nutzt, importiert sie neu.
 
 ## Neu in 1.9.25
 

@@ -395,12 +395,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cleanupnow']) && func
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_exists('cam_config')) {
     $ac_new = cam_config();
     $ac_alt = $ac_new;
-    /* Adressfelder nur von Steuerzeichen und Anfuehrungszeichen befreien - NICHT von
-       Doppelpunkt, Schraegstrich oder Punkt. Ein zu strenger Filter hat aus einer
-       eingefuegten URL frueher "http19216817817cgi-binencoder..." gemacht. */
+    /* Adressfelder: Leerraum am RAND wird still abgeschnitten (Nr. 19 laesst
+       das ausdruecklich zu). Leerraum, Anfuehrungszeichen und < > MITTEN im
+       Wert werden beanstandet. Bis 1.9.26 entfernte $ac_saeubern() sie still
+       ("http://kamera/a b" wurde "http://kamera/ab", ein Anfuehrungszeichen
+       im Kennwort verschwand) - gespeichert wurde eine andere Adresse als die
+       eingetippte (B-Nachzug 01.10.2026, Entscheidung 19). Doppelpunkt,
+       Schraegstrich und Punkt bleiben selbstverstaendlich erlaubt: ein zu
+       strenger Filter hat aus einer eingefuegten URL frueher
+       "http19216817817cgi-binencoder..." gemacht. */
     $ac_saeubern = function ($wert) {
-        $wert = preg_replace('/[\x00-\x1F\x7F"\'<>\s]/', '', (string) $wert);
         return trim((string) $wert);
+    };
+    $ac_zeichen_falsch = function ($wert) {
+        return preg_match('/[\x00-\x1F\x7F"\'<>\s]/', (string) $wert) === 1;
     };
 
     /* BEANSTANDEN STATT ZURECHTBIEGEN (U3, U5; Pruefung 29.09.2026).
@@ -411,8 +419,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
      * und kannte fuer Name und Schnappschuss-URL keine Laengengrenze - die
      * eigene Sicherung wurde danach abgewiesen. Jetzt prueft jedes Feld gegen
      * DIESELBE Regel wie das Zurueckspielen (cam_wert_pruefen). Was nicht
-     * passt, wird gemeldet, und der bisherige Wert bleibt stehen; alle
-     * uebrigen Felder werden gespeichert. */
+     * passt, wird gemeldet, und gespeichert wird NICHTS (Entscheidung 16,
+     * X-2; seit 1.9.25). Seit dem B-Nachzug (01.10.2026, Entscheidung 19)
+     * zaehlt auch das stille Zurechtbiegen als Beanstandung: Vorgabe fuer ein
+     * geleertes Feld, "http://" vorangesetzt, Zeichen entfernt, leerer
+     * Benutzer behaelt den alten. Still bleibt nur das Abschneiden von
+     * Leerraum am Rand. */
     $ac_fehler = array();
     $ac_hinweise = array();
     // X-2: die beanstandeten Felder, fuer die Markierung nach der Umleitung.
@@ -456,6 +468,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
             $k = $feld . $ac_s;
             return (isset($_POST[$k]) && is_string($_POST[$k])) ? $_POST[$k] : '';
         };
+        /* Wurde das Feld GESENDET? Ein Kameraplatz ohne Block im Formular
+           (nicht eingerichtet und nicht der naechste freie) schickt gar
+           nichts; dort gilt die Vorgabe wie bisher. Ein gesendetes, aber
+           leeres Feld dagegen hat jemand geleert - das wird beanstandet,
+           nicht still durch die Vorgabe ersetzt (Entscheidung 19). */
+        $ac_da = function ($feld) use ($ac_s) {
+            $k = $feld . $ac_s;
+            return isset($_POST[$k]) && is_string($_POST[$k]);
+        };
 
         $ac_setzen('host' . $ac_s, trim((string) $ac_f('host')));
 
@@ -463,7 +484,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
            ist hier schon einmal passiert und fuehrte zu USER=&PWD=… und damit
            zu HTTP 401. Geloescht wird ueber den Haken daneben (U7). */
         $ac_u = trim((string) $ac_f('user'));
-        if ($ac_u !== '') { $ac_setzen('user' . $ac_s, $ac_u); }
+        if ($ac_u !== '') {
+            $ac_setzen('user' . $ac_s, $ac_u);
+        } elseif ($ac_da('user') && (string) $ac_alt['user' . $ac_s] !== ''
+                  && $ac_f('zugang_loeschen') === '') {
+            /* Das Feld zeigt den gespeicherten Benutzer; leer heisst also,
+               jemand hat ihn geloescht. Bis 1.9.26 blieb er dann still stehen
+               und "gespeichert" stand daneben (Entscheidung 19). Geloescht
+               wird ueber den Haken daneben (U7) - die Meldung sagt es. */
+            $ac_bean[] = 'user' . $ac_s;
+            $ac_fehler[] = sprintf(cam_t('TEXT.BENUTZER_LEER'), $ac_i);
+        }
 
         /* Passwortfeld leer lassen = bisheriges Passwort behalten.
            trim() ist kein Schoenheitsfehler: Passwortverwaltungen im Browser
@@ -493,7 +524,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
             $ac_namen[] = strtolower($ac_nm);
         }
 
-        $ac_zahl('channel' . $ac_s, $ac_f('channel'), 1);
+        $ac_zahl('channel' . $ac_s, $ac_f('channel'), $ac_da('channel') ? null : 1);
         $ac_res = trim((string) $ac_f('resolution'));
         if ($ac_res !== '' && (!preg_match('/^[A-Za-z0-9x,]+\z/', $ac_res) || stripos($ac_res, 'http') === 0)) {
             $ac_fehler[] = sprintf(cam_t('TEXT.WERT_ABGEWIESEN'), ac_e('resolution' . $ac_s), ac_e($ac_res),
@@ -505,23 +536,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
 
         /* Die Masken aus dem Formular (U6) werden hier wieder durch den
            gespeicherten Wert ersetzt. */
-        $ac_cmd = cam_zugang_entmaske($ac_saeubern($ac_f('snapcmd')), $ac_alt['snapcmd' . $ac_s]);
-        $ac_su = cam_zugang_entmaske($ac_saeubern($ac_f('snapurl')), $ac_alt['snapurl' . $ac_s]);
-        // Wer die komplette Adresse ins Befehlsfeld einfuegt, meint die vollstaendige URL
-        if ($ac_su === '' && stripos($ac_cmd, '://') !== false) {
-            $ac_su = $ac_cmd;
-            $ac_cmd = '';
-            $ac_note = cam_t('TEXT.M_ADRESSE_UEBERNOMMEN');
+        $ac_cmd_roh = $ac_saeubern($ac_f('snapcmd'));
+        $ac_su_roh = $ac_saeubern($ac_f('snapurl'));
+        $ac_snap_ok = true;
+        foreach (array('snapcmd' => $ac_cmd_roh, 'snapurl' => $ac_su_roh) as $ac_sf => $ac_sw) {
+            if ($ac_zeichen_falsch($ac_sw)) {
+                $ac_snap_ok = false;
+                $ac_bean[] = $ac_sf . $ac_s;
+                $ac_fehler[] = sprintf(cam_t('TEXT.WERT_ABGEWIESEN'), ac_e($ac_sf . $ac_s),
+                    ac_e(cam_zugang_maske($ac_sw)), cam_t('TEXT.ADRESSE_ZEICHEN'));
+            }
         }
-        if ($ac_su !== '' && !preg_match('#^https?://#i', $ac_su)) {
-            $ac_su = 'http://' . ltrim($ac_su, '/');
+        if ($ac_snap_ok) {
+            $ac_cmd = cam_zugang_entmaske($ac_cmd_roh, $ac_alt['snapcmd' . $ac_s]);
+            $ac_su = cam_zugang_entmaske($ac_su_roh, $ac_alt['snapurl' . $ac_s]);
+            // Das Feld, in das die Adresse eingetippt wurde - es wird markiert.
+            $ac_su_feld = 'snapurl' . $ac_s;
+            // Wer die komplette Adresse ins Befehlsfeld einfuegt, meint die vollstaendige URL
+            // (angekuendigt mit eigener Meldung, also kein stilles Zurechtbiegen).
+            if ($ac_su === '' && stripos($ac_cmd, '://') !== false) {
+                $ac_su = $ac_cmd;
+                $ac_cmd = '';
+                $ac_su_feld = 'snapcmd' . $ac_s;
+                $ac_note = cam_t('TEXT.M_ADRESSE_UEBERNOMMEN');
+            }
+            /* Ohne http:// bzw. https:// wird beanstandet, wie bei
+               mjpeg_url und rtsp_url. Bis 1.9.26 wurde hier still "http://"
+               vorangesetzt: aus "ftp://kamera/x" wurde http://ftp://kamera/x,
+               aus "//kamera/x" http://kamera/x - gespeichert und als
+               "gespeichert" gemeldet (B-Nachzug 01.10.2026, Entscheidung 19).
+               Eine Kurzform ohne Anfang taugt nicht: cURL raet dann http,
+               der Rueckfall ohne cURL (fopen) liest dieselbe Zeichenkette
+               als Dateipfad auf dem LoxBerry. */
+            if ($ac_su !== '' && !preg_match('#^https?://#i', $ac_su)) {
+                $ac_fehler[] = sprintf(cam_t('TEXT.ADRESSE_VERWORFEN'), $ac_i, 'http:// / https://',
+                                       ac_e(cam_zugang_maske($ac_su)));
+                $ac_bean[] = $ac_su_feld;
+            } else {
+                $ac_setzen('snapcmd' . $ac_s, $ac_cmd);
+                $ac_setzen('snapurl' . $ac_s, $ac_su);
+            }
         }
-        $ac_setzen('snapcmd' . $ac_s, $ac_cmd);
-        $ac_setzen('snapurl' . $ac_s, $ac_su);
 
-        $ac_a = (string) $ac_f('auth');
-        $ac_setzen('auth' . $ac_s, $ac_a === '' ? 'auto' : $ac_a);
-        $ac_zahl('timeout' . $ac_s, $ac_f('timeout'), 8);
+        // Nicht gesendet: Vorgabe "auto"; gesendet und leer: die Auswahlregel weist es ab.
+        $ac_setzen('auth' . $ac_s, $ac_da('auth') ? (string) $ac_f('auth') : 'auto');
+        $ac_zahl('timeout' . $ac_s, $ac_f('timeout'), $ac_da('timeout') ? null : 8);
 
         /* Eine Adresse, die dem Muster nicht entspricht, wird gemeldet statt
            stillschweigend geleert - bis 1.9.8 verschwand sie wortlos. In der
@@ -540,16 +599,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
         } else {
             $ac_setzen('rtsp_url' . $ac_s, $ac_ru);
         }
-        $ac_zahl('rtsp_stream' . $ac_s, $ac_f('rtsp_stream'), 2);
-        $ac_zahl('rtsp_port' . $ac_s, $ac_f('rtsp_port'), 7070);
-        $ac_zahl('rtsp_quality' . $ac_s, $ac_f('rtsp_quality'), 5);
+        $ac_zahl('rtsp_stream' . $ac_s, $ac_f('rtsp_stream'), $ac_da('rtsp_stream') ? null : 2);
+        $ac_zahl('rtsp_port' . $ac_s, $ac_f('rtsp_port'), $ac_da('rtsp_port') ? null : 7070);
+        $ac_zahl('rtsp_quality' . $ac_s, $ac_f('rtsp_quality'), $ac_da('rtsp_quality') ? null : 5);
     }
     $ac_zahl('stream_fps', ac_post('stream_fps'), null);
     // 900 s statt 21600: jeder offene Strom belegt einen PHP-Arbeitsprozess,
     // und davon hat ein LoxBerry nur eine Handvoll. Siehe cam_stream.php.
     $ac_zahl('stream_maxsec', ac_post('stream_maxsec'), null);
-    $ac_sm = ac_post('stream_mode', 'auto');
-    $ac_setzen('stream_mode', $ac_sm === '' ? 'auto' : $ac_sm);
+    // Leer (nur von Hand erreichbar) weist die Auswahlregel ab, statt still "auto" zu setzen.
+    $ac_setzen('stream_mode', ac_post('stream_mode', 'auto'));
     /* EINE Positivliste fuer das Stromkennwort (U3, B7): die Regel "marke"
        aus cam_wertregeln(). Bis 1.9.22 entfernte das Formular den Punkt, die
        Sicherung liess ihn zu - aus strom.1 wurde beim naechsten Speichern
@@ -573,12 +632,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
      * Handler (save_mqtt). $ac_new kommt aus cam_config(), die Werte
      * ueberleben also unveraendert. Stuende die Zeile hier weiter, schaltete
      * jedes Speichern der Einstellungen MQTT stillschweigend ab. */
-    // "0 oder leer = unbegrenzt" bzw. "aus": leer heisst hier 0.
+    /* "0 oder leer = unbegrenzt" steht auf der Seite fuer Alter und Anzahl
+       (TEXT.0_ODER_LEER_UNBEGRENZT): dort heisst leer weiter 0. Bei
+       Hoechstgroesse, Pruefabstand und Mindestpause sagt die Seite nur
+       "0 = unbegrenzt" bzw. "0 = aus"; ein geleertes Feld wurde bis 1.9.26
+       still 0 - die Erreichbarkeitspruefung war damit aus, ohne dass es
+       jemand gewaehlt hatte. Jetzt wird es beanstandet (Entscheidung 19). */
     $ac_zahl('keep_max', ac_post('keep_max'), 0);
-    $ac_zahl('keep_mb', ac_post('keep_mb'), 0);
+    $ac_zahl('keep_mb', ac_post('keep_mb'), null);
     $ac_zahl('keep_days', ac_post('keep_days'), 0);
-    $ac_zahl('pruef_minuten', ac_post('pruef_minuten'), 0);
-    $ac_zahl('mindestpause', ac_post('mindestpause'), 0);
+    $ac_zahl('pruef_minuten', ac_post('pruef_minuten'), null);
+    $ac_zahl('mindestpause', ac_post('mindestpause'), null);
     $ac_new['timelapse'] = isset($_POST['timelapse']) ? 1 : 0;
     /* Kaestchen an = feste Adresse bedienen, wie seit jeher. Das Kaestchen
        steht im selben Formular wie timelapse; ein fehlendes Feld heisst
@@ -1036,6 +1100,7 @@ foreach ($ac_zeigen as $ac_i):
 <?php if ($ac_i === 1) { ?>
         <div class="sm-small"><?php echo cam_t('TEXT.IST_DIESES_FELD_GEFLLT_NUTZT_DAS_P'); ?> <b><?php echo cam_t('TEXT.GENAU_DIESE_ADRESSE'); ?></b> <?php echo cam_t('TEXT.OHNE_EIGENES_ZUSAMMENBAUEN_OHNE_UM'); ?> <span class="sm-mono">ERROR: not authorized</span>.<br>
         <b><?php echo cam_t('TEXT.HINWEIS'); ?></b> <?php echo cam_t('TEXT.DIESE_URL_ENTHLT_DAS_KAMERA_PASSWO'); ?><span class="sm-mono">chmod 600</span><?php echo cam_t('TEXT.UND_WIRD_IN_PROTOKOLL_UND_DIAGNOSE'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.CAM_PHP'); ?></span> <?php echo cam_t('TEXT.OHNE_ZUGANGSDATEN'); ?></div>
+        <div class="sm-small"><?php echo cam_t('TEXT.H_SNAPURL_SCHEMA'); ?></div>
 <?php } ?>
     </div>
     <div class="acw-breit">

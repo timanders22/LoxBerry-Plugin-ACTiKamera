@@ -91,7 +91,10 @@ if [ -f "$BK" ]; then
 fi
 
 # Weitere Kopien mit Kamerapasswort (Befunde I3 und I1, Pruefung 29.09.2026):
-#   <ordner>.backup.json.alt            beiseitegelegt von postinstall.sh
+#   <ordner>.backup.json.alt            beiseitegelegt von preinstall.sh
+#                                       (Rueckfall postinstall.sh)
+#   config/plugins/<ordner>/cam.json.alt  im Takt geheilte cam.json, von
+#                                       postinstall.sh beiseitegelegt (X-1)
 #   <ordner>.upgrade_sicherung(.alt)/   cam.json einer Aktualisierung, die nicht
 #                                       ankam, oder beiseitegelegt
 #   config/plugins/<ordner>/cam.json.kaputt*  verdraengte Staende (0600)
@@ -124,7 +127,8 @@ ac_pruef_weg() { # $1 Pfad: weg, dann nachzaehlen
 ac_pruef_weg "$BK.alt"
 ac_pruef_weg "$BASE/data/plugins/$PFOLDER.upgrade_sicherung"
 ac_pruef_weg "$BASE/data/plugins/$PFOLDER.upgrade_sicherung.alt"
-for AC_P in "$BASE/config/plugins/$PFOLDER/cam.json.kaputt"* "$BASE/data/plugins/$PFOLDER.archiv/"*.alt; do
+for AC_P in "$BASE/config/plugins/$PFOLDER/cam.json.kaputt"* "$BASE/config/plugins/$PFOLDER/cam.json.alt" \
+            "$BASE/data/plugins/$PFOLDER.archiv/"*.alt; do
     ac_pruef_weg "$AC_P"
 done
 if [ -n "$AC_REST" ]; then
@@ -133,6 +137,10 @@ elif [ -n "$AC_WEG" ]; then
     echo "<OK> Upgrade-Sicherung und beiseitegelegte Staende entfernt, nachgezaehlt liegt nichts mehr da:$AC_WEG"
 fi
 
+# Der Merker einer abgebrochenen Neuinstallation (preinstall.sh legt ihn an,
+# postinstall.sh entfernt ihn; X-1, B-Nachzug 01.10.2026). Er traegt nur eine
+# Uhrzeit.
+rm -f "$BASE/data/plugins/$PFOLDER.neuinstallation" 2>/dev/null
 # Die Marke "Aktualisierung laeuft" aus preupgrade.sh liegt NEBEN dem
 # Datenordner und uebersteht deshalb auch das Deinstallieren. Bliebe sie nach
 # einer abgebrochenen Aktualisierung liegen, speicherte eine Neuinstallation

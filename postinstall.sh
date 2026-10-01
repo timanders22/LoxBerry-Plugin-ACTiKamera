@@ -126,6 +126,11 @@ else
     # 'backup' ist fest - und EINE <WARNING>-Zeile mit allen Pfaden. Die
     # Deinstallation raeumt .alt mit ab.
     #
+    # Seit dem B-Nachzug (01.10.2026, X-1) legt schon preinstall.sh das alles
+    # beiseite, BEVOR Oberflaeche und Cron-Datei da sind; dieser Schritt
+    # bleibt als Rueckfall (etwa wenn preinstall.sh eine Datei nicht
+    # verschieben konnte).
+    #
     # Aus dem Archivordner gehen die BETRIEBSDATEIEN mit (Entscheidung 6):
     # betrieb<N>.json (Erreichbarkeit, Fehlerzaehler), letztesbild<N>.json
     # (Anlass, Zeit, Objekte der letzten Aufnahme), letztesbild<N>.jpg (die
@@ -151,11 +156,47 @@ else
             echo "<WARNING> $1 liess sich nicht beiseitelegen - bitte von Hand entfernen."
         fi
     }
-    if [ -e "$BK" ] || [ -L "$BK" ]; then ac_beiseite "$BK"; fi
+    # Eine im Minutentakt GEHEILTE cam.json bleibt nicht stehen (X-1,
+    # B-Nachzug 01.10.2026). Zwischen der Cron-Datei und diesem Skript liegt
+    # rund eine Minute; lag die Zweitschrift einer frueheren Installation
+    # noch da, kopierte cam_config() sie in dieser Luecke nach cam.json - bis
+    # 1.9.26 legte dieses Skript danach nur die Zweitschrift beiseite, und
+    # Kamerapasswort und altes Aktionstoken galten in cam.json weiter (in WSL
+    # gemessen, vb_acti2_bau_skripte/proben, Fall N2). Geheilt heisst: der
+    # Heilmerker der Bibliothek liegt (data/plugins/<ordner>/konfig_geheilt.txt)
+    # oder cam.json ist byte-gleich mit der Zweitschrift bzw. ihrer .alt.
+    # Dann geht sie als cam.json.alt beiseite, und cam.json ist wieder "{}".
+    #
+    # Hat preinstall.sh schon alles verschoben (Merker
+    # data/plugins/<ordner>.neuinstallation), stammt, was jetzt im
+    # Archivordner oder als Zweitschrift liegt, von DIESER Installation (der
+    # Minutentakt schreibt herzschlag.json und betrieb.json in der Luecke) und
+    # bleibt stehen. Bis 1.9.26 ging es nach .alt, und eine zweite <WARNING>
+    # nannte es "aus einer frueheren Installation" - auch bei einer
+    # Neuinstallation ohne jeden Rest (in WSL gemessen, Faelle N1 und N4).
+    AC_PRE=0
+    if [ -f "$BASE/data/plugins/$PFOLDER.neuinstallation" ]; then AC_PRE=1; fi
+    AC_GEHEILT=0
+    AC_HM="$BASE/data/plugins/$PFOLDER/konfig_geheilt.txt"
+    if [ "$AC_PRE" != "1" ] && ac_inhalt "$CF"; then
+        if [ -f "$AC_HM" ] || { [ -f "$BK" ] && cmp -s "$CF" "$BK"; } \
+           || { [ -f "$BK.alt" ] && cmp -s "$CF" "$BK.alt"; }; then
+            AC_GEHEILT=1
+        fi
+    fi
+    if [ "$AC_GEHEILT" = "1" ]; then
+        ac_beiseite "$CF"
+        if [ ! -e "$CF" ]; then
+            echo '{}' > "$CF"
+            chmod 0600 "$CF" 2>/dev/null
+            rm -f "$AC_HM" 2>/dev/null
+        fi
+    fi
+    if [ "$AC_PRE" != "1" ] && { [ -e "$BK" ] || [ -L "$BK" ]; }; then ac_beiseite "$BK"; fi
     AC_US="$BASE/data/plugins/$PFOLDER.upgrade_sicherung"
-    if [ -e "$AC_US" ] || [ -L "$AC_US" ]; then ac_beiseite "$AC_US"; fi
+    if [ "$AC_PRE" != "1" ] && { [ -e "$AC_US" ] || [ -L "$AC_US" ]; }; then ac_beiseite "$AC_US"; fi
     AC_AR="$BASE/data/plugins/$PFOLDER.archiv"
-    if [ -d "$AC_AR" ]; then
+    if [ "$AC_PRE" != "1" ] && [ -d "$AC_AR" ]; then
         for I in "" 2 3 4; do
             for E in "betrieb$I.json" "letztesbild$I.json" "letztesbild$I.jpg"; do
                 if [ -f "$AC_AR/$E" ] || [ -L "$AC_AR/$E" ]; then ac_beiseite "$AC_AR/$E"; fi
@@ -166,9 +207,13 @@ else
         done
     fi
     if [ -n "$AC_BEISEITE" ]; then
-        echo "<WARNING> Neuinstallation: aus einer frueheren Installation lagen Einstellungen (mit Kamerapasswort und Aktionstoken) bzw. Betriebsdateien da. Sie werden NICHT eingespielt und liegen beiseite:$AC_BEISEITE - die Aufnahmen im Archiv bleiben; die Deinstallation raeumt die .alt-Dateien mit ab."
+        AC_GEHEILT_TEXT=""
+        [ "$AC_GEHEILT" = "1" ] && AC_GEHEILT_TEXT=" Der Minutentakt hatte cam.json schon daraus geheilt; sie ist wieder leer."
+        echo "<WARNING> Neuinstallation: aus einer frueheren Installation lagen Einstellungen (mit Kamerapasswort und Aktionstoken) bzw. Betriebsdateien da. Sie werden NICHT eingespielt und liegen beiseite:$AC_BEISEITE - die Aufnahmen im Archiv bleiben; die Deinstallation raeumt die .alt-Dateien mit ab.$AC_GEHEILT_TEXT"
     fi
 fi
+# Der Merker aus preinstall.sh gilt nur fuer diesen einen Lauf.
+rm -f "$BASE/data/plugins/$PFOLDER.neuinstallation" 2>/dev/null
 # Die Erstanleitung nur, wenn keine eingerichtete Konfiguration vorliegt.
 # postinstall.sh laeuft auch bei jedem Upgrade (Regeln/06); danach war der
 # Rat, die Zugangsdaten einzutragen, falsch und legte nahe, sie seien weg.
