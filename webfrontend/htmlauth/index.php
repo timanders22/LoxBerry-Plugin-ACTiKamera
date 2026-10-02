@@ -1475,20 +1475,65 @@ foreach (cam_felder() as $ac_fn => $ac_fd) {
 </table>
 </div>
 
-<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b>
+<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b><br>
+<?php /* X-8 (02.10.2026, Entscheidung 36): Komplette Baustein-Liste in der Hausform
+         # | Baustein (Typ) | Name (Vorschlag) | Parameter | Eingaenge verbinden mit.
+         Titel, Adressen, Suchtexte, Grenzen, Einheiten und Sendebefehle kommen aus
+         DENSELBEN Funktionen wie die Importdateien (cam_vorlage_kopf(),
+         cam_eingangsbefehle(), cam_ausgangsbefehle()) - mit mehreren Kameras
+         stehen deren Befehle von selbst mit da. Typ, Name, Parameter und Verbindung
+         der Logik stehen in [BAUSTEIN] der Sprachdateien; {Kennung} in einem Text
+         wird zur laufenden Nummer "#n".
+         Zeile: array(Kennung, Typ, Name, Parameter, Argumente, Verbindung). Ein Name
+         als array('text' => ...) ist fertig (aus dem Code, maskiert) und geht nicht
+         noch einmal durch cam_t(). */
+$ac_bs_m = function ($s) { return '<span class="sm-mono">' . ac_e($s) . '</span>'; };
+$ac_bs_ein = cam_vorlage_kopf('ein', $ac_host);
+$ac_bs_aus = cam_vorlage_kopf('aus', $ac_host);
+$ac_bs = array(
+    array('VI', 'T_VI', array('text' => ac_e($ac_bs_ein['title'])), 'P_VI',
+          array($ac_bs_m($ac_bs_ein['address']), ac_e($ac_bs_ein['polling'])), 'V_KEINE'),
+);
+foreach (cam_eingangsbefehle() as $ac_bc) {
+    $ac_bs[] = array('F_' . $ac_bc['feld'], 'T_VI_BEFEHL', array('text' => ac_e($ac_bc['title'])),
+                     $ac_bc['unit'] !== '' ? 'P_VI_BEFEHL_EINHEIT' : 'P_VI_BEFEHL',
+                     array(ac_e($ac_bc['comment']), $ac_bs_m($ac_bc['check']), (int) $ac_bc['min'],
+                           (int) $ac_bc['max'], $ac_bs_m($ac_bc['unit'])), 'V_UNTER_VI');
+}
+$ac_bs[] = array('E1', 'T_VERZ', 'E1_NAME', 'E1_PARAM', array(), 'E1_VERB');
+$ac_bs[] = array('VO', 'T_VO', array('text' => ac_e($ac_bs_aus['title'])), 'P_VO',
+                 array($ac_bs_m($ac_bs_aus['address'])), 'V_KEINE');
+foreach (cam_ausgangsbefehle() as $ac_bc) {
+    $ac_bs[] = array('A_' . $ac_bc['title'], 'T_VO_BEFEHL', array('text' => ac_e($ac_bc['title'])), 'P_VO_BEFEHL',
+                     array(ac_e($ac_bc['comment']), $ac_bs_m($ac_bc['on'])), 'V_' . strtoupper($ac_bc['art']));
+}
+$ac_bs[] = array('S1', 'T_SCHWELLE', 'S1_NAME', 'P_SCHWELLE', array(), 'S1_VERB');
+$ac_bs[] = array('S2', 'T_SCHWELLE', 'S2_NAME', 'P_SCHWELLE', array(), 'S2_VERB');
+$ac_bs[] = array('U1', 'T_UND', 'U1_NAME', 'P_KEINE', array(), 'U1_VERB');
+$ac_bs[] = array('O1', 'T_ODER', 'O1_NAME', 'O1_PARAM', array(), 'O1_VERB');
+$ac_bs[] = array('N1', 'T_BENACHR', 'N1_NAME', 'N1_PARAM', array(), 'N1_VERB');
+$ac_bs[] = array('S3', 'T_SCHWELLE', 'S3_NAME', 'P_SCHWELLE', array(), 'S3_VERB');
+$ac_bs[] = array('N2', 'T_BENACHR_TEST', 'N2_NAME', 'N2_PARAM', array(), 'N2_VERB');
+$ac_bs[] = array('ST', 'T_STATUS', 'ST_NAME', 'ST_PARAM', array(), 'ST_VERB');
+$ac_bs_nr = array();
+foreach ($ac_bs as $ac_i => $ac_z) { $ac_bs_nr[$ac_z[0]] = $ac_i + 1; }
+$ac_bs_t = function ($z) use ($ac_bs_nr) {
+    if (is_array($z)) { return $z['text']; }
+    return preg_replace_callback('/\{([A-Za-z0-9_]+)\}/', function ($m) use ($ac_bs_nr) {
+        return isset($ac_bs_nr[$m[1]]) ? '#' . $ac_bs_nr[$m[1]] : $m[0];
+    }, (string) cam_t('BAUSTEIN.' . $z));
+}; ?>
+<?php echo $ac_bs_t('TEXT'); ?>
 <table class="sm-tbl">
-<tr><th><?php echo cam_t('TEXT.BAUSTEIN'); ?></th><th><?php echo cam_t('TEXT.NAME'); ?></th><th><?php echo cam_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo cam_t('TEXT.EINGNGE'); ?></th></tr>
-<tr><td><?php echo cam_t('TEXT.EINSCHALTVERZGERUNG_E1'); ?></td><td><?php echo cam_t('TEXT.KLINGEL_ENTPRELLT'); ?></td><td>3 s</td><td><?php echo cam_t('TEXT.KLINGELTASTER_INTERCOM'); ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.VIRTUELLER_AUSGANG'); ?></td><td><?php echo cam_t('TEXT.BILD_HOLEN'); ?></td><td><?php echo cam_t('TEXT.BEFEHL_AUS_SCHRITT_2'); ?><span class="sm-mono"><?= ac_e(cam_anlass_beispiel()) ?></span>)</td><td><?php echo cam_t('TEXT.E1'); ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.SCHWELLWERTSCHALTER_S1'); ?></td><td><?php echo cam_t('TEXT.AUFNAHME_ERFOLGT'); ?></td><td><?php echo cam_t('TEXT.EIN_0_5_AUS_0_4'); ?></td><td><?php echo cam_t('TEXT.PUSHAKTIV'); ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.SCHWELLWERTSCHALTER_S2'); ?></td><td><?php echo cam_t('TEXT.PUSH_FREIGEGEBEN'); ?></td><td><?php echo cam_t('TEXT.EIN_0_5_AUS_0_4'); ?></td><td><?php echo cam_t('TEXT.PUSH'); ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.UND_U1'); ?></td><td><?php echo cam_t('TEXT.BESUCH_MELDEN'); ?></td><td></td><td><?php echo cam_t('TEXT.S1_S2'); ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.ODER_O1'); ?></td><td><?php echo cam_t('TEXT.PUSH_SAMMLER'); ?></td><td><?php echo cam_t('TEXT.EINZIGE_QUELLE_DES_BENACHRICHTIGUN'); ?></td><td>U1</td></tr>
-<tr><td><?php echo cam_t('TEXT.BENACHRICHTIGUNGS_BAUSTEIN'); ?></td><td><?php echo cam_t('TEXT.PUSH_BESUCH_AN_DER_TR'); ?></td><td><?php echo cam_t('TEXT.TEXT_Z_B_JEMAND_HAT_GEKLINGELT_BIL'); ?></td><td><?php echo cam_t('TEXT.O1'); ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.BENACHRICHTIGUNGS_BAUSTEIN_2'); ?></td><td><?php echo cam_t('TEXT.TEST_PUSH'); ?></td><td><?php echo cam_t('TEXT.EIGENER_BAUSTEIN_NUR_FR_DEN_TEST'); ?></td><td><?php echo cam_t('TEXT.SCHWELLWERTSCHALTER_AN_PTEST'); ?></td></tr>
-<tr><td><?php echo cam_t('TEXT.STATUSBAUSTEIN'); ?></td><td><?php echo cam_t('TEXT.KAMERA_KACHEL'); ?></td><td><?php echo cam_t('TEXT.TEXT_LETZTES_BILD_VOR_V1_0_MINUTEN'); ?></td><td><?php echo cam_t('TEXT.I1_ALTER'); ?></td></tr>
+<tr><th>#</th><th><?php echo cam_t('BAUSTEIN.T_TYP'); ?></th><th><?php echo cam_t('BAUSTEIN.T_NAME'); ?></th><th><?php echo cam_t('BAUSTEIN.T_PARAM'); ?></th><th><?php echo cam_t('BAUSTEIN.T_VERB'); ?></th></tr>
+<?php foreach ($ac_bs as $ac_i => $ac_z) {
+    $ac_p = $ac_bs_t($ac_z[3]);
+    if ($ac_z[4]) { $ac_p = vsprintf($ac_p, $ac_z[4]); } ?>
+<tr><td><?= $ac_i + 1 ?></td><td><?php echo $ac_bs_t($ac_z[1]); ?></td><td><span class="sm-mono"><?php echo $ac_bs_t($ac_z[2]); ?></span></td><td><?php echo $ac_p; ?></td><td><?php echo $ac_bs_t($ac_z[5]); ?></td></tr>
+<?php } ?>
 </table>
 <div class="sm-small"><b><?php echo cam_t('TEXT.PRAXIS_ERFAHRUNG_ZUM_BENACHRICHTIG'); ?></b> <?php echo cam_t('TEXT.ER_SENDET_NUR_BEI_EINER_01_FLANKE_'); ?></div>
+<div class="sm-small" style="margin-top:6px;"><?= sprintf($ac_bs_t('ERLAEUTERUNG'), $ac_bs_m(cam_anlass_beispiel())) ?></div>
 </div>
 
 <div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_5_BILD_IN_DER_APP_ANZEIGEN'); ?></b><br>

@@ -3811,11 +3811,35 @@ function cam_kommentar($kurz, $zusatz)
     return ($zusatz !== '' && $n !== false && $n <= 40) ? $kurz . $zusatz : (string) $kurz;
 }
 
-/** array(Dateiname, Inhalt) der Importdatei fuer Loxone Config. */
-function cam_vorlage($host = '')
+/**
+ * Kopf einer Importvorlage: Titel, Adresse, Abfragezyklus. EINE Quelle fuer
+ * die beiden Importdateien und die Baustein-Liste im Reiter "Einbindung in
+ * Loxone" (X-8, 02.10.2026) - bis 1.9.27 standen Titel und Adresse nur als
+ * Literal in cam_vorlage()/cam_vorlage_ausgang().
+ * $art: 'ein' = virtueller HTTP-Eingang, 'aus' = virtueller Ausgang.
+ */
+function cam_vorlage_kopf($art, $host = '')
 {
     if ($host === '') { $host = gethostname() ?: 'loxberry'; }
+    if ($art === 'aus') {
+        return array('title' => 'ACTi Kamera senden', 'address' => 'http://' . $host);
+    }
     $plugindir = getenv('LBPPLUGINDIR') ?: 'actikamera';
+    return array(
+        'title'   => 'ACTi Kamera',
+        'address' => 'http://' . $host . '/plugins/' . $plugindir . '/cam.php',
+        'polling' => '60',
+    );
+}
+
+/**
+ * Die Befehle des virtuellen HTTP-Eingangs - EINE Quelle fuer die
+ * Importdatei und die Baustein-Liste (X-8, 02.10.2026), wie
+ * cam_ausgangsbefehle() fuer den Ausgang. 'feld' und 'kamera' liest nur die
+ * Liste; die Vorlage schreibt sie nicht.
+ */
+function cam_eingangsbefehle()
+{
     $cmds = array();
     foreach (cam_felder() as $name => $d) {
         list($analog, $min, $max, $schluessel) = $d;
@@ -3835,16 +3859,21 @@ function cam_vorlage($host = '')
             'check'   => '\i;' . $name . '=\i\v',
             'analog'  => $analog, 'min' => $min, 'max' => $max,
             'unit'    => isset($d[4]) ? (string) $d[4] : '',
+            'feld'    => $name,
+            'kamera'  => $ac_kid,
         );
     }
-    return array('VI_actikamera.xml', cam_xml_virtual_in_http(array(
-        'title'   => 'ACTi Kamera',
-        'address' => 'http://' . $host . '/plugins/' . $plugindir . '/cam.php',
-        'polling' => '60',
+    return $cmds;
+}
+
+/** array(Dateiname, Inhalt) der Importdatei fuer Loxone Config. */
+function cam_vorlage($host = '')
+{
+    return array('VI_actikamera.xml', cam_xml_virtual_in_http(cam_vorlage_kopf('ein', $host) + array(
         'comment' => 'Erzeugt vom LoxBerry-Plugin ACTi Kamera (' . date('d.m.Y') . '). '
                    . 'Loxone Config legt beim Import neu an und ueberschreibt nichts - '
                    . 'zweimal eingelesen ergibt doppelte Bausteine.',
-    ), $cmds));
+    ), cam_eingangsbefehle()));
 }
 
 
@@ -3894,6 +3923,7 @@ function cam_ausgangsbefehle()
                 'hint'    => cam_t($v[1]) . ($mehrere ? ' [' . cam_kname($id) . ']' : ''),
                 'on'      => $pfad . $v[2] . $kam . $anhang,
                 'kamera'  => $id,
+                'art'     => $v[0],     // fuer die Baustein-Liste (X-8)
             );
         }
     }
@@ -3902,10 +3932,7 @@ function cam_ausgangsbefehle()
 
 function cam_vorlage_ausgang($host = '')
 {
-    if ($host === '') { $host = gethostname() ?: 'loxberry'; }
-    return array('VQ_actikamera.xml', cam_xml_virtual_out(array(
-        'title'   => 'ACTi Kamera senden',
-        'address' => 'http://' . $host,
+    return array('VQ_actikamera.xml', cam_xml_virtual_out(cam_vorlage_kopf('aus', $host) + array(
         'comment' => 'Erzeugt vom LoxBerry-Plugin ACTi Kamera (' . date('d.m.Y') . '). '
                    . 'Die Adressen enthalten das Aktionstoken - nach einem neuen Token '
                    . 'muss diese Datei neu erzeugt und erneut eingelesen werden.',

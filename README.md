@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.26 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.27 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -12,6 +12,22 @@ in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxo
 nur noch `cam.php?foto=1&token=…` auf; die Zugangsdaten bleiben auf dem LoxBerry.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
+
+## Neu in 1.9.27
+
+Baustein-Liste zum Nachbauen (Nachzug B: X-8, Hausregel A4).
+Gemessen mit der gerenderten Oberfläche unter PHP 7.4 und 8.5 gegen die mitgelieferten Vorlagen; nicht am Gerät.
+
+* **Baustein-Liste zum Nachbauen:** Schritt 4 im Reiter „Einbindung in Loxone“ ist jetzt eine nummerierte Liste
+  (# | Baustein | Name | Parameter | Eingänge verbinden mit) statt der alten Tabelle ohne Nummern. Sie nennt beide
+  Importvorlagen mit ihrem Titel – den virtuellen HTTP-Eingang „ACTi Kamera“ mit allen Befehlen (Befehlserkennung,
+  Min/Max, Einheit) und den virtuellen Ausgang „ACTi Kamera senden“ mit den vier Sendebefehlen samt Adresse und
+  Aktionstoken –, danach die Klingel-Entprellung und die Push-Logik (Schwellwertschalter, UND, ODER als einzige Quelle
+  des Benachrichtigungs-Bausteins, eigener Test-Push, Status-Kachel). Mit mehreren Kameras stehen deren Befehle von
+  selbst mit in der Liste.
+* Titel, Adressen und Befehle der Liste kommen aus denselben Funktionen wie die Importdateien; die Importdateien selbst
+  sind unverändert.
+* **In Loxone:** nichts zu tun. Wer die Logik nachbauen will, arbeitet die Liste von oben nach unten ab.
 
 ## Neu in 1.9.26
 
