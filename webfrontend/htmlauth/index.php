@@ -1002,6 +1002,35 @@ if ($ac_rahmen) {
 <div class="sm-alert sm-warn"><b><?php echo cam_t('TEXT.NOCH_NICHT_EINGERICHTET'); ?></b> <?php echo cam_t('TEXT.TRAGEN_SIE_UNTEN_ADRESSE_BENUTZER_'); ?></div>
 <?php } ?>
 
+<?php
+/* Kopf (Entscheidung Nr. 43, seit 1.9.28): Statusuebersicht ueber den
+ * Reitern, immer sichtbar. Nur, was die Seite schon gelesen hat: $ac_st aus
+ * cam_state() (erste Kamera; Dateien unter data/ und der Merker des
+ * Minutentakts - keine Anfrage an die Kamera) und $ac_cfg. Einen Dienst hat
+ * das Plugin nicht, es arbeitet im Minutentakt (cron.01min); die Grenze von
+ * 5 Minuten ist dieselbe wie in der Pruefzeile TEST.F_HERZ. */
+$ac_k = (is_array($ac_st) ? $ac_st : array()) + array('herz_min' => -1, 'erreichbar' => -1,
+    'alter_min' => -1, 'name' => '');
+$ac_k_n = count(cam_kameras()) - (trim((string) $ac_cfg['host']) === '' ? 1 : 0);
+$ac_k_herz = (int) $ac_k['herz_min'];
+?>
+<table class="sm-tbl" style="max-width:620px">
+<tr><th><?php echo cam_t('TEXT.KOPF_EIGENSCHAFT'); ?></th><th><?php echo cam_t('TEXT.WERT'); ?></th></tr>
+<tr><td><?php echo cam_t('TEXT.KOPF_TAKT'); ?></td>
+    <td><?= $ac_k_herz < 0 ? '<b>' . cam_t('TEXT.KOPF_TAKT_NIE') . '</b>'
+        : ($ac_k_herz <= 5 ? sprintf(cam_t('TEXT.KOPF_TAKT_OK'), $ac_k_herz)
+                          : '<b>' . sprintf(cam_t('TEXT.KOPF_TAKT_ALT'), $ac_k_herz) . '</b>') ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.KOPF_KAMERAS'); ?></td>
+    <td><?= (int) max(0, $ac_k_n) ?></td></tr>
+<tr><td><?= sprintf(cam_t('TEXT.KOPF_ANTWORTET'), ac_e((string) $ac_k['name'])) ?></td>
+    <td><?= trim((string) $ac_cfg['host']) === '' ? '&ndash;'
+        : ((int) $ac_cfg['pruef_minuten'] <= 0 ? cam_t('TEXT.KOPF_PRUEFUNG_AUS')
+        : ((int) $ac_k['erreichbar'] === -1 ? cam_t('TEXT.KOPF_UNGEPRUEFT')
+        : ((int) $ac_k['erreichbar'] === 1 ? cam_t('ALLGEMEIN.JA') : '<b>' . cam_t('ALLGEMEIN.NEIN') . '</b>'))) ?></td></tr>
+<tr><td><?php echo cam_t('TEXT.LETZTES_BILD'); ?></td>
+    <td><?= (int) $ac_k['alter_min'] >= 0 ? sprintf(cam_t('TEXT.KOPF_VOR_MIN'), (int) $ac_k['alter_min']) : '&ndash;' ?></td></tr>
+</table>
+
 <!-- Reiterleiste: echte Links, JavaScript faengt den Klick ab. Warum beides:
      Der Link traegt die Adresse - jeder Reiter ist damit verlinkbar, die
      Zurueck-Taste tut das Erwartete, und faellt das Skript aus, bleibt die
@@ -1017,6 +1046,7 @@ if ($ac_rahmen) {
 
 <!-- ================= Einstellungen ================= -->
 <div class="sm-pane<?= $ac_tab === 'tab-settings' ? ' sm-active' : '' ?>" id="tab-settings">
+<div class="sm-hinweis"><?php echo cam_t('TEXT.WAS_IST_DAS'); ?></div>
 <?php
 /* X-2: nach einer Beanstandung zeigt das Formular die eingetippten Werte -
    nur bis </form>, danach gelten wieder die gespeicherten. */
