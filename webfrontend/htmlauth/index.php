@@ -978,6 +978,15 @@ if ($ac_rahmen) {
 /* Eigene Ergaenzung, nicht aus der Vorlage (X-2, Regeln/04): das Feld, das
    nach einer Abweisung beanstandet ist. */
 .acw .sm-beanstandet { border: 2px solid #c62828 !important; background: #fff5f5 !important; }
+/* Welle Bild 20 (1.9.30): zwei Seiten aus dem Musterprojekt in Schritt 4 - Bild, Ueberschrift, Schritte und
+   Hinweise je Seite (wie Govee 0.9.27). */
+.acw .sm-bild { margin: 12px 0; }
+.acw .sm-bild img { max-width: 100%; height: auto; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
+.acw .sm-bild figcaption { font-size: .9em; color: #555; margin-top: 4px; }
+.acw h4.sm-h4 { color: #4f7d17; font-size: 0.98em; font-weight: 700; margin: 22px 0 4px;
+    padding-top: 10px; border-top: 1px solid #e0e0e0; }
+.acw .sm-schritte { margin: 6px 0 0 18px; padding: 0; }
+.acw .sm-schritte li { margin: 3px 0; }
 
 </style>
 <div class="acw">
@@ -1505,65 +1514,158 @@ foreach (cam_felder() as $ac_fn => $ac_fd) {
 </table>
 </div>
 
-<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b><br>
-<?php /* X-8 (02.10.2026, Entscheidung 36): Komplette Baustein-Liste in der Hausform
-         # | Baustein (Typ) | Name (Vorschlag) | Parameter | Eingaenge verbinden mit.
-         Titel, Adressen, Suchtexte, Grenzen, Einheiten und Sendebefehle kommen aus
-         DENSELBEN Funktionen wie die Importdateien (cam_vorlage_kopf(),
-         cam_eingangsbefehle(), cam_ausgangsbefehle()) - mit mehreren Kameras
-         stehen deren Befehle von selbst mit da. Typ, Name, Parameter und Verbindung
-         der Logik stehen in [BAUSTEIN] der Sprachdateien; {Kennung} in einem Text
-         wird zur laufenden Nummer "#n".
-         Zeile: array(Kennung, Typ, Name, Parameter, Argumente, Verbindung). Ein Name
-         als array('text' => ...) ist fertig (aus dem Code, maskiert) und geht nicht
-         noch einmal durch cam_t(). */
-$ac_bs_m = function ($s) { return '<span class="sm-mono">' . ac_e($s) . '</span>'; };
+<?php
+/**
+ * Die Baustein-Listen fuer Schritt 4 (Welle Bild 20, 1.9.30; Hausherr 11.10.2026: Vollausstattung, ein absoluter
+ * Laie soll das Maximum leicht uebernehmen koennen; Entwurf Welle 20 ac, Entscheidungen 1-16). Zwei Seiten aus
+ * dem LoxBerry-Plugins Musterprojekt, dort in Loxone Config gebaut und verbunden (Musterprojekt/
+ * baustein_listen.txt, Abschnitte "ACTi-Kamera" 17 und "ACTi-Kamera Aufnahmen" 22 Zeilen, wortgleich). Je
+ * Tabellenzeile EIN Sprachschluessel BAUSTEIN.Z<seite>_<nn> = "Typ | Name | Parameter | Eingaenge" ohne
+ * Auszeichnung; jede Zelle und jeder Satz wird maskiert ausgegeben.
+ *
+ * Bis 1.9.29 stand hier eine Liste mit 28 Zeilen (X-8): die Push-Kette lief ueber drei Schwellwertschalter an
+ * den abgefragten Ein/Aus-Werten PUSHAKTIV, PUSH und PTEST - hinter einem abgefragten Eingang gibt ein
+ * Schwellwertschalter bei jeder Abfrage einen Impuls (Regeln/09), die Meldung kaeme jede Minute -, und eine
+ * Ausfallerkennung fehlte, obwohl ERREICHBAR, FEHLER und HERZ geliefert werden.
+ *
+ * Rueckgabe: je Seite 'kopf' (Name der Musterseite), 'bild', 'schritte' und 'hinweise' (Saetze), 'zeilen'
+ * (je ein Text mit vier Zellen) - alles reiner Text; ac_bs_text() rechnet Behaelter und Befehle.
+ */
+function ac_bausteinseiten()
+{
+    return array(
+        array('kopf' => 'ACTi-Kamera', 'bild' => 'einbindung_loxone.png',
+              'schritte' => array(
+                  sprintf(cam_t('BAUSTEIN.S1_SCHRITT1'), cam_t('REITER.EINSTELLUNGEN'), cam_t('TEXT.L_PRUEF_MINUTEN'), cam_t('REITER.TEST'), cam_t('TEXT.VERBINDUNG_PRFEN'), cam_t('TEXT.JETZT_EIN_BILD_AUFNEHMEN')),
+                  sprintf(cam_t('BAUSTEIN.S1_SCHRITT2'), cam_t('REITER.LOXONE'), cam_t('LOX.K_VORLAGE')),
+                  cam_t('BAUSTEIN.S1_SCHRITT3'),
+                  cam_t('BAUSTEIN.S1_SCHRITT4'),
+                  cam_t('BAUSTEIN.S1_SCHRITT5')),
+              'zeilen' => array(
+                  cam_t('BAUSTEIN.Z1_01'),
+                  cam_t('BAUSTEIN.Z1_02'),
+                  cam_t('BAUSTEIN.Z1_03'),
+                  cam_t('BAUSTEIN.Z1_04'),
+                  cam_t('BAUSTEIN.Z1_05'),
+                  cam_t('BAUSTEIN.Z1_06'),
+                  cam_t('BAUSTEIN.Z1_07'),
+                  cam_t('BAUSTEIN.Z1_08'),
+                  cam_t('BAUSTEIN.Z1_09'),
+                  cam_t('BAUSTEIN.Z1_10'),
+                  cam_t('BAUSTEIN.Z1_11'),
+                  cam_t('BAUSTEIN.Z1_12'),
+                  cam_t('BAUSTEIN.Z1_13'),
+                  cam_t('BAUSTEIN.Z1_14'),
+                  cam_t('BAUSTEIN.Z1_15'),
+                  cam_t('BAUSTEIN.Z1_16'),
+                  cam_t('BAUSTEIN.Z1_17')),
+              'hinweise' => array(
+                  cam_t('BAUSTEIN.S1_H1'),
+                  cam_t('BAUSTEIN.S1_H2'),
+                  sprintf(cam_t('BAUSTEIN.S1_H3'), cam_t('TEXT.L_PRUEF_MINUTEN')),
+                  cam_t('BAUSTEIN.S1_H4'),
+                  cam_t('BAUSTEIN.S1_H5'))),
+        array('kopf' => 'ACTi-Kamera Aufnahmen', 'bild' => 'einbindung_loxone_aufnahmen.png',
+              'schritte' => array(
+                  sprintf(cam_t('BAUSTEIN.S2_SCHRITT1'), cam_t('REITER.LOXONE'), cam_t('LOX.K_VORLAGE_AUS'), cam_t('TOKEN.K_NEU'), cam_t('REITER.EINSTELLUNGEN'), cam_t('TEXT.PUSH_FREIGABE_AN_LOXONE_MELDEN'), cam_t('TEXT.MELDEFENSTER_NACH_EINER_AUFNAHME_M')),
+                  cam_t('BAUSTEIN.S2_SCHRITT2'),
+                  cam_t('BAUSTEIN.S2_SCHRITT3'),
+                  cam_t('BAUSTEIN.S2_SCHRITT4'),
+                  sprintf(cam_t('BAUSTEIN.S2_SCHRITT5'), cam_t('REITER.AUFNAHMEN'), cam_t('REITER.TEST'), cam_t('TEXT.TEST_PUSHNACHRICHT'))),
+              'zeilen' => array(
+                  cam_t('BAUSTEIN.Z2_01'),
+                  cam_t('BAUSTEIN.Z2_02'),
+                  cam_t('BAUSTEIN.Z2_03'),
+                  cam_t('BAUSTEIN.Z2_04'),
+                  cam_t('BAUSTEIN.Z2_05'),
+                  cam_t('BAUSTEIN.Z2_06'),
+                  cam_t('BAUSTEIN.Z2_07'),
+                  cam_t('BAUSTEIN.Z2_08'),
+                  cam_t('BAUSTEIN.Z2_09'),
+                  cam_t('BAUSTEIN.Z2_10'),
+                  cam_t('BAUSTEIN.Z2_11'),
+                  cam_t('BAUSTEIN.Z2_12'),
+                  cam_t('BAUSTEIN.Z2_13'),
+                  cam_t('BAUSTEIN.Z2_14'),
+                  cam_t('BAUSTEIN.Z2_15'),
+                  cam_t('BAUSTEIN.Z2_16'),
+                  cam_t('BAUSTEIN.Z2_17'),
+                  cam_t('BAUSTEIN.Z2_18'),
+                  cam_t('BAUSTEIN.Z2_19'),
+                  cam_t('BAUSTEIN.Z2_20'),
+                  cam_t('BAUSTEIN.Z2_21'),
+                  cam_t('BAUSTEIN.Z2_22')),
+              'hinweise' => array(
+                  cam_t('BAUSTEIN.S2_H1'),
+                  cam_t('BAUSTEIN.S2_H2'),
+                  sprintf(cam_t('BAUSTEIN.S2_H3'), cam_t('TEXT.L_MINDESTPAUSE')),
+                  cam_t('BAUSTEIN.S2_H4'),
+                  cam_t('BAUSTEIN.S2_H5'),
+                  sprintf(cam_t('BAUSTEIN.S2_H6'), cam_t('TEXT.KI_OBJEKTERKENNUNG_OPTIONAL')))),
+    );
+}
+
+/**
+ * Eine Zelle der Baustein-Seiten fuer die Ausgabe: der Behaelter in der Typzelle ("Vorlage ...") und die Namen
+ * der Vorlagenbefehle (ACTI_...) kommen aus DENSELBEN Funktionen wie die Importdateien - cam_vorlage_kopf(),
+ * cam_eingangsbefehle(), cam_ausgangsbefehle(), jeweils Kamera 1 (Entwurf Welle 20 ac, Abschnitt 4). Fuer
+ * Kamera 1 sind sie gleich den Namen des Musterprojekts; laeuft eine Vorlage einmal auseinander, folgt die
+ * Tabelle ihr. $karte: Name im Musterprojekt => Name aus der Vorlage.
+ */
+function ac_bs_text($s, array $karte)
+{
+    $s = (string) $s;
+    return isset($karte[$s]) ? $karte[$s] : strtr($s, $karte);
+}
+
 $ac_bs_ein = cam_vorlage_kopf('ein', $ac_host);
 $ac_bs_aus = cam_vorlage_kopf('aus', $ac_host);
-$ac_bs = array(
-    array('VI', 'T_VI', array('text' => ac_e($ac_bs_ein['title'])), 'P_VI',
-          array($ac_bs_m($ac_bs_ein['address']), ac_e($ac_bs_ein['polling'])), 'V_KEINE'),
+$ac_bs_karte = array(
+    "\u{201e}ACTi Kamera senden\u{201c}" => "\u{201e}" . $ac_bs_aus['title'] . "\u{201c}",
+    "\u{201c}ACTi Kamera senden\u{201d}" => "\u{201c}" . $ac_bs_aus['title'] . "\u{201d}",
+    "\u{201e}ACTi Kamera\u{201c}" => "\u{201e}" . $ac_bs_ein['title'] . "\u{201c}",
+    "\u{201c}ACTi Kamera\u{201d}" => "\u{201c}" . $ac_bs_ein['title'] . "\u{201d}",
 );
+$ac_bs_befehle = array();
 foreach (cam_eingangsbefehle() as $ac_bc) {
-    $ac_bs[] = array('F_' . $ac_bc['feld'], 'T_VI_BEFEHL', array('text' => ac_e($ac_bc['title'])),
-                     $ac_bc['unit'] !== '' ? 'P_VI_BEFEHL_EINHEIT' : 'P_VI_BEFEHL',
-                     array(ac_e($ac_bc['comment']), $ac_bs_m($ac_bc['check']), (int) $ac_bc['min'],
-                           (int) $ac_bc['max'], $ac_bs_m($ac_bc['unit'])), 'V_UNTER_VI');
+    if ((int) $ac_bc['kamera'] === 1) { $ac_bs_befehle['ACTI_' . $ac_bc['feld']] = $ac_bc['title']; }
 }
-$ac_bs[] = array('E1', 'T_VERZ', 'E1_NAME', 'E1_PARAM', array(), 'E1_VERB');
-$ac_bs[] = array('VO', 'T_VO', array('text' => ac_e($ac_bs_aus['title'])), 'P_VO',
-                 array($ac_bs_m($ac_bs_aus['address'])), 'V_KEINE');
 foreach (cam_ausgangsbefehle() as $ac_bc) {
-    $ac_bs[] = array('A_' . $ac_bc['title'], 'T_VO_BEFEHL', array('text' => ac_e($ac_bc['title'])), 'P_VO_BEFEHL',
-                     array(ac_e($ac_bc['comment']), $ac_bs_m($ac_bc['on'])), 'V_' . strtoupper($ac_bc['art']));
+    if ((int) $ac_bc['kamera'] === 1) { $ac_bs_befehle['ACTI_' . $ac_bc['art']] = $ac_bc['title']; }
 }
-$ac_bs[] = array('S1', 'T_SCHWELLE', 'S1_NAME', 'P_SCHWELLE', array(), 'S1_VERB');
-$ac_bs[] = array('S2', 'T_SCHWELLE', 'S2_NAME', 'P_SCHWELLE', array(), 'S2_VERB');
-$ac_bs[] = array('U1', 'T_UND', 'U1_NAME', 'P_KEINE', array(), 'U1_VERB');
-$ac_bs[] = array('O1', 'T_ODER', 'O1_NAME', 'O1_PARAM', array(), 'O1_VERB');
-$ac_bs[] = array('N1', 'T_BENACHR', 'N1_NAME', 'N1_PARAM', array(), 'N1_VERB');
-$ac_bs[] = array('S3', 'T_SCHWELLE', 'S3_NAME', 'P_SCHWELLE', array(), 'S3_VERB');
-$ac_bs[] = array('N2', 'T_BENACHR_TEST', 'N2_NAME', 'N2_PARAM', array(), 'N2_VERB');
-$ac_bs[] = array('ST', 'T_STATUS', 'ST_NAME', 'ST_PARAM', array(), 'ST_VERB');
-$ac_bs_nr = array();
-foreach ($ac_bs as $ac_i => $ac_z) { $ac_bs_nr[$ac_z[0]] = $ac_i + 1; }
-$ac_bs_t = function ($z) use ($ac_bs_nr) {
-    if (is_array($z)) { return $z['text']; }
-    return preg_replace_callback('/\{([A-Za-z0-9_]+)\}/', function ($m) use ($ac_bs_nr) {
-        return isset($ac_bs_nr[$m[1]]) ? '#' . $ac_bs_nr[$m[1]] : $m[0];
-    }, (string) cam_t('BAUSTEIN.' . $z));
-}; ?>
-<?php echo $ac_bs_t('TEXT'); ?>
+?>
+<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b><br>
+<?php echo cam_t('BAUSTEIN.TEXT'); ?>
+<div class="sm-small" style="margin-top:6px;"><b><?php echo cam_t('TEXT.PRAXIS_ERFAHRUNG_ZUM_BENACHRICHTIG'); ?></b> <?php echo cam_t('TEXT.ER_SENDET_NUR_BEI_EINER_01_FLANKE_'); ?></div>
+<?php foreach (ac_bausteinseiten() as $ac_bsei) { ?>
+<h4 class="sm-h4"><?= ac_e($ac_bsei['kopf']) ?></h4>
+<div class="sm-hinweis"><b><?= ac_e(cam_t('BAUSTEIN.SCHRITTE_TITEL')) ?></b>
+<ol class="sm-schritte">
+<?php foreach ($ac_bsei['schritte'] as $ac_bsx) { ?>
+<li><?= ac_e($ac_bsx) ?></li>
+<?php } ?>
+</ol></div>
 <table class="sm-tbl">
-<tr><th>#</th><th><?php echo cam_t('BAUSTEIN.T_TYP'); ?></th><th><?php echo cam_t('BAUSTEIN.T_NAME'); ?></th><th><?php echo cam_t('BAUSTEIN.T_PARAM'); ?></th><th><?php echo cam_t('BAUSTEIN.T_VERB'); ?></th></tr>
-<?php foreach ($ac_bs as $ac_i => $ac_z) {
-    $ac_p = $ac_bs_t($ac_z[3]);
-    if ($ac_z[4]) { $ac_p = vsprintf($ac_p, $ac_z[4]); } ?>
-<tr><td><?= $ac_i + 1 ?></td><td><?php echo $ac_bs_t($ac_z[1]); ?></td><td><span class="sm-mono"><?php echo $ac_bs_t($ac_z[2]); ?></span></td><td><?php echo $ac_p; ?></td><td><?php echo $ac_bs_t($ac_z[5]); ?></td></tr>
+<tr><th style="width:28px;">#</th><th><?= ac_e(cam_t('BAUSTEIN.T_TYP')) ?></th><th><?= ac_e(cam_t('BAUSTEIN.T_NAME')) ?></th>
+    <th><?= ac_e(cam_t('BAUSTEIN.T_PARAM')) ?></th><th><?= ac_e(cam_t('BAUSTEIN.T_VERB')) ?></th></tr>
+<?php foreach ($ac_bsei['zeilen'] as $ac_bsi => $ac_bsz) {
+    $ac_bsc = array_pad(explode(' | ', $ac_bsz, 4), 4, ''); ?>
+<tr><td><?= (int) $ac_bsi + 1 ?></td><td><?= ac_e(ac_bs_text($ac_bsc[0], $ac_bs_karte)) ?></td><td><span class="sm-mono"><?= ac_e(ac_bs_text($ac_bsc[1], $ac_bs_befehle)) ?></span></td>
+    <td><?= ac_e($ac_bsc[2]) ?></td><td><?= ac_e($ac_bsc[3]) ?></td></tr>
 <?php } ?>
 </table>
-<div class="sm-small"><b><?php echo cam_t('TEXT.PRAXIS_ERFAHRUNG_ZUM_BENACHRICHTIG'); ?></b> <?php echo cam_t('TEXT.ER_SENDET_NUR_BEI_EINER_01_FLANKE_'); ?></div>
-<div class="sm-small" style="margin-top:6px;"><?= sprintf($ac_bs_t('ERLAEUTERUNG'), $ac_bs_m(cam_anlass_beispiel())) ?></div>
+<div class="sm-warnung"><b><?= ac_e(cam_t('BAUSTEIN.HINWEISE_TITEL')) ?></b>
+<ul class="sm-schritte">
+<?php foreach ($ac_bsei['hinweise'] as $ac_bsx) { ?>
+<li><?= ac_e($ac_bsx) ?></li>
+<?php } ?>
+</ul></div>
+<figure class="sm-bild">
+<img src="<?= ac_e($ac_bsei['bild']) ?>" alt="<?= ac_e(cam_t('LOX.BILD_ALT')) ?>" loading="lazy">
+<figcaption><?= ac_e(sprintf(cam_t('LOX.BILD_UNTERSCHRIFT'), $ac_bsei['kopf'])) ?></figcaption>
+</figure>
+<div class="sm-small"><?php echo cam_t('LOX.MUSTERPROJEKT'); ?></div>
+<?php } ?>
 </div>
 
 <div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_5_BILD_IN_DER_APP_ANZEIGEN'); ?></b><br>

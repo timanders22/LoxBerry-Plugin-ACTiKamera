@@ -1684,7 +1684,14 @@ function cam_betrieb_schreiben(array $z, $id = 1)
 function cam_herzschlag()
 {
     $jetzt = date('c');
-    $js = json_encode(array('herz' => $jetzt));
+    /* Seit 1.9.30 (Welle Bild 20, Entwurf Welle 20 ac E3) zaehlt daneben ein Laufzaehler 0-999 je Takt eins
+       weiter (cam_herzzaehler()). HERZ allein traegt fuer eine Analogwertvalidierung in Loxone nicht: der Takt
+       laeuft auf der vollen Minute, HERZ = gerundete Minuten seit dem letzten Lauf steht bei gesunder Anlage
+       dauerhaft auf 0 oder 1 - "aendert sich nicht" hiesse dort nichts. Der Zaehler wechselt in JEDEM Lauf;
+       steht der LoxBerry oder der Minutentakt, bleibt er stehen. */
+    $alt = cam_herzzaehler();
+    $zaehler = $alt < 0 ? 0 : ($alt + 1) % 1000;
+    $js = json_encode(array('herz' => $jetzt, 'zaehler' => $zaehler));
     if ($js !== false) {
         cam_schreibe_unteilbar(cam_herzdatei(), $js);
     }
@@ -1696,6 +1703,22 @@ function cam_herzstand()
 {
     $d = cam_json_lesen(cam_herzdatei());
     return isset($d['herz']) ? (string) $d['herz'] : '';
+}
+
+/**
+ * Lebenszeichen des Minutentakts fuer den Miniserver (Feld ZAEHLER, seit 1.9.30, Welle Bild 20; Entwurf Welle 20
+ * ac, E3): 0 bis 999, eins weiter je Lauf, laeuft um; -1, wenn der Minutentakt noch nie lief (oder vor dem
+ * ersten Lauf nach dem Update - herzschlag.json einer Vorfassung traegt nur 'herz'). Pluginweit wie HERZ, nur
+ * bei Kamera 1, nicht ueber MQTT (dort sind online/ts das Lebenszeichen). Steht in der Statuszeile direkt hinter
+ * HERZ (bei einer Kamera ganz hinten) - kein bestehender Suchtext aendert sich (fuehrendes Semikolon).
+ */
+function cam_herzzaehler()
+{
+    $d = cam_json_lesen(cam_herzdatei());
+    if (!isset($d['zaehler']) || !is_int($d['zaehler']) || $d['zaehler'] < 0 || $d['zaehler'] > 999) {
+        return -1;
+    }
+    return $d['zaehler'];
 }
 
 /* ---------------- Kamera-Zugriff ---------------- */
@@ -3338,6 +3361,9 @@ function cam_basisfelder()
         'ERREICHBAR' => array(0, -1, 1, 'FELD.ERREICHBAR', '', 1, 1, 0),
         'FEHLER'     => array(1, 0, 100000, 'FELD.FEHLER', '<v.0>', 1, 1, 0),
         'HERZ'       => array(1, -1, 100000, 'FELD.HERZ', '<v.1> min', 0, 0, 0),
+        /* Seit 1.9.30 (Welle Bild 20 E3): das Lebenszeichen des Minutentakts, cam_herzzaehler(). Analog,
+           nicht ueber MQTT, pluginweit, nicht retained - wie HERZ. */
+        'ZAEHLER'    => array(1, -1, 999, 'FELD.ZAEHLER', '<v.0>', 0, 0, 0),
     );
 }
 
@@ -3550,6 +3576,7 @@ function cam_werte($st = null, $fuer = 1)
             $aus['PUSH'] = (int) $s['push'];
             $aus['PTEST'] = cam_ptest_active() ? 1 : 0;
             $aus['HERZ'] = (int) $s['herz_min'];
+            $aus['ZAEHLER'] = cam_herzzaehler();
         }
     }
     /* Die Reihenfolge der Statuszeile folgt der Feldtabelle, nicht der
@@ -3870,9 +3897,10 @@ function cam_eingangsbefehle()
 function cam_vorlage($host = '')
 {
     return array('VI_actikamera.xml', cam_xml_virtual_in_http(cam_vorlage_kopf('ein', $host) + array(
-        'comment' => 'Erzeugt vom LoxBerry-Plugin ACTi Kamera (' . date('d.m.Y') . '). '
-                   . 'Loxone Config legt beim Import neu an und ueberschreibt nichts - '
-                   . 'zweimal eingelesen ergibt doppelte Bausteine.',
+        /* Seit 1.9.30 (Welle Bild 20 E13): aus der Sprachdatei, ohne Erzeugungsdatum - so steht er im
+           Musterprojekt. Der Titel bleibt fest deutsch (Sprachregel 13.10.2026), nur der Kommentar folgt der
+           Sprache der Oberflaeche. */
+        'comment' => trim(strip_tags(html_entity_decode(cam_t('LOX.VI_KOMMENTAR'), ENT_QUOTES, 'UTF-8'))),
     ), cam_eingangsbefehle()));
 }
 
@@ -3933,9 +3961,8 @@ function cam_ausgangsbefehle()
 function cam_vorlage_ausgang($host = '')
 {
     return array('VQ_actikamera.xml', cam_xml_virtual_out(cam_vorlage_kopf('aus', $host) + array(
-        'comment' => 'Erzeugt vom LoxBerry-Plugin ACTi Kamera (' . date('d.m.Y') . '). '
-                   . 'Die Adressen enthalten das Aktionstoken - nach einem neuen Token '
-                   . 'muss diese Datei neu erzeugt und erneut eingelesen werden.',
+        // Seit 1.9.30 (Welle Bild 20 E13): aus der Sprachdatei, ohne Erzeugungsdatum.
+        'comment' => trim(strip_tags(html_entity_decode(cam_t('LOX.VQ_KOMMENTAR'), ENT_QUOTES, 'UTF-8'))),
     ), cam_ausgangsbefehle()));
 }
 

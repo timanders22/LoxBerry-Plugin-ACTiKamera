@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.29 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.30 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -12,6 +12,40 @@ in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxo
 nur noch `cam.php?foto=1&token=…` auf; die Zugangsdaten bleiben auf dem LoxBerry.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
+
+## Neu in 1.9.30
+
+Einbindung in Loxone in Vollausstattung: zwei Seiten aus dem gemeinsamen Musterprojekt mit Bildern und
+Schritt-für-Schritt-Anleitung; neues Lebenszeichen `ZAEHLER`.
+
+* **Wer nach der Baustein-Liste bis 1.9.29 gebaut hat: die drei Schwellwertschalter („Aufnahme erfolgt“,
+  „Push freigegeben“, „Test-Push läuft“) entfernen und `ACTI_PUSHAKTIV` bzw. `ACTI_PTEST` direkt anschließen.**
+  Die alte Liste hängte sie an abgefragte Ein/Aus-Werte vor die Benachrichtigungen; hinter einem abgefragten
+  Eingang gibt ein Schwellwertschalter bei jeder Abfrage einen kurzen Impuls – „Besuch an der Tür“ und
+  „Test-Push“ sind dann jede Minute zu erwarten (an anderer Linie gemessen, an dieser nicht). `ACTI_PUSHAKTIV`
+  enthält die Push-Freigabe schon; das UND mit `ACTI_PUSH` und das ODER „Push-Sammler“ entfallen ebenfalls.
+* **Reiter „Einbindung in Loxone“, Schritt 4:** Statt der bisherigen Liste mit 28 Zeilen stehen dort die zwei
+  Seiten des [LoxBerry-Plugins Musterprojekts](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt), je mit
+  Kasten „So übernehmen Sie diese Seite“, Tabelle, Hinweisen und Bild: „ACTi-Kamera“ (17 Zeilen: alle Werte,
+  Ausfallerkennung über `ERREICHBAR` und das neue Lebenszeichen `ZAEHLER` mit einer Analogwertvalidierung,
+  Störmeldung nach 10 Minuten, Status „Zustand“ und „Archiv“) und „ACTi-Kamera Aufnahmen“ (22 Zeilen: Klingel
+  → 3 s → Einzelbild, bei Abwesenheit Bildserie statt Einzelbild, Türtaster und Bewegungsmelder je ein Bild,
+  Meldung „Aufnahme bei Abwesenheit“, eigener Test-Push, „Person vor der Kamera“ als Schaltausgang, Status
+  „Aufnahmen“). Behälter und Befehlsnamen kommen aus denselben Funktionen wie die Importdateien.
+* **Neues Feld `ZAEHLER`** (Lebenszeichen des Minutentakts, 0 bis 999, eins weiter je Lauf, -1 ohne Lauf):
+  steht in der Statuszeile direkt hinter `HERZ` (`…;HERZ=…;ZAEHLER=…`, bei einer Kamera ganz hinten), nur
+  einmal (wie `HERZ`), nicht über MQTT (dort sind
+  `online`/`ts` das Lebenszeichen). Es ändert sich bei jeder Abfrage; bleibt es stehen, steht der LoxBerry oder
+  der Minutentakt. `HERZ` taugt dafür nicht: bei laufendem Takt steht es dauerhaft auf 0 oder 1. Kein
+  bestehender Suchtext ändert sich, bestehende Importe laufen weiter. **Wer `ZAEHLER` nutzen will,** legt im
+  Behälter „ACTi Kamera“ einen Befehl `ACTI_ZAEHLER` mit dem Suchtext `\i;ZAEHLER=\i\v` von Hand an (Minimum
+  -1, Maximum 999) – ein neuer Import legt alle Eingänge doppelt an.
+* **Texte berichtigt:** Schritt 1 nennt den Ausgang „ACTi Kamera senden“ (wie die Importdatei), Typnamen wie in
+  Loxone Config, Reiter MQTT nennt, warum das Musterprojekt den virtuellen HTTP-Eingang nimmt. Der Kommentar
+  beider Importdateien kommt aus der Sprachdatei und trägt kein Erzeugungsdatum mehr (betrifft nur neu
+  eingelesene Vorlagen).
+* Aufnahme, Endpunkt-Aktionen, MQTT-Themen und JSON unverändert. Gerendert unter PHP 7.4, 8.4 und 8.5, nicht am
+  Gerät angesehen.
 
 ## Neu in 1.9.29
 
@@ -178,7 +212,8 @@ der dreifache Prüftakt. `OK` heißt weiter „Adresse eingetragen“.
   mit gesetztem Stromkennwort nur mit Token
 - **Ausfallerkennung**: das Plugin fragt die Kamera in einstellbarem Takt, ob sie
   antwortet, und meldet `ERREICHBAR` sowie `FEHLER` (fehlgeschlagene Prüfungen in
-  Folge) an Loxone. Bleibt der Minutentakt selbst stehen, wächst `HERZ`, und
+  Folge) an Loxone. Seit 1.9.30 zählt das Lebenszeichen `ZAEHLER` je Minutentakt
+  eins weiter. Bleibt der Minutentakt selbst stehen, wächst `HERZ`, und
   seit 1.9.23 steht `ERREICHBAR` auf 0, sobald die letzte Prüfung älter ist als
   das Dreifache des Prüftakts (`OK` heißt weiter nur „Adresse eingetragen“)
 - **Push-Auslöser für Loxone**: `PUSHAKTIV=1` für ein einstellbares Zeitfenster
@@ -197,8 +232,17 @@ der dreifache Prüftakt. `OK` heißt weiter „Adresse eingetragen“.
   ein toter Dienst nicht wie ein ruhiges Haus aussieht; **JSON** für Drittsoftware
 - **Fertige Importdateien für Loxone Config** — eine für die virtuellen Eingänge,
   eine für die virtuellen Ausgänge samt Aktionstoken
-- Reiter: Einstellungen, MQTT, Einbindung in Loxone (Schritt-für-Schritt inkl.
-  kompletter Baustein-Liste), Aufnahmen, Test, Logdateien
+- Reiter: Einstellungen, MQTT, Einbindung in Loxone (Schritt für Schritt, mit zwei
+  Baustein-Seiten aus dem Musterprojekt), Aufnahmen, Test, Logdateien
+
+## Einbindung in Loxone
+
+Der Reiter *Einbindung in Loxone* führt Schritt für Schritt durch beide Richtungen, mit den fertigen
+Importdateien (virtueller HTTP-Eingang „ACTi Kamera“, virtueller Ausgang „ACTi Kamera senden“) und in Schritt 4
+den **Baustein-Listen** der zwei Seiten zum Nachbauen. Fertig verbunden stehen die Bausteine auf den Seiten
+„ACTi-Kamera“ und „ACTi-Kamera Aufnahmen“ im
+[LoxBerry-Plugins Musterprojekt](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt) – die ganze
+Projektdatei mit allen Plugin-Seiten und Vorlagen.
 
 ## Mehrere Kameras
 
@@ -219,7 +263,7 @@ weitere trägt ihre Nummer:
 anfassen.** Beide Importdateien wachsen einfach um die neuen Bausteine; Loxone
 Config legt beim Import neu an und überschreibt nichts.
 
-`PUSH`, `PTEST` und `HERZ` gibt es genau einmal — ein Test-Push und ein
+`PUSH`, `PTEST`, `HERZ` und `ZAEHLER` gibt es genau einmal — ein Test-Push und ein
 Minutentakt gehören zum Plugin, nicht zu einer Kamera. Stünden sie je Kamera
 da, sähe man auf einer Anlage mit vier Kameras viermal denselben Wert und
 hielte ihn für vier Messungen.
