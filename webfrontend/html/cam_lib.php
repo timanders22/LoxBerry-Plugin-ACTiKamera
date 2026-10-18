@@ -3028,20 +3028,6 @@ function cam_webhook_felder()
     return array_keys(cam_webhook_daten('', '', array(), 1));
 }
 
-/**
- * Der Beispielparameter fuer den Anlass, wie ihn die Anleitung zeigt.
- *
- * Aus dem Code, nicht aus der Sprachdatei: language_en.ini nannte bis
- * 1.9.16 "trigger=klingel", waehrend cam.php $_GET['anlass'] liest. Wer
- * die englische Oberflaeche abschrieb, trug in Loxone einen Parameter
- * ein, den es nicht gibt - und ein virtueller Ausgang wertet die
- * Antwort nicht aus, der Ausfall blieb still.
- */
-function cam_anlass_beispiel()
-{
-    return 'anlass=klingel';
-}
-
 /** Die Parameter, die Webhook 2 an seine Adresse anhaengt. */
 function cam_webhook2_parameter()
 {

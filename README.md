@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.30 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.31 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -12,6 +12,19 @@ in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxo
 nur noch `cam.php?foto=1&token=…` auf; die Zugangsdaten bleiben auf dem LoxBerry.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
+
+## Neu in 1.9.31
+
+Pflege ohne neues Verhalten: Oberfläche, Vorlagen, Endpunkte, MQTT und Minutentakt sind unverändert.
+
+* **Kein Neuimport nötig** – die Importdateien sind bytegleich mit 1.9.30, im eigenen Loxone-Projekt ändert
+  sich nichts.
+* Aufgeräumt: die Funktion `cam_anlass_beispiel()` ist entfernt. Sie lieferte das Beispiel `anlass=klingel`
+  für die Baustein-Liste bis 1.9.29 und wurde seit 1.9.30 nicht mehr aufgerufen. Den Teil `anlass=…` der
+  Adresse erklärt weiter ein Hinweis auf der Seite „ACTi-Kamera Aufnahmen“.
+* Aufgeräumt: vier Texte der alten Baustein-Liste (Schwellwertschalter S1/S2, „Schwellwertschalter an
+  PTEST“, „Statusbaustein“) sind aus den Sprachdateien entfernt; keine Seite hat sie mehr gezeigt.
+* Gerendert unter PHP 7.4, 8.4 und 8.5 (Seiten unverändert), nicht am Gerät angesehen.
 
 ## Neu in 1.9.30
 
