@@ -219,11 +219,10 @@ function cam_bildurl($id = 1, $host = null)
     if ($host === null) {
         $host = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'loxberry';
     }
-    /* Der Ordnername kommt aus der Umgebung, nicht aus einer festen
-       Zeichenkette - ueberall sonst im Plugin wird LBPPLUGINDIR ausgewertet.
-       Bei abweichendem Ordnernamen zeigte die verschickte Bildadresse ins
-       Leere. */
-    $ordner = getenv('LBPPLUGINDIR') ?: basename(dirname(__FILE__));
+    /* Der Ordnername kommt aus cam_paths() (A8, seit 1.9.32) - eine Stelle
+       fuer Pfade und Adressen. Bis 1.9.31 stand hier LBPPLUGINDIR oder der
+       Name des eigenen Ordners; im Archiv war das "html". */
+    $ordner = cam_paths()['ordner'];
     return 'http://' . $host . '/plugins/' . $ordner
          . '/letztesbild' . cam_sx($id) . '.jpg';
 }
@@ -326,7 +325,10 @@ function cam_paths()
         'datadir' => $lb . '/data/plugins/' . $ordner,
         'archiv' => $lb . '/data/plugins/' . $ordner . '.archiv',
         'web' => $lb . '/webfrontend/html/plugins/' . $ordner,
-        'tmp' => '/tmp/actikamera',
+        /* Seit 1.9.32 (A8) aus dem Ordnernamen statt fest "/tmp/actikamera" -
+           bei FOLDER actikamera derselbe Pfad, die Merker ueberleben das
+           Update. */
+        'tmp' => '/tmp/' . $ordner,
         'lbhome' => $lb,
         'ordner' => $ordner,
         'fremd' => '',
@@ -468,7 +470,11 @@ function cam_vorgaben()
     'clip_seconds' => 10,        // Laenge eines Videoclips
     'clip_fps' => 2,             // Bilder je Sekunde im Clip
     'notify' => array(),
-    'mqtt_enabled' => 0,
+    /* Seit 1.9.32 ab Werk 1 (Entscheidung 2, E-E11): eine Neuinstallation
+       sendet ueber das Gateway, ohne dass jemand die Oberflaeche oeffnet. Eine
+       eingerichtete Bestandsdatei ohne den Schluessel bekommt ueber die
+       Lese-Regel cam_uebergang() weiter 0. */
+    'mqtt_enabled' => 1,
     'mqtt_topic' => 'acti',
     'keep_max' => 0,             // max. Dateien je Archiv (0 = unbegrenzt)
     'timelapse' => 0,            // Zeitraffer-Aufnahme aktiv
@@ -490,6 +496,16 @@ function cam_vorgaben()
        Stromkennwort gesetzt ist, nur mit Token). Neue Funktion, ab Werk aus:
        0 aendert das Verhalten, 1 nicht. */
     'bild_fest' => 1,
+    /* Seit 1.9.32 (Entscheidung 2, E-E12): der HTTP-Lesezweig fuer Loxone
+       (Statuszeile und ?json von cam.php). Neuinstallation 0 - Werte kommen
+       ueber MQTT; eine eingerichtete Bestandsdatei ohne den Schluessel liest
+       ihn als 1 (cam_uebergang(), postupgrade.sh schreibt ihn fest). Bilder,
+       Livebild, e.php und Aktionen mit Aktionstoken haengen nicht daran. */
+    'endpunkt_ein' => 0,
+    /* Seit 1.9.32 (E-E1 bis E-E5): Befehle aus Loxone ueber die
+       Befehlsbruecke annehmen (foto, clip, testpush) - ab Werk aus, wirkt nur
+       mit mqtt_enabled. */
+    'befehle_mqtt_ein' => 0,
 );
 }
 
@@ -613,6 +629,9 @@ function cam_wertregeln()
         'pruef_minuten'   => array('art' => 'zahl', 'min' => 0, 'max' => 1440),
         'mindestpause'    => array('art' => 'zahl', 'min' => 0, 'max' => 3600),
         'bild_fest'       => array('art' => 'zahl', 'min' => 0, 'max' => 1),
+        // Seit 1.9.32 (Pflicht, Entwurf 2.10): sonst wiese die Sicherung beide als "unbekannt" ab.
+        'endpunkt_ein'    => array('art' => 'zahl', 'min' => 0, 'max' => 1),
+        'befehle_mqtt_ein' => array('art' => 'zahl', 'min' => 0, 'max' => 1),
     );
 }
 
@@ -859,6 +878,10 @@ function cam_config($erzeugen = true)
     if (!is_array($cfg)) {
         $cfg = array();
     }
+    /* Die Lese-Regel fuer Bestandsdateien (seit 1.9.32, N1): eine
+       eingerichtete Datei ohne endpunkt_ein liest 1, ohne mqtt_enabled 0 -
+       VOR den Vorgaben, die sonst die neuen Werte 0 bzw. 1 setzten. */
+    $cfg += cam_uebergang($cfg);
     $cfg += cam_alle_vorgaben();
     if (!is_array($cfg['notify'])) {
         $cfg['notify'] = array();
@@ -1118,7 +1141,8 @@ function cam_ausloeser_adresse($id, $host = '')
     if ($host === '') {
         $host = isset($_SERVER['HTTP_HOST']) ? (string) $_SERVER['HTTP_HOST'] : (gethostname() ?: 'loxberry');
     }
-    $ordner = getenv('LBPPLUGINDIR') ?: basename(__DIR__);
+    // Seit 1.9.32 (A8): der Ordnername aus cam_paths() - eine Stelle fuer Pfade und Adressen.
+    $ordner = cam_paths()['ordner'];
     $k = cam_kcfg($id);
     $t = (string) $k['ausloeser_token'];
     return 'http://' . $host . '/plugins/' . $ordner . '/e.php?t=' . $t;
@@ -1272,11 +1296,6 @@ function cam_log($msg)
     if (!is_dir(dirname($f))) {
         @mkdir(dirname($f), 0775, true);
     }
-    clearstatcache(true, $f);
-    if (is_file($f) && filesize($f) > 512000) {
-        $tail = array_slice(file($f, FILE_IGNORE_NEW_LINES) ?: array(), -200);
-        @file_put_contents($f, implode("\n", $tail) . "\n");
-    }
     /* Passwoerter niemals ins Protokoll - und zwar die aller Kameras.
        Bis 1.9.16 wurde nur $cfg['pass'] ersetzt, also Kamera 1; pass2 bis
        pass4 standen ungeschuetzt da. Aktionstoken und Stromkennwort
@@ -1286,7 +1305,34 @@ function cam_log($msg)
             $msg = str_replace($ac_w, '********', $msg);
         }
     }
-    @file_put_contents($f, '[' . date('Y-m-d H:i:s') . '] ' . $msg . "\n", FILE_APPEND);
+    /* Kuerzen und Anhaengen unteilbar (E5, seit 1.9.32; Bauform Docker D14):
+       bis 1.9.31 las ein Schreiber die Datei, schnitt sie auf 200 Zeilen und
+       schrieb sie mit file_put_contents zurueck - schrieb ein zweiter (Takt,
+       Endpunkt, Bruecke, abgekoppelte Aufnahme) dazwischen, war seine Zeile
+       weg oder die Datei halb. Jetzt unter einer Sperre <log>.lock,
+       geoeffnet mit fopen 'ce' - ein Kindprozess erbt sie nicht:  gekuerzt wird ueber eine
+       Nebendatei mit rename, angehaengt mit FILE_APPEND | LOCK_EX. Geht die
+       Sperre nicht, wird trotzdem angehaengt - eine verlorene Zeile waere
+       schlimmer als eine ungekuerzte Datei. */
+    $sp = @fopen($f . '.lock', 'ce');
+    $gesperrt = ($sp !== false) && @flock($sp, LOCK_EX);
+    clearstatcache(true, $f);
+    if ($gesperrt && is_file($f) && filesize($f) > 512000) {
+        $tail = array_slice(file($f, FILE_IGNORE_NEW_LINES) ?: array(), -200);
+        $neben = $f . '.' . getmypid() . '.neu';
+        if (@file_put_contents($neben, implode("\n", $tail) . "\n") !== false) {
+            if (!@rename($neben, $f)) {
+                @unlink($neben);
+            }
+        }
+    }
+    @file_put_contents($f, '[' . date('Y-m-d H:i:s') . '] ' . $msg . "\n", FILE_APPEND | LOCK_EX);
+    if ($gesperrt) {
+        @flock($sp, LOCK_UN);
+    }
+    if ($sp !== false) {
+        @fclose($sp);
+    }
 }
 
 /** Die Geheimnisse der Konfiguration - EINE Liste fuer Protokoll und Einmalmeldung. */
@@ -1373,7 +1419,7 @@ function cam_einmal_lesen()
 function cam_eingabe_felder($formular)
 {
     if ($formular === 'mqtt') {
-        return array('mqtt_enabled', 'mqtt_topic');
+        return array('mqtt_enabled', 'mqtt_topic', 'befehle_mqtt_ein');
     }
     if ($formular !== 'settings') {
         return array();
@@ -1412,7 +1458,7 @@ function cam_eingabe_geheimfelder($formular)
 function cam_eingabe_haken($feld)
 {
     return in_array(preg_replace('/[2-9]\z/', '', (string) $feld),
-                    array('mqtt_enabled', 'zugang_loeschen', 'timelapse', 'notify_push', 'bild_fest'), true);
+                    array('mqtt_enabled', 'befehle_mqtt_ein', 'zugang_loeschen', 'timelapse', 'notify_push', 'bild_fest'), true);
 }
 
 /** Ein Adressfeld, in dem ein Kennwort stehen kann (im Formular maskiert, U6). */
@@ -1598,7 +1644,7 @@ function cam_melden($schwere, $text)
     $s = (int) $schwere;
     if ($s < 1 || $s > 7) { $s = 4; }
     notify_ext(array(
-        'PACKAGE'  => getenv('LBPPLUGINDIR') ?: 'actikamera',
+        'PACKAGE'  => $p['ordner'],
         'NAME'     => 'ACTi Kamera',
         'MESSAGE'  => (string) $text,
         'SEVERITY' => $s,
@@ -1709,7 +1755,8 @@ function cam_herzstand()
  * Lebenszeichen des Minutentakts fuer den Miniserver (Feld ZAEHLER, seit 1.9.30, Welle Bild 20; Entwurf Welle 20
  * ac, E3): 0 bis 999, eins weiter je Lauf, laeuft um; -1, wenn der Minutentakt noch nie lief (oder vor dem
  * ersten Lauf nach dem Update - herzschlag.json einer Vorfassung traegt nur 'herz'). Pluginweit wie HERZ, nur
- * bei Kamera 1, nicht ueber MQTT (dort sind online/ts das Lebenszeichen). Steht in der Statuszeile direkt hinter
+ * bei Kamera 1; ueber MQTT geht derselbe Zaehler seit 1.9.32 als Thema "zaehler" (cam_mqtt_lebenszeichen(),
+ * klein geschrieben, damit HTTP-Feld und MQTT-Thema nicht verwechselt werden). Steht in der Statuszeile direkt hinter
  * HERZ (bei einer Kamera ganz hinten) - kein bestehender Suchtext aendert sich (fuehrendes Semikolon).
  */
 function cam_herzzaehler()
@@ -1937,8 +1984,20 @@ function cam_system($befehl, $id = 1)
 }
 
 /**
- * Ermittelt die RTSP-Adresse: entweder hinterlegt oder ueber GET_STREAM erfragt.
- * Die Zugangsdaten werden erst hier eingesetzt, damit sie nirgends gespeichert sind.
+ * Ermittelt die RTSP-Adresse: hinterlegt, sonst gebildet aus Kamera-Adresse,
+ * RTSP-Port und Strom (rtsp_stream). Die Zugangsdaten werden erst hier
+ * eingesetzt, damit sie nirgends gespeichert sind.
+ *
+ * Seit 1.9.33 OHNE GET_STREAM (Geraetemessung 26.10.2026, "E72 Kamera Gang"):
+ * bis 1.9.32 fragte diese Funktion bei leerer Adresse zuerst
+ * /cgi-bin/cmd/system?GET_STREAM. Die ACTi-Kamera antwortet darauf aber nicht
+ * mit einer Adresse, sondern mit dem MJPEG-Strom selbst (siehe
+ * cam_mjpeg_url(): gemessen HTTP 200, 10,7 MB in der cURL-Frist von 8 s,
+ * Antwort false; mit den zwei Rueckfall-Anmeldungen von cam_system() 24 s).
+ * Erst danach griff die gebildete Adresse - das Livebild startete rund 24 s
+ * spaet, und die RTSP-Pruefung (Frist ab dem Aufruf) lief in ihre Frist.
+ * Die gebildete Adresse ist am Geraet geprueft und war schon bisher der
+ * Weg, der tatsaechlich griff.
  */
 function cam_rtsp_url($nur_gespeichert = false, $id = 1)
 {
@@ -1946,23 +2005,15 @@ function cam_rtsp_url($nur_gespeichert = false, $id = 1)
     $url = trim((string) $cfg['rtsp_url']);
 
     if ($url === '' && !$nur_gespeichert) {
-        list($antwort, $code, $err) = cam_system('GET_STREAM', $id);
-        if ($antwort !== false && preg_match('#rtsp://[^\s\'"&]+#i', (string) $antwort, $m)) {
-            $url = $m[0];
-        } elseif ($antwort !== false && preg_match('#GET_STREAM=\'?([^\s\'"]+)#i', (string) $antwort, $m)) {
-            $url = $m[1];
-        }
-        if ($url === '') {
-            // Am Geraet geprueft: rtsp://<host>:7070//stream1 bzw. //stream2.
-            // Der doppelte Schraegstrich gehoert dazu, die Kamera erwartet ihn so.
-            $host = preg_replace('#^https?://#i', '', trim((string) $cfg['host']));
-            $host = rtrim(explode('/', $host)[0], '/');
-            $host = explode(':', $host)[0];
-            $port = max(1, min(65535, (int) $cfg['rtsp_port']));
-            $nr = ((int) $cfg['rtsp_stream']) === 1 ? 1 : 2;
-            if ($host !== '') {
-                $url = 'rtsp://' . $host . ':' . $port . '//stream' . $nr;
-            }
+        // Am Geraet geprueft: rtsp://<host>:7070//stream1 bzw. //stream2.
+        // Der doppelte Schraegstrich gehoert dazu, die Kamera erwartet ihn so.
+        $host = preg_replace('#^https?://#i', '', trim((string) $cfg['host']));
+        $host = rtrim(explode('/', $host)[0], '/');
+        $host = explode(':', $host)[0];
+        $port = max(1, min(65535, (int) $cfg['rtsp_port']));
+        $nr = ((int) $cfg['rtsp_stream']) === 1 ? 1 : 2;
+        if ($host !== '') {
+            $url = 'rtsp://' . $host . ':' . $port . '//stream' . $nr;
         }
     }
     if ($url === '') {
@@ -1971,15 +2022,13 @@ function cam_rtsp_url($nur_gespeichert = false, $id = 1)
     /* Benutzer und Passwort in die RTSP-Adresse einsetzen, falls noch nicht
      * enthalten.
      *
-     * ACHTUNG, bewusst so gelassen: ffmpeg kennt fuer RTSP keine getrennte
-     * Anmeldeoption - die Zugangsdaten muessen in der Adresse stehen, und
-     * die Adresse steht damit in der Kommandozeile, die auf einem Linux
-     * ueber /proc/<pid>/cmdline fuer jeden lokalen Benutzer lesbar ist.
-     * escapeshellarg() schuetzt gegen Einschleusung, nicht gegen Mitlesen.
-     * Ein Umweg ueber die Umgebung hilft nicht: die Schale setzt den Wert
-     * ein, BEVOR sie ffmpeg startet - in dessen argv stuende er wieder.
-     * Wer das nicht will, laesst den RTSP-Weg aus (Bildquelle "Nur
-     * Kamerastrom"); die Oberflaeche sagt das am Auswahlfeld. */
+     * ffmpeg kennt fuer RTSP keine getrennte Anmeldeoption - die Zugangsdaten
+     * muessen in der Adresse stehen. Die Adresse geht deshalb NIE auf eine
+     * Kommandozeile (/proc/<pid>/cmdline ist fuer jeden lokalen Benutzer
+     * lesbar), sondern ueber eine ffconcat-Datei (0600) an ffmpeg, gestartet
+     * ohne Schale: so in cam_rtsp_pruefen() und seit 1.9.32 auch im Livebild
+     * (cam_stream.php, Weg 2; A6/E4). Bis 1.9.31 stand hier, ein Umweg helfe
+     * nicht - die ffconcat-Datei ist der Umweg, der hilft. */
     if (strpos($url, '@') === false && trim((string) $cfg['user']) !== '') {
         $url = preg_replace('#^rtsp://#i',
             'rtsp://' . rawurlencode($cfg['user']) . ':' . rawurlencode($cfg['pass']) . '@', $url);
@@ -2130,7 +2179,7 @@ function cam_rtsp_pruefen($id = 1)
             $aus['stand'] = 1;
         } else {
             $aus['stand'] = 0;
-            $aus['grund'] = cam_t('TEST.G_RTSP_KEINBILD');
+            $aus['grund'] = cam_t('TEST.G_RTSP_KEINBILD') . cam_rtsp_deutung($fehler);
         }
         return $aus;
     }
@@ -2169,10 +2218,21 @@ function cam_rtsp_meldung($fehler, $datei)
  * Zusatz, wenn ffmpeg die Kamera erreicht, ihren Strom aber nicht lesen kann
  * ("Picture size 0x0", "Invalid data found") - am Geraet am 30.09.2026 mit
  * einer ACTi-Kamera gemessen, die per RTSP MJPEG liefert.
+ *
+ * Seit 1.9.33 (Geraetetest 26.10.2026, "E72 Kamera Gang"): "Picture size
+ * 0x0" und "unspecified size" heissen MJPEG ueber 2040 Pixel - RTP/JPEG
+ * (RFC 2435) traegt Breite und Hoehe nur bis 2040; Stream 1 dieser Kameras
+ * ist MJPEG 2048x1536. Dafuer eine eigene Meldung mit der Empfehlung
+ * stream2 (TEST.G_RTSP_MJPEG2040); "Invalid data found" behaelt die
+ * allgemeine. cam_rtsp_pruefen() haengt den Zusatz seither auch an "ffmpeg
+ * endete ohne ein einziges Bild".
  */
 function cam_rtsp_deutung($fehler)
 {
-    return preg_match('/Picture size 0x0|Invalid data found/i', (string) $fehler)
+    if (preg_match('/Picture size 0x0|unspecified size/i', (string) $fehler)) {
+        return ' – ' . cam_t('TEST.G_RTSP_MJPEG2040');
+    }
+    return preg_match('/Invalid data found/i', (string) $fehler)
         ? ' – ' . cam_t('TEST.G_RTSP_KODIERUNG') : '';
 }
 
@@ -2617,13 +2677,20 @@ function cam_snapshot($anlass = 'manuell', $id = 1)
     if ($objekte) {
         cam_log('Erkannt (' . cam_kname($id) . '): ' . implode(', ', $objekte));
     }
+    // EIN Zeitpunkt fuer zeit (Datei und MQTT) und zeit_unix (cam_mqtt_zustand()), seit 1.9.32.
+    $ac_jetzt = time();
     cam_schreibe_unteilbar(cam_kdatei($id, 'letztesbild', 'json'), json_encode(array(
-        'datei' => $name, 'anlass' => $anlass, 'zeit' => date('c'),
+        'datei' => $name, 'anlass' => $anlass, 'zeit' => date('c', $ac_jetzt),
         'bytes' => strlen($body), 'objekte' => $objekte,
     )));
     cam_cleanup();
     cam_mqtt(array('letztes_bild' . $sx => $name, 'anlass' . $sx => $anlass,
-                   'zeit' . $sx => date('c'), 'objekte' . $sx => implode(',', $objekte)));
+                   'zeit' . $sx => date('c', $ac_jetzt), 'objekte' . $sx => implode(',', $objekte)));
+    /* Sofort senden (A10, seit 1.9.32): BILDER, PUSHAKTIV, PERSON, OBJEKTE,
+       zeit_unix ... nur, was sich geaendert hat - bis 1.9.31 erst mit dem
+       naechsten Minutenlauf. Der Lauf danach findet keine Aenderung mehr
+       (gemeinsamer Merker). Vor den Webhooks: die brauchen bis zu 2 x 13 s. */
+    cam_mqtt_zustand();
     cam_webhooks($name, $anlass, $objekte, $id);
     return array(1, $name . ($objekte ? ' (' . implode(', ', $objekte) . ')' : ''));
 }
@@ -2691,13 +2758,16 @@ function cam_clip($anlass = 'klingel', $id = 1)
             cam_log('Erkannt: ' . implode(', ', $objekte));
         }
         $name = basename($dir) . '/' . basename($letzter_pfad);
+        $ac_jetzt = time();
         cam_schreibe_unteilbar(cam_kdatei($id, 'letztesbild', 'json'), json_encode(array(
-            'datei' => $name, 'anlass' => $anlass, 'zeit' => date('c'),
+            'datei' => $name, 'anlass' => $anlass, 'zeit' => date('c', $ac_jetzt),
             'bytes' => strlen($letztes), 'objekte' => $objekte,
         )));
         cam_cleanup();
         cam_mqtt(array('letztes_bild' . $sx => $name, 'anlass' . $sx => $anlass,
-                       'zeit' . $sx => date('c'), 'objekte' . $sx => implode(',', $objekte)));
+                       'zeit' . $sx => date('c', $ac_jetzt), 'objekte' . $sx => implode(',', $objekte)));
+        // Sofort senden (A10), wie in cam_snapshot().
+        cam_mqtt_zustand();
         cam_webhooks($name, $anlass, $objekte, $id);
         return array(1, basename($dir) . ' (' . $n . ' Bilder'
             . ($objekte ? ', ' . implode(', ', $objekte) : '') . ')');
@@ -2923,12 +2993,26 @@ function cam_timelapse($id = 1)
     return array(1, $name . ($film ? ' (Video neu erzeugt)' : ''));
 }
 
-/** Erzeugt zeitraffer.mp4 aus allen Zeitrafferbildern - nur wenn ffmpeg da ist. */
+/**
+ * Erzeugt zeitraffer.mp4 aus allen Zeitrafferbildern einer Kamera - nur wenn
+ * ffmpeg da ist.
+ *
+ * Seit 1.9.32 (A9, E3; Entwurf E-E15):
+ *   - das Video liegt im ARCHIV (Ordner timelapse<n>, cam_zeitraffer_pfad()),
+ *     abrufbar ueber cam.php?video=1[&kamera=n] hinter dem Stromkennwort - bis
+ *     1.9.31 lag es offen im unangemeldeten Webordner (zeitraffer<n>.mp4);
+ *   - die Liste ist je Lauf eine eigene Datei (tempnam statt fester liste.txt),
+ *     ffmpeg schreibt in eine Nebendatei, umbenannt wird nur bei Erfolg
+ *     (Rueckgabewert 0, Datei > 0 Byte) - ein abgebrochener Lauf hinterliess
+ *     bis 1.9.31 ein halbes Video unter der festen Adresse;
+ *   - ffmpeg laeuft ohne Schale (proc_open mit Feld) und hoechstens 300 s
+ *     (timeout -k 5 300); eine Sperre je Kamera verhindert einen zweiten
+ *     gleichzeitigen Lauf.
+ */
 function cam_timelapse_video($id = 1)
 {
-    $out = array();
-    @exec('command -v ffmpeg 2>/dev/null', $out);
-    if (empty($out)) {
+    $ff = cam_ffmpeg();
+    if ($ff === '') {
         return 0;
     }
     $dir = cam_ordner($id, 'timelapse');
@@ -2937,22 +3021,61 @@ function cam_timelapse_video($id = 1)
         return 0;
     }
     sort($bilder);
-    $liste = $dir . '/liste.txt';
+    $p = cam_paths();
+    if (!is_dir($p['tmp'])) {
+        @mkdir($p['tmp'], 0775, true);
+    }
+    $sp = @fopen($p['tmp'] . '/timelapse' . cam_sx($id) . '.lock', 'ce');
+    if ($sp !== false && !flock($sp, LOCK_EX | LOCK_NB)) {
+        fclose($sp);
+        cam_log('Zeitraffer-Video (' . cam_kname($id) . '): ein Lauf ist schon im Gange - kein zweiter.');
+        return 0;
+    }
+    $liste = @tempnam($dir, 'liste');
     $txt = '';
     foreach ($bilder as $b) {
-        $txt .= "file '" . $b . "'\nduration 0.4\n";
+        $txt .= "file '" . str_replace("'", "'\\''", $b) . "'\nduration 0.4\n";
     }
-    $txt .= "file '" . end($bilder) . "'\n";
-    @file_put_contents($liste, $txt);
-    $ziel = cam_paths()['web'] . '/zeitraffer' . cam_sx($id) . '.mp4';
-    @exec('ffmpeg -y -f concat -safe 0 -i ' . escapeshellarg($liste)
-        . ' -vf "scale=1280:-2,format=yuv420p" -r 25 ' . escapeshellarg($ziel) . ' 2>&1', $o, $rc);
-    @unlink($liste);
-    if ($rc === 0) {
-        cam_log('Zeitraffer-Video erzeugt aus ' . count($bilder) . ' Bildern');
+    $txt .= "file '" . str_replace("'", "'\\''", end($bilder)) . "'\n";
+    $ziel = cam_zeitraffer_pfad($id);
+    $neben = $ziel . '.' . getmypid() . '.neu.mp4';
+    $rc = -1;
+    $fehler = '';
+    if ($liste !== false && @file_put_contents($liste, $txt) === strlen($txt)) {
+        $befehl = array('timeout', '-k', '5', '300', $ff, '-nostdin', '-y', '-loglevel', 'error',
+            '-f', 'concat', '-safe', '0', '-i', $liste, '-vf', 'scale=1280:-2,format=yuv420p', '-r', '25', $neben);
+        $rohre = array();
+        $pr = @proc_open($befehl, array(0 => array('file', '/dev/null', 'r'), 1 => array('file', '/dev/null', 'w'),
+                                        2 => array('pipe', 'w')), $rohre);
+        if (is_resource($pr)) {
+            $fehler = (string) stream_get_contents($rohre[2]);
+            fclose($rohre[2]);
+            $rc = proc_close($pr);
+        } else {
+            $fehler = 'ffmpeg liess sich nicht starten';
+        }
+    } else {
+        $fehler = 'Liste nicht geschrieben';
+    }
+    if (is_string($liste) && is_file($liste)) {
+        @unlink($liste);
+    }
+    clearstatcache(true, $neben);
+    $ok = ($rc === 0 && is_file($neben) && (int) @filesize($neben) > 0 && @rename($neben, $ziel));
+    if (!$ok && is_file($neben)) {
+        @unlink($neben);
+    }
+    if ($sp !== false) {
+        flock($sp, LOCK_UN);
+        fclose($sp);
+    }
+    if ($ok) {
+        cam_log('Zeitraffer-Video erzeugt aus ' . count($bilder) . ' Bildern (' . cam_kname($id) . ')');
         return 1;
     }
-    cam_log('FEHLER Zeitraffer-Video: ' . trim(implode(' ', array_slice($o, -2))));
+    $zeilen = array_values(array_filter(array_map('trim', preg_split('/\r?\n/', $fehler)), 'strlen'));
+    cam_log('FEHLER Zeitraffer-Video (' . cam_kname($id) . ', rc ' . (int) $rc . '): '
+        . ($zeilen ? $zeilen[count($zeilen) - 1] : 'ohne Meldung') . ' - das bisherige Video bleibt.');
     return 0;
 }
 
@@ -3316,12 +3439,14 @@ function cam_basisfelder()
        gemessen, dass "retain <thema> <wert>" auf demselben UDP-Weg wirkt wie
        "publish" (mqttgateway.pl, sub udpin, Zeilen 224-228 und 353).
 
-       ALTER hat deshalb in der sechsten Spalte jetzt eine 0: der Wert aendert
-       sich jede Minute und kam damit am Doppelt-senden-Filter immer vorbei
-       (gemessen: acti/ALTER 47, eine Minute spaeter 48). Wie alt die letzte
-       Aufnahme ist, sagt seit 1.9.19 das retained Thema "zeit" - ein
-       absoluter Zeitstempel, den der Miniserver selbst verrechnet. In der
-       HTTP-Antwortzeile bleibt ALTER unveraendert stehen.
+       ALTER stand von 1.9.19 bis 1.9.31 in der sechsten Spalte auf 0: der
+       Wert aendert sich jede Minute und kam am Doppelt-senden-Filter immer
+       vorbei (gemessen: acti/ALTER 47, eine Minute spaeter 48). Seit 1.9.32
+       (Entscheidung 2, E-E8) geht ALTER wieder ueber MQTT - fluechtig (achte
+       Spalte 0), unter Gateway V2 ist ein Datagramm je Minute und Kamera
+       unerheblich, und das Musterprojekt nimmt einen schlichten Virtuellen
+       Eingang statt einer Formel. Dazu das retained Thema "zeit_unix"
+       (Unix-Sekunden, cam_mqtt_zustand_zusatz()) fuer eigene Logik.
 
        Seit 1.9.22 steht die achte Spalte bei OK, ERREICHBAR, FEHLER,
        PUSHAKTIV und PTEST auf 0 (Regeln/07, Abschnitt 3): OK, ERREICHBAR
@@ -3332,7 +3457,7 @@ function cam_basisfelder()
        Altwerte raeumt cam_mqtt_zustand() ab (cam_mqtt_altlast()). */
     return array(
         'OK'         => array(0, 0, 1, 'FELD.OK', '', 1, 1, 0),
-        'ALTER'      => array(1, -1, 100000, 'FELD.ALTER', '<v.1> min', 0, 1, 0),
+        'ALTER'      => array(1, -1, 100000, 'FELD.ALTER', '<v.1> min', 1, 1, 0),
         /* Fuenfte Spalte: Unit der Vorlage. Die Zaehler tragen seit dem
            B-Nachzug (01.10.2026) "<v.0>" - bis 1.9.26 stand dort "", und am
            virtuellen Eingang stand eine nackte Zahl (Regeln/07). */
@@ -3362,9 +3487,11 @@ function cam_basisfelder()
  * because of empty message"). Die Zahl derselben Sache steht als OBJEKTE
  * daneben und ist nie leer.
  *
- * "online" und "ts" sind das Lebenszeichen und gehen nie retained hinaus -
- * retained zeigte "online" fuer immer 1, und genau daran erkennt Loxone einen
- * stehengebliebenen Minutentakt.
+ * Seit 1.9.32 (Gruppe 25): "zeit_unix" (Zeitpunkt des letzten Bildes in
+ * Unix-Sekunden, -1 ohne Bild) retained wie "zeit" - Entscheidung 2, ein
+ * absoluter Zeitstempel, den der Miniserver selbst verrechnet. "zaehler" ist
+ * das Lebenszeichen je Minutenlauf, einmal fuer das Plugin, nie retained
+ * (E-E7); es ersetzt "online" und "ts" (cam_mqtt_lebenszeichen()).
  */
 function cam_mqtt_zusatzthemen()
 {
@@ -3372,9 +3499,9 @@ function cam_mqtt_zusatzthemen()
         'letztes_bild' => 1,
         'anlass'       => 1,
         'zeit'         => 1,
+        'zeit_unix'    => 1,
         'objekte'      => 0,
-        'online'       => 0,
-        'ts'           => 0,
+        'zaehler'      => 0,
     );
 }
 
@@ -3418,10 +3545,10 @@ function cam_mqtt_retained($schluessel)
  * Die vollstaendige Themenliste: was geht unter welchem Namen hinaus, und
  * welches davon retained?
  *
- * Diese Liste ist die Anleitung. Der Reiter "Einbindung in Loxone" zeigt sie,
- * der Reiter "Test" haelt sie gegen die cam_mqtt()-Aufrufe im Quelltext -
- * sonst waere sie ein Versprechen ohne Deckung (Regeln/07, Anlass Renault:
- * 20 gesendete Themen standen nirgends).
+ * Diese Liste ist die Anleitung. Der Reiter "Einbindung in Loxone" zeigt sie
+ * (Namenstabelle, cam_mqtt_namenstabelle()), der Reiter "Test" haelt sie gegen
+ * die cam_mqtt()-Aufrufe im Quelltext - sonst waere sie ein Versprechen ohne
+ * Deckung (Regeln/07, Anlass Renault: 20 gesendete Themen standen nirgends).
  *
  * Rueckgabe: Thema => array(retained, Sprachschluessel oder Klartext)
  */
@@ -3436,13 +3563,12 @@ function cam_mqtt_themenliste()
     foreach (cam_kameras() as $id) {
         $sx = cam_sx($id);
         foreach (cam_mqtt_zusatzthemen() as $k => $r) {
-            // online und ts gibt es einmal, nicht je Kamera.
-            if ($k === 'online' || $k === 'ts') { continue; }
+            // Das Lebenszeichen gibt es einmal, nicht je Kamera.
+            if ($k === 'zaehler') { continue; }
             $aus[$k . $sx] = array((bool) $r, 'MQTT.T_' . strtoupper($k));
         }
     }
-    $aus['online'] = array(false, 'MQTT.T_ONLINE');
-    $aus['ts'] = array(false, 'MQTT.T_TS');
+    $aus['zaehler'] = array(false, 'MQTT.T_ZAEHLER');
     return $aus;
 }
 
@@ -3629,14 +3755,22 @@ function cam_mqtt_zustand($erzwingen = false)
             unset($werte[$ac_n]);
         }
     }
+    /* Zusatzwerte je Kamera, die nicht in der Statuszeile stehen (seit 1.9.32:
+       zeit_unix<n>, retained, -1 ohne Bild) - im vollen Satz und bei
+       Aenderung, also sofort nach jeder Aufnahme. */
+    foreach (cam_kameras() as $ac_zk) {
+        foreach (cam_mqtt_zustand_zusatz($ac_zk) as $ac_zn => $ac_zw) {
+            $werte[$ac_zn . cam_sx($ac_zk)] = $ac_zw;
+        }
+    }
     $merker = cam_paths()['tmp'] . '/mqtt_letzte.json';
     $vorher = cam_json_lesen($merker);
     $praefix = cam_mqtt_praefix($cfg);
     /* Eine AUSGETRAGENE Kamera (M4, ACTiKamera-a2): stand ihr Platz im
        Kameramerker (bzw. ohne ihn ihr Feld im letzten gesendeten Satz) und ist
        sie jetzt nicht mehr eingerichtet, gehen ihre zurueckbehaltenen Themen
-       EINMAL als "-" retained hinaus (Entscheidungen 5 und 8 vom 29./30.09.2026:
-       "-" gibt es fuer ein entferntes Geraet). Bis 1.9.22 blieben BILDER2,
+       EINMAL mit ihrem Fehlwert retained hinaus - seit 1.9.32 -1 fuer Zahlen,
+       "-" fuer Texte (cam_mqtt_strich_werte(), E-E9). Bis 1.9.22 blieben BILDER2,
        PERSON2, letztes_bild2 ... fuer immer im Broker stehen (gemessen, Fall
        F7); 1.9.23 bis 1.9.25 leerten sie, erkannten die Kamera aber nur am
        /tmp-Merker - ein Neustart zwischen Austragen und Takt liess sie aus.
@@ -3660,12 +3794,12 @@ function cam_mqtt_zustand($erzwingen = false)
         if ($ac_n > 0) {
             $ac_weg++;
             cam_log('MQTT: Kameraplatz ' . $ac_i . ' ist ausgetragen - seine ' . count($ac_strich)
-                . ' zurueckbehaltenen Themen unter ' . $praefix . '/ gehen einmal als "-" hinaus: '
+                . ' zurueckbehaltenen Themen unter ' . $praefix . '/ gehen einmal mit Fehlwert (-1 bzw. "-") hinaus: '
                 . implode(' ', array_keys($ac_strich)));
         } else {
             $ac_offen[] = $ac_i;
             cam_log_selten('ausgetragen_' . $ac_i, 'MQTT: Kameraplatz ' . $ac_i . ' ist ausgetragen, '
-                . 'seine Themen liessen sich noch nicht als "-" senden - der naechste Takt versucht es wieder.');
+                . 'seine Themen liessen sich noch nicht mit Fehlwert senden - der naechste Takt versucht es wieder.');
         }
     }
     $ac_soll_k = array_values(array_unique(array_merge($ac_jetzt_k, $ac_offen)));
@@ -3837,7 +3971,7 @@ function cam_vorlage_kopf($art, $host = '')
     if ($art === 'aus') {
         return array('title' => 'ACTi Kamera senden', 'address' => 'http://' . $host);
     }
-    $plugindir = getenv('LBPPLUGINDIR') ?: 'actikamera';
+    $plugindir = cam_paths()['ordner'];
     return array(
         'title'   => 'ACTi Kamera',
         'address' => 'http://' . $host . '/plugins/' . $plugindir . '/cam.php',
@@ -3912,7 +4046,7 @@ function cam_vorlage($host = '')
  */
 function cam_ausgangsbefehle()
 {
-    $plugindir = getenv('LBPPLUGINDIR') ?: 'actikamera';
+    $plugindir = cam_paths()['ordner'];
     $cfg = cam_config();
     $tok = (string) $cfg['aktionstoken'];
     $pfad = '/plugins/' . $plugindir . '/cam.php?';
@@ -3944,9 +4078,33 @@ function cam_ausgangsbefehle()
     return $cmds;
 }
 
+/**
+ * Die Vorlage der virtuellen AUSGAENGE: seit 1.9.32 die Brueckenvorlage
+ * (E-E20) - Behaelter "ACTi Kamera senden" an den UDP-Eingang des
+ * MQTT-Gateways (/dev/udp/<LoxBerry>/<Udpinport>), je Kamera dieselben vier
+ * Befehle wie bisher, jetzt "publish <praefix>/befehl/foto klingel" usw.
+ * (cam_bruecke_vorlagenbefehle()). Kein Token mehr in der Projektdatei; es
+ * wirkt nur mit dem Haken "Befehle ueber MQTT annehmen". Der Dateiname
+ * VQ_actikamera.xml bleibt (Name im Repo des Musterprojekts); die HTTP-Vorlage
+ * mit Aktionstoken heisst jetzt VQ_actikamera_HTTP.xml
+ * (cam_vorlage_ausgang_http(), "Bestehende Anlagen").
+ */
 function cam_vorlage_ausgang($host = '')
 {
-    return array('VQ_actikamera.xml', cam_xml_virtual_out(cam_vorlage_kopf('aus', $host) + array(
+    if ($host === '') { $host = gethostname() ?: 'loxberry'; }
+    $port = (int) cam_mqtt_zustand_pruefen()['udpport'];
+    if ($port <= 0) { $port = 11884; }
+    return array('VQ_actikamera.xml', cam_xml_virtual_out(array(
+        'title'   => 'ACTi Kamera senden',
+        'address' => '/dev/udp/' . $host . '/' . $port,
+        'comment' => trim(strip_tags(html_entity_decode(cam_t('LOX.VQ_KOMMENTAR_MQTT'), ENT_QUOTES, 'UTF-8'))),
+    ), cam_bruecke_vorlagenbefehle()));
+}
+
+/** array(Dateiname, Inhalt) der HTTP-Ausgangsvorlage mit Aktionstoken (bis 1.9.31 VQ_actikamera.xml). */
+function cam_vorlage_ausgang_http($host = '')
+{
+    return array('VQ_actikamera_HTTP.xml', cam_xml_virtual_out(cam_vorlage_kopf('aus', $host) + array(
         // Seit 1.9.30 (Welle Bild 20 E13): aus der Sprachdatei, ohne Erzeugungsdatum.
         'comment' => trim(strip_tags(html_entity_decode(cam_t('LOX.VQ_KOMMENTAR'), ENT_QUOTES, 'UTF-8'))),
     ), cam_ausgangsbefehle()));
@@ -4070,6 +4228,8 @@ function cam_formulare_pruefen()
  * 127.0.0.1 unter dem Port dieser Seite, 3 s Frist. Drei Ausgaenge:
  * 1 Statuszeile kam, 0 eine andere Antwort (HTTP 500, 404, Fremdtext),
  * -1 nicht feststellbar (Archivmodus oder keine Verbindung).
+ * Seit 1.9.32: bei endpunkt_ein = 0 ist die gewollte Antwort 403 mit
+ * "ACTI;OK=0;ERR=ENDPUNKT_AUS" - auch sie heisst "der Endpunkt antwortet".
  * Rueckgabe array(stand, url, code, auszug).
  */
 function cam_endpunkt_pruefen()
@@ -4088,6 +4248,10 @@ function cam_endpunkt_pruefen()
     }
     if ((int) $r[1] === 200 && strpos((string) $r[0], 'ACTI;') === 0) {
         return array(1, $url, 200, '');
+    }
+    if ((int) $r[1] === 403 && !cam_endpunkt_ein(cam_config())
+        && strpos((string) $r[0], 'ACTI;OK=0;ERR=ENDPUNKT_AUS') === 0) {
+        return array(1, $url, 403, '');
     }
     $auszug = trim(preg_replace('/\s+/', ' ', strip_tags((string) $r[0])));
     return array(0, $url, (int) $r[1], substr($auszug, 0, 80));
@@ -4312,10 +4476,13 @@ function cam_pruefungen()
            entfernt, Haken blieb). */
         $ac_felder = cam_felder();
         $ac_nie = array();
+        // Seit 1.9.32: was cam_mqtt_zustand() als Zusatzwert mitsendet (zeit_unix), gilt als gesendet.
+        $ac_zz = array_keys(cam_mqtt_zustand_zusatz(1));
         foreach (array_keys(cam_mqtt_themenliste()) as $ac_t) {
             $ac_stamm = preg_match('/^(.*?)([2-9])$/', $ac_t, $ac_mm)
-                && (int) $ac_mm[2] <= CAM_MAX && isset($ac_qt[$ac_mm[1]]) ? $ac_mm[1] : $ac_t;
-            $ac_feld = isset($ac_felder[$ac_t]) && !empty($ac_felder[$ac_t][5]);
+                && (int) $ac_mm[2] <= CAM_MAX && (isset($ac_qt[$ac_mm[1]]) || in_array($ac_mm[1], $ac_zz, true))
+                ? $ac_mm[1] : $ac_t;
+            $ac_feld = (isset($ac_felder[$ac_t]) && !empty($ac_felder[$ac_t][5])) || in_array($ac_stamm, $ac_zz, true);
             if (!isset($ac_qt[$ac_stamm]) && !$ac_feld) { $ac_nie[] = $ac_t; }
         }
         $ac_antw = array();
@@ -4332,6 +4499,15 @@ function cam_pruefungen()
                           count(cam_mqtt_themenliste())));
     }
 
+    /* Befehlsbruecke (seit 1.9.32): aus (Haken), laeuft oder steht. */
+    $ac_bl = cam_bruecke_lage();
+    $zeile($ac_bl[0] === true ? 1 : ($ac_bl[0] === null ? -1 : 0), cam_t('TEST.F_BRUECKE'), $ac_bl[1]);
+
+    /* HTTP-Lesezweig (seit 1.9.32, E-E12): an heisst bestehende Anlage, aus
+       ist gewollt (Werte ueber MQTT) - kein Kreuz. */
+    $zeile(cam_endpunkt_ein($cfg) ? 1 : -1, cam_t('TEST.F_LESEZWEIG'),
+        cam_t(cam_endpunkt_ein($cfg) ? 'TEST.A_LESEZWEIG_AN' : 'TEST.A_LESEZWEIG_AUS'));
+
     /* Keine Aussage des Dienstes ueber sich selbst und nichts, was allein
        durch die Uhr falsch wird, geht retained hinaus (Regeln/07,
        Abschnitt 3, Entscheidungen vom 18., 19. und 24.09.2026). Die Zeile
@@ -4346,7 +4522,8 @@ function cam_pruefungen()
             if (cam_mqtt_retained($ac_s . cam_sx($ac_i))) { $ac_zu[$ac_s . cam_sx($ac_i)] = true; }
         }
     }
-    foreach (array('online', 'ts') as $ac_s) {
+    // Das Lebenszeichen (seit 1.9.32 zaehler statt online/ts) geht nie retained.
+    foreach (array('zaehler') as $ac_s) {
         if (cam_mqtt_retained($ac_s)) { $ac_zu[$ac_s] = true; }
     }
     $zeile($ac_zu ? 0 : 1, cam_t('TEST.F_DIENSTAUSSAGE'),
@@ -4446,7 +4623,7 @@ function cam_pruefungen()
        Ausgangsvorlage gibt, waere ein Haken auf die haelfte der Wahrheit. */
     $alt = libxml_use_internal_errors(true);
     $gut = true;
-    foreach (array(cam_vorlage(), cam_vorlage_ausgang()) as $ac_v) {
+    foreach (array(cam_vorlage(), cam_vorlage_ausgang(), cam_vorlage_ausgang_http()) as $ac_v) {
         if (simplexml_load_string($ac_v[1]) === false) { $gut = false; }
     }
     libxml_clear_errors();
@@ -4921,7 +5098,7 @@ function cam_mqtt_altlast($praefix)
  * Die Themen, die die Deinstallation leert: jedes, das eine veroeffentlichte
  * Fassung je retained gesendet hat - fuer ALLE vier Kameraplaetze, denn eine
  * Kamera, die inzwischen ausgetragen ist, hat ihre Themen im Broker gelassen.
- * Was nie retained ging (ALTER, HERZ, objekte, online, ts), bleibt
+ * Was nie retained ging (ALTER, HERZ, objekte, zaehler, frueher online und ts), bleibt
  * unberuehrt: eine leere Nachricht darauf loeschte nichts.
  */
 function cam_mqtt_leer_themen()
@@ -4946,8 +5123,9 @@ function cam_mqtt_leer_themen_kamera($id)
         if (empty($d[6]) && $id !== 1) { continue; }
         if (!empty($d[7]) || in_array($n, $alt, true)) { $aus[] = $n . $sx; }
     }
+    // Nur, was retained geht - das Lebenszeichen zaehler nie.
     foreach (cam_mqtt_zusatzthemen() as $k => $r) {
-        if ($r && $k !== 'online' && $k !== 'ts') { $aus[] = $k . $sx; }
+        if ($r) { $aus[] = $k . $sx; }
     }
     return $aus;
 }
@@ -5004,17 +5182,25 @@ function cam_mqtt_kameras_merken($praefix, array $ids)
 }
 
 /**
- * Die retained Themen EINES ausgetragenen Kameraplatzes mit dem Wert "-"
- * (Entscheidungen 5 und 8). Nur, was retained geht - die frueheren
- * Stammthemen (OK, ERREICHBAR ...) gehen seit 1.9.22 fluechtig und bekommen
- * keinen Strich.
+ * Die retained Themen EINES ausgetragenen Kameraplatzes mit ihrem Fehlwert.
+ * Nur, was retained geht - die frueheren Stammthemen (OK, ERREICHBAR ...)
+ * gehen seit 1.9.22 fluechtig und bekommen keinen.
+ *
+ * Seit 1.9.32 (E-E9, Hausform G16/G21): Zahlenthemen bekommen -1 (BILDER,
+ * CLIPS, ZEITRAFFER, PERSON, OBJEKTE, zeit_unix), Textthemen "-"
+ * (letztes_bild, anlass, zeit; cam_mqtt_textthemen()). Die Entscheidungen 5
+ * und 8 vom 29./30.09.2026 ("-" fuer ein entferntes Geraet) gelten damit nur
+ * noch fuer Texte - ein Virtueller Eingang liest aus "-" keine Zahl.
  */
 function cam_mqtt_strich_werte($id)
 {
+    $texte = cam_mqtt_textthemen();
+    $sx = cam_sx($id);
     $aus = array();
     foreach (cam_mqtt_leer_themen_kamera($id) as $t) {
         if (cam_mqtt_retained($t)) {
-            $aus[$t] = '-';
+            $stamm = ($sx !== '' && substr($t, -strlen($sx)) === $sx) ? substr($t, 0, -strlen($sx)) : $t;
+            $aus[$t] = in_array($stamm, $texte, true) ? '-' : -1;
         }
     }
     return $aus;
@@ -5093,7 +5279,11 @@ function cam_mqtt_leeren_lauf($w, $themen = null, $runden = 3, $pause_us = 10000
     for ($r = 1; $r <= max(1, (int) $runden) && $offen; $r++) {
         if ($r > 1) { usleep((int) $pause_us); }
         $gelaufen = $r;
+        $ac_dg = 0;
         foreach ($offen as $t) {
+            /* Die Pause zwischen zwei Datagrammen gehoert in die Sendefunktion
+               (Regeln/07, M8) - seit 1.9.32 auch beim Leeren (A10). */
+            if ($ac_dg++ > 0) { usleep(CAM_MQTT_PAUSE_US); }
             // Ein Leerzeichen hinter dem Thema, sonst keine Nutzlast: die
             // Form, die das Gateway als Loeschung liest (Regeln/07,
             // Nachtrag 19.09.2026: mqttgateway.pl:281, :311-315, :357).
@@ -5305,6 +5495,15 @@ function cam_sicherung_lesen($roh, &$namen = null)
     $fehlend = array();
     foreach (array_keys(cam_vorgaben()) as $fk) {
         if (!array_key_exists($fk, $daten)) {
+            /* Die Spaetliste (seit 1.9.32, Pflicht N2): diese Schluessel gibt
+               es erst seit der Fassung 1.9.32 - eine aeltere Sicherung kennt
+               sie nicht. Sie behalten den GELTENDEN Wert ($neu beginnt mit
+               cam_config()), und der Hinweis sagt es. Ohne diese Ausnahme
+               liesse sich keine 1.9.31-Sicherung mehr zurueckspielen. */
+            if (in_array($fk, cam_sicherung_spaeter(), true)) {
+                $hinweise[] = sprintf(cam_t('TEXT.SICH_SPAETER'), $fk, (string) $neu[$fk]);
+                continue;
+            }
             $fehlend[] = $fk;
         }
     }
@@ -5340,6 +5539,776 @@ function cam_rueckspiel_befund()
     }
     $namen = array_values(array_unique($namen));
     return $namen ? $namen : array('?');
+}
+
+/* ==================================================================
+ * HAUSFORM 1.9.32 (Gruppe 25, 26.10.2026)
+ *
+ * Entscheidungen 1-3 und E-E1 bis E-E23 (Musterprojekt/
+ * ENTSCHEIDUNGEN_GRUPPE25_ACTI.md), Entwurf entwurf_gruppe25_ac.txt
+ * (Abschnitte 2 und 3). Lese-Regel und Spaetliste, Lebenszeichen ueber
+ * MQTT, sofort senden, Namenstabelle, Befehlsbruecke 1.0.1, abgekoppelte
+ * Aufnahme, Test-Push, Zeitraffer im Archiv, Protokoll und cron.err.
+ * ================================================================== */
+
+/**
+ * Die Lese-Regel fuer Bestandsdateien (E-E11, E-E12, Pflicht N1): eine
+ * EINGERICHTETE Datei - mindestens ein Schluessel ausser den selbst
+ * erzeugten Token, dasselbe Kriterium wie cam_config_eingerichtet() - stammt
+ * aus einer frueheren Fassung. Fehlt ihr endpunkt_ein, gilt 1 (der
+ * HTTP-Lesezweig einer bestehenden Anlage bleibt erreichbar); fehlt ihr
+ * mqtt_enabled, gilt 0 (die neue Vorgabe 1 kommt nicht still in eine alte
+ * Anlage). Eine Neuinstallation ("{}", keine Datei, oder nur die Token, die
+ * das erste Oeffnen der Oberflaeche schreibt) bekommt die neuen Vorgaben.
+ *
+ * Nicht das Merkwort-Kriterium der Beschattung: das erste Oeffnen der
+ * Oberflaeche schreibt aktionstoken und ausloeser_token (index.php) - mit
+ * cam_hat_token() waere jede Neuinstallation offen und ohne MQTT (Entwurf
+ * probe_g25 L1a). Rueckgabe: Schluessel => Wert, die statt der Vorgabe gelten.
+ * cam_config() wendet sie bei jedem Lesen an; postupgrade.sh schreibt
+ * endpunkt_ein beim Update fest (Datei und Zweitschrift).
+ */
+function cam_uebergang($roh)
+{
+    if (!is_array($roh)) {
+        return array();
+    }
+    $rest = $roh;
+    foreach (cam_selbsterzeugte_schluessel() as $ac_s) {
+        unset($rest[$ac_s]);
+    }
+    $u = array();
+    if (count($rest) > 0) {
+        if (!array_key_exists('endpunkt_ein', $roh)) {
+            $u['endpunkt_ein'] = 1;
+        }
+        if (!array_key_exists('mqtt_enabled', $roh)) {
+            $u['mqtt_enabled'] = 0;
+        }
+    }
+    return $u;
+}
+
+/**
+ * Die Spaetliste der Sicherung (Pflicht N2, E-E13): Schluessel, die erst seit
+ * 1.9.32 in cam_vorgaben() stehen. Fehlen sie in einer Sicherung, ist das
+ * keine Beanstandung; es gilt der GELTENDE Wert (cam_sicherung_lesen()
+ * beginnt mit cam_config()), und der Hinweis sagt es.
+ */
+function cam_sicherung_spaeter()
+{
+    return array('endpunkt_ein', 'befehle_mqtt_ein');
+}
+
+/** Ist der HTTP-Lesezweig fuer Loxone an (Statuszeile, ?json)? E-E12. */
+function cam_endpunkt_ein(array $cfg)
+{
+    return (int) (isset($cfg['endpunkt_ein']) ? $cfg['endpunkt_ein'] : 0) === 1;
+}
+
+/* ---------------- Lebenszeichen und Zusatzwerte (E2, N3; E-E7, E-E8) ---------------- */
+
+/**
+ * Das Lebenszeichen je Minutenlauf (E-E7, Pflicht N3): zaehler (eben von
+ * cam_herzschlag() weitergezaehlt) und je Kamera OK und ERREICHBAR - alle
+ * "publish", nie retained. OK und ERREICHBAR wechseln fast nie; nur im
+ * Minuten-Lebenszeichen (und unter Gateway V2 mit "Noncached") kommen sie
+ * nach einem Neustart des Miniservers binnen einer Minute wieder an. Sonst
+ * stuende ERREICHBAR bis zu 30 Minuten auf dem Startwert 0, und die
+ * Stoerungskette des Musterprojekts meldete faelschlich.
+ *
+ * Die Themen online und ts gibt es seit 1.9.32 nicht mehr: online war immer 1
+ * und kam unter V2-Dedup genau einmal an, ts ist ein ISO-Text, aus dem ein
+ * Virtueller Eingang nur die fuehrende Jahreszahl liest. Beide gingen nie
+ * retained - im Broker ist nichts abzuraeumen.
+ *
+ * Zwei Aufrufe statt einem: der Reiter Test liest den Quelltext nach
+ * cam_mqtt(array(...)) ab (cam_mqtt_quelltext_themen()), und zaehler muss dort
+ * als Schluessel stehen. Zwischen beiden die Pause wie zwischen zwei
+ * Datagrammen (M8).
+ */
+function cam_mqtt_lebenszeichen()
+{
+    $cfg = cam_config();
+    if (empty($cfg['mqtt_enabled'])) {
+        return 0;
+    }
+    $z = cam_herzzaehler();
+    if ($z < 0) {
+        return 0;
+    }
+    $ac_ok = array();
+    foreach (cam_kameras() as $ac_id) {
+        $ac_s = cam_state($ac_id);
+        $ac_ok['OK' . cam_sx($ac_id)] = (int) $ac_s['ok'];
+        $ac_ok['ERREICHBAR' . cam_sx($ac_id)] = (int) $ac_s['erreichbar'];
+    }
+    $n = cam_mqtt(array('zaehler' => $z));
+    usleep(CAM_MQTT_PAUSE_US);
+    return $n + cam_mqtt($ac_ok);
+}
+
+/** Zeitpunkt des letzten Bildes einer Kamera in Unix-Sekunden, -1 = keines (E-E8). */
+function cam_zeit_unix($id)
+{
+    $l = cam_json_lesen(cam_kdatei($id, 'letztesbild', 'json'));
+    if (empty($l['zeit'])) {
+        return -1;
+    }
+    $t = strtotime((string) $l['zeit']);
+    return ($t !== false && $t > 0) ? (int) $t : -1;
+}
+
+/**
+ * Die Zusatzthemen, die cam_mqtt_zustand() SELBST mitsendet (Stamm => Wert
+ * der Kamera $id) - EINE Quelle fuer den Versand und fuer die Pruefzeile
+ * "Themenliste gegen Sendecode". zeit_unix<n> (Entscheidung 2, retained, -1
+ * ohne Bild) geht damit im vollen Satz und - weil cam_snapshot()/cam_clip()
+ * cam_mqtt_zustand() rufen - sofort nach jeder Aufnahme hinaus, genau einmal.
+ */
+function cam_mqtt_zustand_zusatz($id)
+{
+    return array('zeit_unix' => cam_zeit_unix($id));
+}
+
+/** Die Textthemen (alle anderen sind Zahlen): eine ausgetragene Kamera bekommt dort "-", sonst -1 (E-E9). */
+function cam_mqtt_textthemen()
+{
+    return array('letztes_bild', 'anlass', 'zeit', 'objekte');
+}
+
+/* ---------------- Namenstabelle, V2-Hakenliste (E-E10) ---------------- */
+
+/**
+ * Der Name, den das MQTT-Gateway einem Thema als Virtuellen Eingang gibt
+ * (Hausform G15-G23, Gedaechtnis mqtt-gateway-v2-verhalten): Praefix + "_" +
+ * Thema, "/", "%" und Leerzeichen werden "_". Beispiele: acti_zaehler,
+ * acti_OK, acti_BILDER2. EINE Stelle fuer Namenstabelle, Hakenliste und
+ * Bausteinliste.
+ */
+function cam_gateway_name($praefix, $thema)
+{
+    return str_replace(array('/', '%', ' '), '_', (string) $praefix . '_' . (string) $thema);
+}
+
+/**
+ * Die Namenstabelle: je gesendetes Thema (cam_mqtt_themenliste() - EINE Quelle
+ * fuer Sendeliste, Reiter, Hakenliste und Bausteinliste) der Gateway-Name, die
+ * Bauform (Virtueller Eingang bzw. Texteingang), die Bedeutung
+ * (Sprachschluessel), der Wertebereich, ob zurueckbehalten, ob in der
+ * V2-Hakenliste des Musterprojekts (14 Haken bei einer Kamera), ob
+ * "Noncached" (OK und ERREICHBAR, N3) und die Stelle im Musterprojekt.
+ */
+function cam_mqtt_namenstabelle(array $cfg)
+{
+    $w = cam_mqtt_praefix($cfg);
+    $felder = cam_basisfelder();
+    $haken = array('zaehler', 'OK', 'ERREICHBAR', 'FEHLER', 'ALTER', 'BILDER', 'CLIPS', 'ZEITRAFFER',
+                   'zeit_unix', 'PUSHAKTIV', 'PUSH', 'PERSON', 'OBJEKTE', 'PTEST');
+    $noncached = array('OK', 'ERREICHBAR');
+    $mp = array('OK' => 'ACTi-Kamera #1', 'ALTER' => 'ACTi-Kamera #2, Aufnahmen #17', 'BILDER' => 'ACTi-Kamera #3',
+                'CLIPS' => 'ACTi-Kamera #4', 'ZEITRAFFER' => 'ACTi-Kamera #5', 'ERREICHBAR' => 'ACTi-Kamera #6',
+                'FEHLER' => 'ACTi-Kamera #7', 'zeit_unix' => 'ACTi-Kamera #8', 'zaehler' => 'ACTi-Kamera #9',
+                'PUSHAKTIV' => 'Aufnahmen #12', 'PUSH' => 'Aufnahmen #13', 'PERSON' => 'Aufnahmen #14',
+                'OBJEKTE' => 'Aufnahmen #15', 'PTEST' => 'Aufnahmen #16');
+    $texte = cam_mqtt_textthemen();
+    $zusatz = cam_mqtt_zusatzthemen();
+    $aus = array();
+    foreach (cam_mqtt_themenliste() as $t => $d) {
+        $stamm = $t;
+        $kamera = 1;
+        if (preg_match('/^(.*?)([2-9])$/', $t, $m) && (int) $m[2] <= CAM_MAX
+            && (isset($felder[$m[1]]) || array_key_exists($m[1], $zusatz))) {
+            $stamm = $m[1];
+            $kamera = (int) $m[2];
+        }
+        $text = in_array($stamm, $texte, true);
+        if (isset($felder[$stamm])) {
+            $bereich = $felder[$stamm][1] . ' … ' . $felder[$stamm][2];
+        } elseif ($stamm === 'zaehler') {
+            $bereich = '0 … 999';
+        } elseif ($stamm === 'zeit_unix') {
+            $bereich = cam_t('MQTT.B_UNIX');
+        } else {
+            $bereich = cam_t('MQTT.B_TEXT');
+        }
+        $aus[] = array('thema' => $t, 'stamm' => $stamm, 'kamera' => $kamera, 'voll' => $w . '/' . $t,
+                       'name' => cam_gateway_name($w, $t), 'text' => $text, 'bez' => $d[1],
+                       'bereich' => $bereich, 'retain' => (bool) $d[0],
+                       'haken' => in_array($stamm, $haken, true),
+                       'noncached' => in_array($stamm, $noncached, true),
+                       'mp' => ($kamera === 1 && isset($mp[$stamm])) ? $mp[$stamm] : '');
+    }
+    return $aus;
+}
+
+/* ---------------- Test-Push (A4, A10; E-E6, E-E17) ---------------- */
+
+/**
+ * Den Test-Push setzen - EINE Stelle fuer cam.php?ptest=1 ('http'), den
+ * Formularknopf im Reiter Test ('knopf') und die Befehlsbruecke ('mqtt').
+ * Merker <tmp>/ptest = jetzt (PTEST=1 fuer 5 Minuten), Protokollzeile mit der
+ * Quelle, danach SOFORT senden (A10: bis 1.9.31 kam PTEST erst mit dem
+ * naechsten Minutenlauf; der Minutenlauf danach findet keine Aenderung mehr,
+ * beide teilen den Merker mqtt_letzte.json). Bauart fer_befehl_testpush()
+ * (Ferien 1.2.29). Rueckgabe array('ok' => bool, 'grund' => Text).
+ */
+function cam_testpush($quelle)
+{
+    $t = cam_paths()['tmp'];
+    if (!is_dir($t)) {
+        @mkdir($t, 0775, true);
+    }
+    $ok = @file_put_contents($t . '/ptest', (string) time()) !== false;
+    $wege = array('http' => 'ueber den Endpunkt (Aktionstoken)', 'knopf' => 'ueber den Knopf im Reiter Test',
+                  'mqtt' => 'ueber MQTT (Befehlsbruecke)');
+    cam_log('Test-Pushnachricht ausgeloest ' . (isset($wege[$quelle]) ? $wege[$quelle] : 'ueber ' . (string) $quelle)
+        . ($ok ? ' - PTEST=1 fuer 5 Minuten' : ' - der Merker liess sich NICHT schreiben: ' . $t . '/ptest'));
+    if ($ok) {
+        cam_mqtt_zustand();
+    }
+    return array('ok' => $ok, 'grund' => $ok ? '' : 'Merker nicht geschrieben');
+}
+
+/* ---------------- Abgekoppelte Aufnahme (E-E3, E-E4, Pflicht N4) ---------------- */
+
+/** Wo die Sperre einer laufenden Bildserie liegt (je Kamera, Zwischenspeicher). */
+function cam_clip_sperre($id)
+{
+    return cam_paths()['tmp'] . '/clip' . cam_sx($id) . '.lock';
+}
+
+/** Der Minutentakt bin/cam_cron.php: installiert unter bin/plugins/<ordner>/, im Archiv unter bin/. '' = keiner. */
+function cam_cron_pfad()
+{
+    $p = cam_paths();
+    $kand = array();
+    if ($p['lbhome'] !== '') {
+        $kand[] = $p['lbhome'] . '/bin/plugins/' . $p['ordner'] . '/cam_cron.php';
+    }
+    $kand[] = dirname(dirname(__DIR__)) . '/bin/cam_cron.php';
+    foreach ($kand as $k) {
+        if (is_file($k)) {
+            return $k;
+        }
+    }
+    return '';
+}
+
+/**
+ * Eine Aufnahme ueber die Befehlsbruecke starten - ABGEKOPPELT (E-E3, N4).
+ *
+ * Synchron, im Dienst, nur die Pruefungen: Art, Kamera eingerichtet (eine
+ * Adresse steht), Anlass ^[a-z0-9]{1,20}$, bei einer Bildserie: laeuft fuer
+ * diese Kamera schon eine (Sperre <tmp>/clip<n>.lock, flock LOCK_NB), dann
+ * die Mindestpause ueber cam_pause_nehmen() - dieselbe Sperrdatei wie cam.php
+ * und e.php, die Pause gilt also fuer ALLE Wege (E-E4). Danach startet
+ * "cam_cron.php --aufnahme foto|clip <kamera> <anlass> <quelle>" als
+ * abgekoppelter Kindprozess wie marstek_haus_abnehmer_starten() (Marstek
+ * 1.1.28): alle Deskriptoren ueber 2 geschlossen - die Roehren zu
+ * mosquitto_sub und jede Sperre des Dienstes erbt die Aufnahme nicht
+ * (Gedaechtnis sperre-vererbt-sich-an-kinder).
+ *
+ * Warum nicht synchron: die Bruecke ruft tun() im Dauerdienst nacheinander.
+ * cam_snapshot() kann im schlechten Fall ueber 200 s dauern (Abruf mit Suche
+ * nach dem Weg, KI 25 s, zwei Webhooks), cam_clip() bis 60 s plus KI - der
+ * Waechter hielte den Dienst ab 180 s fuer haengend, und jedes Klingelfoto
+ * laege hinter einer Bildserie. Rueckgabe array('ok', 'grund'); ok heisst
+ * "Aufnahme gestartet" (Quittung 'uebergeben'), das Ergebnis steht im
+ * Protokoll und kommt ueber MQTT (sofort, A10).
+ */
+function cam_aufnahme_starten($art, $kamera, $anlass, $quelle = 'mqtt')
+{
+    $kamera = (int) $kamera;
+    if ($art !== 'foto' && $art !== 'clip') {
+        return array('ok' => false, 'grund' => 'Art unbekannt');
+    }
+    $kc = cam_kcfg($kamera);
+    if ($kamera < 1 || $kamera > CAM_MAX || !in_array($kamera, cam_kameras(), true)
+        || trim((string) $kc['host']) === '') {
+        return array('ok' => false, 'grund' => 'Kamera ' . $kamera . ' nicht eingerichtet');
+    }
+    if (!is_string($anlass) || !preg_match('/^[a-z0-9]{1,20}\z/', $anlass)) {
+        return array('ok' => false, 'grund' => 'Anlass ungueltig');
+    }
+    if (!preg_match('/^[a-z]{1,10}\z/', (string) $quelle)) {
+        return array('ok' => false, 'grund' => 'Quelle ungueltig');
+    }
+    if ($art === 'clip') {
+        $p = cam_paths();
+        if (!is_dir($p['tmp'])) {
+            @mkdir($p['tmp'], 0775, true);
+        }
+        $fh = @fopen(cam_clip_sperre($kamera), 'ce');
+        if ($fh !== false) {
+            if (!flock($fh, LOCK_EX | LOCK_NB)) {
+                fclose($fh);
+                return array('ok' => false, 'grund' => 'Bildserie laeuft');
+            }
+            flock($fh, LOCK_UN);
+            fclose($fh);
+        }
+    }
+    $rest = cam_pause_nehmen($kamera);
+    if ($rest > 0) {
+        cam_log('Aufnahme ueber MQTT abgelehnt: Mindestpause, noch ' . (int) $rest . ' s (Kamera ' . $kamera . ')');
+        return array('ok' => false, 'grund' => 'Mindestpause, noch ' . (int) $rest . ' s');
+    }
+    $skript = cam_cron_pfad();
+    if ($skript === '') {
+        return array('ok' => false, 'grund' => 'cam_cron.php nicht gefunden');
+    }
+    $php = (defined('PHP_BINARY') && PHP_BINARY !== '' && is_executable(PHP_BINARY)) ? PHP_BINARY : 'php';
+    $befehl = 'for f in /proc/$$/fd/*; do n=${f##*/}; [ "$n" -gt 2 ] 2>/dev/null && eval "exec $n>&-"; done; '
+            . 'exec ' . escapeshellarg($php) . ' ' . escapeshellarg($skript) . ' --aufnahme '
+            . escapeshellarg($art) . ' ' . (int) $kamera . ' ' . escapeshellarg($anlass) . ' ' . escapeshellarg((string) $quelle);
+    $voll = 'bash -c ' . escapeshellarg($befehl) . ' </dev/null >/dev/null 2>&1 &';
+    $aus = array();
+    $rc = 1;
+    @exec($voll, $aus, $rc);
+    if ($rc !== 0) {
+        cam_log('Aufnahme ueber MQTT liess sich nicht starten (' . $art . ', Kamera ' . $kamera . ', rc ' . (int) $rc . ')');
+        return array('ok' => false, 'grund' => 'Start fehlgeschlagen');
+    }
+    cam_log('Aufnahme ueber MQTT (Befehlsbruecke) uebergeben: ' . ($art === 'clip' ? 'Bildserie' : 'Bild')
+        . ', ' . cam_kname($kamera) . ', Anlass ' . $anlass);
+    return array('ok' => true, 'grund' => '');
+}
+
+/**
+ * Die abgekoppelte Aufnahme selbst (cam_cron.php --aufnahme <art> <kamera>
+ * <anlass> <quelle>). Argumente streng geprueft (sonst 2). Waehrend einer
+ * Aktualisierung wird nichts aufgenommen (Protokollzeile, 0). Eine Bildserie
+ * haelt ihre Sperre (fopen 'ce', close-on-exec) bis zum Ende; ist sie belegt,
+ * laeuft schon eine - Protokollzeile, 0. Die Mindestpause ist im Dienst schon
+ * genommen und wird hier nicht noch einmal genommen. Rueckgabe Exitcode.
+ */
+function cam_aufnahme_lauf(array $args)
+{
+    $art = isset($args[0]) ? (string) $args[0] : '';
+    $kroh = isset($args[1]) ? (string) $args[1] : '';
+    $anlass = isset($args[2]) ? (string) $args[2] : '';
+    $quelle = isset($args[3]) ? (string) $args[3] : '';
+    if (($art !== 'foto' && $art !== 'clip') || !preg_match('/^[1-4]\z/', $kroh)
+        || !preg_match('/^[a-z0-9]{1,20}\z/', $anlass) || $quelle !== 'mqtt') {
+        fwrite(STDERR, "cam_cron.php --aufnahme: Aufruf ungueltig (foto|clip, Kamera 1-4, Anlass a-z0-9, Quelle mqtt)\n");
+        return 2;
+    }
+    $kamera = (int) $kroh;
+    if (cam_upgrade_laeuft()) {
+        cam_log('Aufnahme ueber MQTT ausgelassen: die Aktualisierung laeuft (' . $art . ', Kamera ' . $kamera . ').');
+        return 0;
+    }
+    if (!in_array($kamera, cam_kameras(), true)) {
+        cam_log('Aufnahme ueber MQTT ausgelassen: Kamera ' . $kamera . ' ist nicht eingerichtet.');
+        return 0;
+    }
+    $p = cam_paths();
+    if (!is_dir($p['tmp'])) {
+        @mkdir($p['tmp'], 0775, true);
+    }
+    $fh = null;
+    if ($art === 'clip') {
+        $fh = @fopen(cam_clip_sperre($kamera), 'ce');
+        if ($fh !== false && !flock($fh, LOCK_EX | LOCK_NB)) {
+            fclose($fh);
+            cam_log('Bildserie ueber MQTT ausgelassen: fuer ' . cam_kname($kamera) . ' laeuft schon eine.');
+            return 0;
+        }
+    }
+    if ($art === 'clip') {
+        list($ok, $info) = cam_clip($anlass, $kamera);
+    } else {
+        list($ok, $info) = cam_snapshot($anlass, $kamera);
+    }
+    cam_log(($art === 'clip' ? 'Bildserie' : 'Bild') . ' ueber MQTT (Befehlsbruecke): OK=' . (int) $ok . ' '
+        . $info . ' (Kamera ' . $kamera . ', Anlass ' . $anlass . ')');
+    if (is_resource($fh)) {
+        flock($fh, LOCK_UN);
+        fclose($fh);
+    }
+    return 0;
+}
+
+/* ---------------- Befehlsbruecke 1.0.1 (Entscheidung 2, E-E1 bis E-E5) ----------------
+ * Stammfassung byte-gleich unter bin/befehlsbruecke.php und .sh; linieneigen ist nur
+ * bin/befehle_zuordnung.php. Der Waechter laeuft im Minutentakt (cam_cron.php, vor Zeitraffer,
+ * Bereinigung und Erreichbarkeit); der Dienst selbst ist ereignisgetrieben. */
+
+/**
+ * Die Befehlsbruecke als Bibliothek laden (BB_NUR_LADEN; Bauart
+ * fer_bruecke_laden(), Ferien 1.2.28). Installiert liegt sie unter
+ * bin/plugins/<ordner>/, in einem Archiv unter bin/ neben webfrontend/.
+ * Rueckgabe true, wenn bb_waechter() danach da ist.
+ */
+function cam_bruecke_laden()
+{
+    if (function_exists('bb_waechter')) {
+        return true;
+    }
+    $p = cam_paths();
+    $kand = array();
+    if ($p['lbhome'] !== '') {
+        $kand[] = $p['lbhome'] . '/bin/plugins/' . $p['ordner'] . '/befehlsbruecke.php';
+    }
+    $kand[] = dirname(dirname(__DIR__)) . '/bin/befehlsbruecke.php';
+    foreach ($kand as $k) {
+        if (is_file($k)) {
+            if (!defined('BB_NUR_LADEN')) {
+                define('BB_NUR_LADEN', true);
+            }
+            require_once $k;
+            return function_exists('bb_waechter');
+        }
+    }
+    return false;
+}
+
+/** Die Befehlsliste der Bruecke (bb_liste(): EINE Quelle fuer Reiter und Vorlage). array(Liste|null, Fehlertext). */
+function cam_bruecke_liste()
+{
+    if (!cam_bruecke_laden()) {
+        return array(null, cam_t('BEFEHL.T_NICHT_DA'));
+    }
+    list($z, $fehler) = bb_zuordnung_laden();
+    if ($z === null) {
+        return array(null, $fehler);
+    }
+    $GLOBALS['bb_zuordnung'] = $z;
+    list($fehl) = bb_zuordnung_pruefen($z);
+    if ($fehl) {
+        return array(null, $fehl[0]);
+    }
+    return array(bb_liste($z, bb_einstellungen($z)), '');
+}
+
+/**
+ * Die Bruecke sofort schalten - nach dem Speichern im Reiter MQTT und nach dem
+ * Zurueckspielen einer Sicherung (Bauart fer_bruecke_schalten()). Soll sie
+ * laufen (befehle_mqtt_ein UND mqtt_enabled): befehlsbruecke.sh start; sonst,
+ * wenn sie laeuft: stop. Rueckgabe array(rc oder null = nichts zu tun,
+ * 'start'|'stop'|'', Ausgabe).
+ */
+function cam_bruecke_schalten(array $cfg)
+{
+    if (!cam_bruecke_laden()) {
+        return array(1, '', cam_t('BEFEHL.T_NICHT_DA'));
+    }
+    $p = bb_pfade();
+    if (!$p) {
+        return array(1, '', cam_t('BEFEHL.T_KEINE_WURZEL'));
+    }
+    if (!empty($cfg['befehle_mqtt_ein']) && !empty($cfg['mqtt_enabled'])) {
+        list($rc, $aus) = bb_sh($p, 'start');
+        return array($rc, 'start', $aus);
+    }
+    if (!bb_dienste()) {
+        return array(null, '', '');
+    }
+    list($rc, $aus) = bb_sh($p, 'stop');
+    return array($rc, 'stop', $aus);
+}
+
+/** Meldungen fuer die Oberflaeche nach cam_bruecke_schalten(): array(ok-Meldungen, Fehlermeldungen), maskiert. */
+function cam_bruecke_meldungen(array $r)
+{
+    list($rc, $art, $aus) = $r;
+    if ($art === 'start') {
+        return $rc === 0 ? array(array(cam_t('BEFEHL.M_EIN') . ' ' . cam_e($aus)), array())
+                         : array(array(), array(sprintf(cam_t('BEFEHL.M_START_FEHL'), cam_e($aus))));
+    }
+    if ($art === 'stop') {
+        return $rc === 0 ? array(array(cam_t('BEFEHL.M_AUS')), array())
+                         : array(array(), array(sprintf(cam_t('BEFEHL.M_STOP_FEHL'), cam_e($aus))));
+    }
+    if ($rc !== null && $rc !== 0) {
+        return array(array(), array(sprintf(cam_t('BEFEHL.M_START_FEHL'), cam_e($aus))));
+    }
+    return array(array(), array());
+}
+
+/**
+ * Lage der Befehlsbruecke fuer den Reiter Test (Bauart fer_bruecke_lage()):
+ * Dienst laeuft (argumentweise), zustand.json juenger als 180 s, Abo steht.
+ * Rueckgabe array(true|false|null, Text) - null heisst "aus" (Haken) und
+ * zaehlt nicht als bestanden.
+ */
+function cam_bruecke_lage()
+{
+    if (!cam_bruecke_laden()) {
+        return array(false, cam_t('BEFEHL.T_NICHT_DA'));
+    }
+    if (!bb_pfade()) {
+        return array(null, cam_t('BEFEHL.T_KEINE_WURZEL'));
+    }
+    list($soll, $grund) = bb_soll_ermitteln();
+    if ($soll === 1) {
+        return array(null, cam_t('BEFEHL.T_AUS'));
+    }
+    if ($soll !== 0) {
+        return array(false, sprintf(cam_t('BEFEHL.T_DEFEKT'), cam_e($grund)));
+    }
+    $zu = bb_zustand_lesen();
+    $pids = bb_dienste();
+    $alter = (is_array($zu) && isset($zu['ts'])) ? time() - (int) $zu['ts'] : null;
+    if ($pids && $alter !== null && $alter <= BB_WACHE_GRENZE && !empty($zu['abo'])) {
+        $zl = (isset($zu['zaehler']) && is_array($zu['zaehler'])) ? $zu['zaehler'] : array();
+        $txt = sprintf(cam_t('BEFEHL.T_LAEUFT'), cam_e(implode(' ', $pids)),
+            cam_e(is_string($zu['abo']) ? $zu['abo'] : ''),
+            isset($zl['angenommen']) ? (int) $zl['angenommen'] : 0, isset($zl['abgelehnt']) ? (int) $zl['abgelehnt'] : 0);
+        $lz = (isset($zu['letzter']) && is_array($zu['letzter'])) ? $zu['letzter'] : null;
+        if ($lz !== null && isset($lz['name'])) {
+            $txt .= ' ' . sprintf(cam_t('BEFEHL.T_LETZTER'), cam_e((string) $lz['name']),
+                cam_e(isset($lz['ergebnis']) ? (string) $lz['ergebnis'] : '-'),
+                isset($lz['zeit']) ? max(0, time() - (int) $lz['zeit']) : 0);
+        } else {
+            $txt .= ' ' . cam_t('BEFEHL.T_KEINER');
+        }
+        return array(true, $txt);
+    }
+    $wie = !$pids ? 'kein Dienst' : ($alter === null ? 'kein Zustand' : ($alter > BB_WACHE_GRENZE
+        ? 'Zustand ' . $alter . ' s alt' : 'ohne Abo' . (is_array($zu) && !empty($zu['fehler']) ? ': ' . $zu['fehler'] : '')));
+    return array(false, sprintf(cam_t('BEFEHL.T_STEHT'), cam_e($wie)));
+}
+
+/**
+ * Die Befehle der Vorlage VQ_actikamera.xml (E-E20, N11): je Kamera dieselben
+ * vier Befehle wie bis 1.9.31 (ACTI_Bild_Klingel, ACTI_Bild_Tuer,
+ * ACTI_Bild_Bewegung, ACTI_Bildserie_Klingel, ab Kamera 2 mit Kennziffer) -
+ * jetzt "publish <praefix>/befehl/foto klingel" usw. an den UDP-Eingang des
+ * Gateways. Die Themen kommen aus bb_liste() (foto, clip, foto/{kamera},
+ * clip/{kamera}); laesst sich die Bruecke nicht laden, aus derselben Regel
+ * (<praefix>/befehl/<art>[/<kamera>]). bb_vorlage() der Stammfassung schriebe
+ * 11 allgemeine Befehle und fuer Kamera 2-4 nur Kommentare.
+ */
+function cam_bruecke_vorlagenbefehle()
+{
+    $cfg = cam_config();
+    $w = cam_mqtt_praefix($cfg);
+    $themen = array('foto' => $w . '/befehl/foto', 'clip' => $w . '/befehl/clip',
+                    'foto/{kamera}' => $w . '/befehl/foto/{kamera}', 'clip/{kamera}' => $w . '/befehl/clip/{kamera}');
+    list($l) = cam_bruecke_liste();
+    if (is_array($l)) {
+        foreach ($l['befehle'] as $b) {
+            if (isset($themen[$b['name']])) {
+                $themen[$b['name']] = $b['thema'];
+            }
+        }
+    }
+    $vorlagen = array(
+        array('Bild_Klingel',      'LOX.VO_KLINGEL',  'foto', 'klingel'),
+        array('Bild_Tuer',         'LOX.VO_TUER',     'foto', 'tuer'),
+        array('Bild_Bewegung',     'LOX.VO_BEWEGUNG', 'foto', 'bewegung'),
+        array('Bildserie_Klingel', 'LOX.VO_CLIP',     'clip', 'klingel'),
+    );
+    $mehrere = count(cam_kameras()) > 1;
+    $cmds = array();
+    foreach (cam_kameras() as $id) {
+        $sx = cam_sx($id);
+        foreach ($vorlagen as $v) {
+            $thema = $id > 1 ? str_replace('{kamera}', (string) $id, $themen[$v[2] . '/{kamera}']) : $themen[$v[2]];
+            $cmds[] = array(
+                'title'   => 'ACTI_' . $v[0] . $sx,
+                'comment' => cam_kommentar(cam_t($v[1]) . ' (MQTT)', $mehrere ? ' [' . cam_kname($id) . ']' : ''),
+                'hint'    => cam_t($v[1]) . ' (MQTT, ' . cam_t('BEFEHL.NIE_RETAIN') . ')' . ($mehrere ? ' [' . cam_kname($id) . ']' : ''),
+                'on'      => 'publish ' . $thema . ' ' . $v[3],
+                'kamera'  => $id,
+                'art'     => $v[0],
+            );
+        }
+    }
+    return $cmds;
+}
+
+/* ---------------- Zurueckspielen/Speichern mit MQTT-Folgen (A1) ---------------- */
+
+/**
+ * Nach einem Speichern, das mqtt_enabled oder mqtt_topic aendern kann (Reiter
+ * MQTT UND seit 1.9.32 das Zurueckspielen einer Sicherung, A1): beim
+ * Praefixwechsel oder beim Abschalten die zurueckbehaltenen Themen unter dem
+ * BISHERIGEN Praefix leeren und beim Broker nachlesen, die Abo-Datei des
+ * Gateways nachziehen und unter dem jetzigen Praefix einmal den vollen Satz
+ * senden. Bis 1.9.31 tat das nur der Reiter MQTT; nach dem Zurueckspielen
+ * blieben die Themen unter dem alten Praefix fuer immer im Broker.
+ * Rueckgabe array(Meldung (maskiert) oder '', rot ja/nein).
+ */
+function cam_mqtt_nach_speichern($alt_ein, $alt_praefix)
+{
+    $c = cam_config();
+    $neu = cam_mqtt_praefix($c);
+    $alt_praefix = (string) $alt_praefix;
+    $wechsel = ($neu !== $alt_praefix);
+    $note = '';
+    $rot = false;
+    if ($alt_ein && ($wechsel || empty($c['mqtt_enabled']))) {
+        $l = cam_mqtt_leeren_lauf($alt_praefix, null, 3, 500000);
+        $zeilen = array();
+        foreach ($l['zeilen'] as $z) {
+            $zeilen[] = cam_e(preg_replace('/^<[A-Z]+> /', '', $z));
+        }
+        $note = sprintf(cam_t($wechsel ? 'MQTT.M_LEEREN_WECHSEL' : 'MQTT.M_LEEREN_AUS'),
+                        cam_e($alt_praefix), cam_e($neu)) . ' ' . implode(' ', $zeilen);
+        $rot = ((int) $l['rc'] !== 0);
+        cam_log('MQTT: ' . ($wechsel ? 'Praefix ' . $alt_praefix . ' -> ' . $neu : 'ausgeschaltet')
+            . ', Themen unter ' . $alt_praefix . '/ geleert: ' . implode(' ', $l['zeilen']));
+    }
+    // Die Abo-Datei des Gateways auf das Praefix nachziehen (M7).
+    cam_mqtt_abo_datei(true);
+    // Unter dem jetzigen Praefix einmal den vollen Satz senden.
+    cam_mqtt_zustand(true);
+    return array($note, $rot);
+}
+
+/* ---------------- Protokoll und cron.err (A3, E5) ---------------- */
+
+/** Die Fehlerausgabe des Minutentakts (cron.01min: REPLACELBPLOGDIR/cron.err) - neben cam.log. */
+function cam_cron_err_pfad()
+{
+    return dirname(cam_paths()['log']) . '/cron.err';
+}
+
+/**
+ * Die letzten $n Zeilen einer Datei, ohne sie ganz zu lesen (Bauart Docker
+ * D21): hoechstens die letzten 64 kB. Rueckgabe array() ohne Datei.
+ */
+function cam_datei_ende($datei, $n)
+{
+    clearstatcache(true, $datei);
+    if (!is_file($datei) || !is_readable($datei)) {
+        return array();
+    }
+    $gr = (int) @filesize($datei);
+    $fh = @fopen($datei, 'rb');
+    if ($fh === false) {
+        return array();
+    }
+    if ($gr > 65536) {
+        fseek($fh, -65536, SEEK_END);
+    }
+    $roh = (string) stream_get_contents($fh);
+    fclose($fh);
+    $zeilen = preg_split('/\r?\n/', rtrim($roh, "\r\n"));
+    if ($gr > 65536) {
+        array_shift($zeilen);   // die erste ist angeschnitten
+    }
+    if ($zeilen === array('')) {
+        return array();
+    }
+    return array_slice($zeilen, -max(1, (int) $n));
+}
+
+/**
+ * "Protokoll leeren" (A3): cam.log UND cron.err auf 0 Byte - nie loeschen (die
+ * Logwartung und der Minutentakt erwarten die Dateien). Rueckgabe array(alle
+ * geleert ja/nein, Liste der nicht geleerten).
+ */
+function cam_protokoll_leeren()
+{
+    $nicht = array();
+    foreach (array(cam_paths()['log'], cam_cron_err_pfad()) as $f) {
+        if (!is_dir(dirname($f))) {
+            @mkdir(dirname($f), 0775, true);
+        }
+        $fh = @fopen($f, 'c');
+        if ($fh === false || !@ftruncate($fh, 0)) {
+            $nicht[] = basename($f);
+        }
+        if ($fh !== false) {
+            fclose($fh);
+        }
+    }
+    return array(!$nicht, $nicht);
+}
+
+/* ---------------- Zeitraffer im Archiv (A9, E3; E-E15) und Livebild-Reste (A6, N15) ---------------- */
+
+/** Wo das Zeitraffer-Video einer Kamera liegt: im Archiv, Ordner timelapse<n>. */
+function cam_zeitraffer_pfad($id)
+{
+    return cam_ordner($id, 'timelapse') . '/zeitraffer.mp4';
+}
+
+/** Das Zeitraffer-Video fuer cam.php?video=1 - der Pfad, wenn es eines gibt, sonst ''. */
+function cam_zeitraffer_video($id)
+{
+    $f = cam_zeitraffer_pfad($id);
+    clearstatcache(true, $f);
+    return (is_file($f) && (int) @filesize($f) > 0) ? $f : '';
+}
+
+/**
+ * Reste des Livebilds (N15): die ffconcat-Datei des RTSP-Wegs loescht
+ * cam_stream.php nach dem ersten Bild und beim Ende. Beendet Apache den
+ * Arbeiter hart, bleibt sie liegen - der Minutentakt raeumt Dateien
+ * livebild.*.ffconcat, die aelter als 15 Minuten sind (stream_maxsec <= 900 s).
+ * Rueckgabe: Zahl der entfernten Dateien.
+ */
+function cam_livebild_reste()
+{
+    $n = 0;
+    foreach (glob(cam_paths()['datadir'] . '/livebild.*.ffconcat') ?: array() as $f) {
+        $m = (int) @filemtime($f);
+        if ($m > 0 && (time() - $m) > 900 && @unlink($f)) {
+            $n++;
+        }
+    }
+    if ($n > 0) {
+        cam_log('Livebild: ' . $n . ' liegengebliebene Uebergabedatei(en) entfernt (aelter als 15 Minuten).');
+    }
+    return $n;
+}
+
+/* ---------------- Ansichten fuer den Reiter Test (N7; E-E17) ---------------- */
+
+/**
+ * Die Auskunft der System-Schnittstelle als Klartext - EINE Stelle fuer
+ * cam.php?sys=1 (Aktionstoken, Altlinks) und index.php?ansicht=sys
+ * (angemeldet, ohne Token in der Adresse).
+ */
+function cam_ansicht_sys($id)
+{
+    $o = "AUSKUNFT DER SYSTEM-SCHNITTSTELLE  /cgi-bin/cmd/system\n";
+    $o .= str_repeat('-', 78) . "\n";
+    /* GET_STREAM fragt die Auskunft seit 1.9.33 nicht mehr ab: die Kamera
+       antwortet darauf mit dem MJPEG-Strom selbst (gemessen 26.10.2026: 24 s
+       und ein abgeschnittener Bilderstrom statt einer Zeile). */
+    $o .= sprintf("%-22s %s\n", 'GET_STREAM', '(nicht abgefragt - liefert den MJPEG-Strom selbst, keine Adresse)');
+    foreach (array('GET_MODEL', 'GET_FIRMWARE_VERSION', 'GET_MAC',
+                   'VIDEO_RESOLUTION', 'CHANNEL_ENABLE') as $ac_b) {
+        list($ac_a, $ac_c, $ac_e2) = cam_system($ac_b, $id);
+        $ac_t = $ac_a === false ? ('FEHLER: ' . $ac_e2) : trim(cam_maske((string) $ac_a));
+        if (strlen($ac_t) > 400) { $ac_t = substr($ac_t, 0, 400) . ' …'; }
+        $o .= sprintf("%-22s HTTP %-4d %s\n", $ac_b, $ac_c, str_replace(array("\r", "\n"), ' ', $ac_t));
+    }
+    $o .= str_repeat('-', 78) . "\n";
+    $ac_ff = cam_ffmpeg();
+    $o .= 'ffmpeg: ' . ($ac_ff !== '' ? $ac_ff : 'nicht vorhanden') . "\n";
+    $o .= 'Kamerastrom: ' . cam_maske(cam_mjpeg_url($id)) . "\n";
+    $o .= 'RTSP-Adresse: ' . (cam_rtsp_maske(cam_rtsp_url(false, $id)) ?: 'nicht ermittelbar') . "\n";
+    return $o;
+}
+
+/** Die Diagnose als Klartext - EINE Stelle fuer cam.php?diag=1 und index.php?ansicht=diag. */
+function cam_ansicht_diag($id)
+{
+    $d_cfg = cam_kcfg($id);
+    $o = 'DIAGNOSE - ' . cam_kname($id) . "\n";
+    $o .= 'Gebaute URL: ' . cam_maske(cam_url('SNAPSHOT', true, $id)) . "\n";
+    $o .= 'Benutzer:    "' . $d_cfg['user'] . '" (' . strlen($d_cfg['user']) . " Zeichen)\n";
+    $o .= 'Passwort:    ' . strlen($d_cfg['pass']) . ' Zeichen'
+       . ($d_cfg['pass'] !== '' ? ', beginnt mit "' . substr($d_cfg['pass'], 0, 1) . '", endet auf "'
+         . substr($d_cfg['pass'], -1) . '"' : ' - LEER!') . "\n";
+    $o .= "\nVergleichen Sie diese Angaben mit einer nachweislich funktionierenden URL\n"
+       . "(z. B. aus einer bestehenden Kamera-Einbindung). Weichen Benutzer oder Laenge ab,\n"
+       . "ist das die Ursache - dann die vollstaendige URL in den Einstellungen hinterlegen.\n";
+    $o .= str_repeat('-', 100) . "\n";
+    foreach (cam_diag($id) as $z) {
+        $o .= sprintf("%-4s HTTP %-4s %5s ms  %-9s %-42s %s\n",
+            $z['ok'] ? 'OK' : '--', $z['http'], $z['ms'], $z['auth'],
+            substr($z['befehl'], 0, 42), $z['antwort']);
+    }
+    $o .= "\nEine Zeile mit OK zeigt den Weg, der funktioniert - er wird automatisch gemerkt.\n";
+    return $o;
 }
 
 /* Der Escape-Helfer gehoert in die Bibliothek, nicht in

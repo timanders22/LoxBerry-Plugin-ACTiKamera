@@ -1,0 +1,6 @@
+# These packages will be installed by apt-get -y install PACKAGENAME
+# One line per package, use exact packagename as you would do for apt-get.
+#
+# Seit 1.9.32 (Gruppe 25, E-E5): mosquitto_sub/_pub fuer die Befehlsbruecke (im LoxBerry-Grundabbild ohnehin
+# vorhanden; Hausform, Bauart Beschattungswaechter 0.9.31 / Docker NG 1.3.20).
+mosquitto-clients

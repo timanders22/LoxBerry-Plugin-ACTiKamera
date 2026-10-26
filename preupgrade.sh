@@ -85,6 +85,15 @@ else
     exit 2
 fi
 
+# 0a. Die Befehlsbruecke anhalten (seit 1.9.32, E-E5; Bauart Ferien 1.2.29
+#     preupgrade): die Marke liegt schon - der Waechter im Minutentakt startet
+#     sie bis postupgrade.sh nicht neu. Bis 1.9.31 gab es keine Bruecke (dann
+#     fehlt die Datei).
+BBSH="$BASE/bin/plugins/$PFOLDER/befehlsbruecke.sh"
+if [ -f "$BBSH" ]; then
+    echo "<INFO> Befehlsbruecke: $(timeout 40 bash "$BBSH" stop 2>&1 | head -n 1)"
+fi
+
 # 0b. Einen ALTEN Sicherungsbestand wegraeumen, bevor neu gesichert wird
 #     (Entscheidung 1, letzter Satz; Befund I4). Bis 1.9.22 legte "mkdir -p"
 #     den Ordner nur an: was von einem frueheren Vorgang darin lag, spielte
@@ -120,6 +129,17 @@ if [ -f "$BASE/config/plugins/$PFOLDER/cam.json" ]; then
     cp -p "$BASE/config/plugins/$PFOLDER/cam.json" "$SICHER/cam.json" \
         && chmod 0600 "$SICHER/cam.json" \
         || echo "<WARNING> Die Konfiguration konnte nicht gesichert werden."
+fi
+# Seit 1.9.32 (E-E11): neue Anlagen senden ab Werk ueber MQTT; eine bestehende
+# bleibt, wie sie ist. Ist MQTT hier aus (oder fehlt der Schluessel in einer
+# eingerichteten Datei - dann liest das Plugin 0), sagt es eine Zeile.
+if [ -f "$BASE/config/plugins/$PFOLDER/cam.json" ] && command -v php >/dev/null 2>&1; then
+    if php -r '$d = json_decode((string) @file_get_contents($argv[1]), true); if (!is_array($d)) { exit(1); }
+        $r = $d; foreach (array("aktionstoken", "ausloeser_token", "ausloeser_token2", "ausloeser_token3", "ausloeser_token4") as $s) { unset($r[$s]); }
+        exit((array_key_exists("mqtt_enabled", $d) ? empty($d["mqtt_enabled"]) : count($r) > 0) ? 0 : 1);' \
+        "$BASE/config/plugins/$PFOLDER/cam.json" 2>/dev/null; then
+        echo "<INFO> MQTT ist in dieser Anlage aus. Neue Anlagen senden ab 1.9.32 ab Werk ueber MQTT - einschalten im Reiter MQTT (empfohlen; der HTTP-Endpunkt bleibt)."
+    fi
 fi
 # Das Protokoll wird NICHT gesichert. purge_installation raeumt
 # log/plugins/<ordner>/ beim Upgrade nicht ab (Regeln/06, Abschnitt

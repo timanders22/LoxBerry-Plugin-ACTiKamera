@@ -1,7 +1,9 @@
 <?php
 /**
  * ACTi Kamera - Admin-Oberflaeche
- * Reiter: Einstellungen | Einbindung in Loxone | Aufnahmen | Test | Protokoll
+ * Reiter: Einstellungen | MQTT | Einbindung in Loxone | Aufnahmen | Test | Protokoll
+ * Seit 1.9.32 (Gruppe 25): Werte ueber das MQTT-Gateway (Namenstabelle), Befehle ueber die Befehlsbruecke,
+ * HTTP-Lesezweig nur noch unter "Bestehende Anlagen", Test-Push als Formular, Ansichten ohne Token.
  *
  * WICHTIG: LBWeb::lbheader() setzt SDK-GLOBALS (u.a. $cfg als stdClass) und
  * wuerde gleichnamige Plugin-Variablen ueberschreiben - daher tragen hier
@@ -215,6 +217,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && function_exists('cam_formtoken')) {
     }
 }
 
+/* ---------- Ansichten des Reiters Test (seit 1.9.32, E-E17, N7) ----------
+ * "Verbindung pruefen", "Diagnose" und "Kamera-Auskunft" ueber die
+ * angemeldete Oberflaeche, ohne Aktionstoken in der Adresse: bis 1.9.31
+ * stand das Token (das auch Aufnahmen ueber HTTP erlaubt) im Browserverlauf
+ * und im Zugriffsprotokoll. Sie lesen nur (F5 schadet nicht), deshalb GET.
+ * Die cam.php-Zweige mit Token bleiben fuer Altlinks. Dieselbe Ausgabe:
+ * cam_test(), cam_ansicht_diag(), cam_ansicht_sys(). */
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['ansicht']) && is_string($_GET['ansicht'])
+    && in_array($_GET['ansicht'], array('test', 'diag', 'sys'), true)) {
+    $ac_ak = 1;
+    if (isset($_GET['kamera']) && is_string($_GET['kamera']) && preg_match('/^[1-4]\z/', $_GET['kamera'])
+        && in_array((int) $_GET['kamera'], cam_kameras(), true)) {
+        $ac_ak = (int) $_GET['kamera'];
+    }
+    header('Content-Type: text/plain; charset=utf-8');
+    header('Cache-Control: no-store');
+    if ($_GET['ansicht'] === 'test') {
+        cam_log('Oberflaeche: Verbindungstest (Kamera ' . $ac_ak . ')');
+        echo cam_test($ac_ak) . "\n";
+    } elseif ($_GET['ansicht'] === 'diag') {
+        echo cam_ansicht_diag($ac_ak);
+    } else {
+        echo cam_ansicht_sys($ac_ak);
+    }
+    exit;
+}
+
 // ---------- Speichern: nur die MQTT-Werte ----------
 // Bewusst ein eigener Zweig. Der grosse Speichervorgang liest zwar die alte
 // Konfiguration ein, ueberschreibt danach aber JEDES Feld aus dem Formular -
@@ -225,11 +254,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mqtt'])) {
     $ac_m_alt_ein = !empty($ac_m['mqtt_enabled']);
     $ac_m_alt_praefix = cam_mqtt_praefix($ac_m);
     $ac_m['mqtt_enabled'] = isset($_POST['mqtt_enabled']) ? 1 : 0;
-    /* Beanstanden statt still kuerzen (M5, U5). Bis 1.9.22 filterte hier
-       preg_replace('#[^\w/\-]#'): aus "Kueche" wurde "Kche", aus "haus#1"
-       "haus1", "hof/" ergab hof//OK, und auf "#" antwortete die Seite, das
-       Thema sei leer. Dieselbe Regel wie beim Zurueckspielen:
-       cam_thema_pruefen(). */
+    // Seit 1.9.32 (E-E1 bis E-E5): Befehle aus Loxone ueber die Befehlsbruecke - im selben Formular.
+    $ac_m['befehle_mqtt_ein'] = isset($_POST['befehle_mqtt_ein']) ? 1 : 0;
+    /* Beanstanden statt still kuerzen (M5, U5). Dieselbe Regel wie beim
+       Zurueckspielen: cam_thema_pruefen(). */
     $ac_mt = trim(ac_post('mqtt_topic'));
     $ac_mg = cam_thema_pruefen($ac_mt);
     if ($ac_mt === '') {
@@ -244,30 +272,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mqtt'])) {
         if (cam_config_save($ac_m)) {
             $ac_saved = true;
             /* Praefixwechsel (M2) und Abschalten (M3): die zurueckbehaltenen
-               Themen unter dem BISHERIGEN Praefix werden geleert und beim
-               Broker nachgelesen, das Ergebnis steht in der Meldung. Bis
-               1.9.22 stand hier der Satz, ein Vollversand halte den Broker
-               davon ab, auf Werten unter dem alten Thema sitzenzubleiben - er
-               sendete aber nur unter dem NEUEN; unter dem alten blieben alle
-               Themen fuer immer stehen, auch nach der Deinstallation
-               (gemessen, Faelle F5 und F6). Bauform KODI-NG 1.2.12. */
-            $ac_m_wechsel = ($ac_mt !== $ac_m_alt_praefix);
-            if ($ac_m_alt_ein && ($ac_m_wechsel || empty($ac_m['mqtt_enabled']))) {
-                $ac_l = cam_mqtt_leeren_lauf($ac_m_alt_praefix, null, 3, 500000);
-                $ac_zeilen = array();
-                foreach ($ac_l['zeilen'] as $ac_z) {
-                    $ac_zeilen[] = ac_e(preg_replace('/^<[A-Z]+> /', '', $ac_z));
-                }
-                $ac_note = sprintf(cam_t($ac_m_wechsel ? 'MQTT.M_LEEREN_WECHSEL' : 'MQTT.M_LEEREN_AUS'),
-                                   ac_e($ac_m_alt_praefix), ac_e($ac_mt)) . ' ' . implode(' ', $ac_zeilen);
-                $ac_note_rot = ((int) $ac_l['rc'] !== 0);
-                cam_log('MQTT: ' . ($ac_m_wechsel ? 'Praefix ' . $ac_m_alt_praefix . ' -> ' . $ac_mt : 'ausgeschaltet')
-                    . ', Themen unter ' . $ac_m_alt_praefix . '/ geleert: ' . implode(' ', $ac_l['zeilen']));
-            }
-            // Die Abo-Datei des Gateways auf das Praefix nachziehen (M7).
-            cam_mqtt_abo_datei(true);
-            // Unter dem neuen Praefix einmal den vollen Satz senden.
-            cam_mqtt_zustand(true);
+               Themen unter dem BISHERIGEN Praefix leeren und beim Broker
+               nachlesen, Abo-Datei nachziehen, voller Satz - seit 1.9.32 an
+               EINER Stelle, die auch das Zurueckspielen ruft (A1). */
+            list($ac_note, $ac_note_rot) = cam_mqtt_nach_speichern($ac_m_alt_ein, $ac_m_alt_praefix);
+            /* Die Bruecke sofort schalten (E-E5): laeuft mit beiden Haken,
+               sonst wird sie angehalten. */
+            list($ac_bok, $ac_bfehl) = cam_bruecke_meldungen(cam_bruecke_schalten(cam_config()));
+            if ($ac_bok) { $ac_note = trim($ac_note . ' ' . implode(' ', $ac_bok)); }
+            if ($ac_bfehl) { $ac_err = trim($ac_err . ' ' . implode(' ', $ac_bfehl)); }
         } else {
             $ac_err = cam_t('MQTT.FEHLER_SPEICHERN');
         }
@@ -307,8 +320,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['download'])) {
     $ac_host = isset($_SERVER['HTTP_HOST']) ? preg_replace('/[^A-Za-z0-9\.\-:]/', '', $_SERVER['HTTP_HOST']) : '';
     /* Zwei Bauformen, ein Handler: der Wert des Knopfes entscheidet.
        Zwei getrennte Handler waeren zwei Stellen, die man mitpflegen muss. */
-    $ac_v = ($_POST['download'] === 'xml_out' && function_exists('cam_vorlage_ausgang'))
-        ? cam_vorlage_ausgang($ac_host) : cam_vorlage($ac_host);
+    /* Seit 1.9.32: xml_out = Brueckenvorlage VQ_actikamera.xml (UDP-Eingang des
+       Gateways, E-E20), xml_out_http = alte HTTP-Vorlage mit Aktionstoken
+       (VQ_actikamera_HTTP.xml, "Bestehende Anlagen"), sonst der virtuelle
+       HTTP-Eingang VI_actikamera.xml (ebenfalls "Bestehende Anlagen"). */
+    $ac_dl = is_string($_POST['download']) ? $_POST['download'] : '';
+    if ($ac_dl === 'xml_out') {
+        $ac_v = cam_vorlage_ausgang($ac_host);
+    } elseif ($ac_dl === 'xml_out_http') {
+        $ac_v = cam_vorlage_ausgang_http($ac_host);
+    } else {
+        $ac_v = cam_vorlage($ac_host);
+    }
     header('Content-Type: application/x-download');
     // Die Anfuehrungszeichen um den Dateinamen sind Pflicht - ohne sie bricht
     // jeder Name, der ein Leerzeichen enthaelt.
@@ -334,9 +357,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['neuestoken'])
     $ac_tab = 'tab-loxone';
 }
 
+/* Protokoll leeren (A3, seit 1.9.32): cam.log UND cron.err auf 0 Byte, nie
+   loeschen - mit Rueckmeldung "geleert" bzw. "nicht geleert". */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clearlog'])) {
-    @mkdir(dirname($ac_logfile), 0775, true);
-    @file_put_contents($ac_logfile, '[' . date('Y-m-d H:i:s') . "] Protokoll geleert (Admin-Oberflaeche)\n");
+    list($ac_lok, $ac_lnicht) = cam_protokoll_leeren();
+    if ($ac_lok) {
+        $ac_note = cam_t('TEXT.M_PROTOKOLL_GELEERT');
+    } else {
+        $ac_note = sprintf(cam_t('TEXT.M_PROTOKOLL_NICHT_GELEERT'), ac_e(implode(', ', $ac_lnicht)));
+        $ac_note_rot = true;
+    }
     $ac_tab = 'tab-log';
 }
 
@@ -345,6 +375,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['shotnow']) && functio
     $ac_note = sprintf(cam_t($ac_ok ? 'TEXT.M_BILD_OK' : 'TEXT.M_BILD_FEHL'), ac_e($ac_info));
     $ac_note_rot = !$ac_ok;
     $ac_tab = 'tab-test';
+}
+/* Test-Push als Formular (A4, seit 1.9.32; Bauart Ferien 1.2.29): bis 1.9.31
+   ein Link cam.php?ptest=1&token=... - das Token stand im Verlauf, und F5
+   loeste erneut aus. cam_testpush() setzt den Merker und sendet sofort. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ptestnow'])) {
+    $ac_pt = cam_testpush('knopf');
+    $ac_note = cam_t($ac_pt['ok'] ? 'TEXT.M_PTEST_OK' : 'TEXT.M_PTEST_FEHL');
+    $ac_note_rot = !$ac_pt['ok'];
+    $ac_tab = 'tab-test';
+}
+/* Der HTTP-Lesezweig fuer Loxone (seit 1.9.32, E-E12): eigenes Formular im
+   Reiter Einbindung, Abschnitt "Bestehende Anlagen". */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_endpunkt'])) {
+    $ac_ep = cam_config();
+    $ac_ep['endpunkt_ein'] = isset($_POST['endpunkt_ein']) ? 1 : 0;
+    if (cam_config_save($ac_ep)) {
+        $ac_saved = true;
+        $ac_note = cam_t($ac_ep['endpunkt_ein'] ? 'LOX.M_ENDPUNKT_AN' : 'LOX.M_ENDPUNKT_AUS');
+    } else {
+        $ac_err = cam_t('TEXT.M_NICHT_GESPEICHERT');
+    }
+    $ac_tab = 'tab-loxone';
 }
 /* RTSP-Weg pruefen (ACTiKamera-b1): ffmpeg einmal je Kamera, hoechstens
    8 s, nichts wird gespeichert. Ergebnis in der Meldung und in der
@@ -737,6 +789,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_zurueck'])) {
         $ac_note = cam_t('TEXT.SICH_ZU_GROSS');
         $ac_note_rot = true;
     } else {
+        /* A1 (seit 1.9.32): der Stand VOR dem Zurueckspielen - fuer das Leeren
+           unter dem alten Praefix und das Schalten der Bruecke danach. */
+        $ac_zr_alt = cam_config();
+        $ac_zr_alt_ein = !empty($ac_zr_alt['mqtt_enabled']);
+        $ac_zr_alt_praefix = cam_mqtt_praefix($ac_zr_alt);
         $ac_sl = cam_sicherung_lesen(
             (string) @file_get_contents($_FILES['cam_sicherung']['tmp_name']));
         list($cam_neu, $cam_fehler, $cam_n) = $ac_sl;
@@ -765,6 +822,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_zurueck'])) {
             if ($ac_angekommen) {
                 $ac_note = sprintf(cam_t('TEXT.SICH_UEBERNOMMEN'), $cam_n)
                     . ($cam_hinw ? ' ' . implode(' ', array_map('ac_e', $cam_hinw)) : '');
+                /* A1 (seit 1.9.32): dieselben Folgen wie das Speichern im Reiter
+                   MQTT - Praefixwechsel bzw. Abschalten leert unter dem alten
+                   Praefix, Abo-Datei und voller Satz sofort - und die Bruecke
+                   folgt dem zurueckgespielten Haken. */
+                list($ac_zr_note, $ac_zr_rot) = cam_mqtt_nach_speichern($ac_zr_alt_ein, $ac_zr_alt_praefix);
+                if ($ac_zr_note !== '') {
+                    $ac_note .= ' ' . $ac_zr_note;
+                    $ac_note_rot = $ac_note_rot || $ac_zr_rot;
+                }
+                list($ac_bok, $ac_bfehl) = cam_bruecke_meldungen(cam_bruecke_schalten(cam_config()));
+                if ($ac_bok) { $ac_note .= ' ' . implode(' ', $ac_bok); }
+                if ($ac_bfehl) { $ac_note .= ' ' . implode(' ', $ac_bfehl); $ac_note_rot = true; }
             } else {
                 $ac_note = cam_t('TEXT.SICH_NICHT_ANGEKOMMEN');
                 $ac_note_rot = true;
@@ -1056,6 +1125,12 @@ $ac_k_herz = (int) $ac_k['herz_min'];
 <!-- ================= Einstellungen ================= -->
 <div class="sm-pane<?= $ac_tab === 'tab-settings' ? ' sm-active' : '' ?>" id="tab-settings">
 <div class="sm-hinweis"><?php echo cam_t('TEXT.WAS_IST_DAS'); ?></div>
+<?php /* Seit 1.9.32 (E-E22, N8): EINE Legende oben im Reiter, direkt nach dem Kasten - bis 1.9.31 stand sie unter
+         dem ersten Knopf. */ ?>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-lesen"></i> <?php echo cam_t('LEGENDE.LESEN'); ?></span>
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span>
+</div>
 <?php
 /* X-2: nach einer Beanstandung zeigt das Formular die eingetippten Werte -
    nur bis </form>, danach gelten wieder die gespeicherten. */
@@ -1168,7 +1243,7 @@ foreach ($ac_zeigen as $ac_i):
         <input type="text" data-role="none" name="mjpeg_url<?= $ac_s ?>"<?= cam_markierung('mjpeg_url' . $ac_s) ?> value="<?= ac_e(cam_zugang_maske((string) $ac_k['mjpeg_url'])) ?>">
     </div>
     <div class="acw-breit">
-        <label><?php echo cam_t('TEXT.RTSP_ADRESSE_LEER_BEI_DER_KAMERA_E'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.GET_STREAM'); ?></span>)</label>
+        <label><?php echo cam_t('TEXT.RTSP_ADRESSE_LEER_GEBILDET'); ?></label>
         <input type="text" data-role="none" name="rtsp_url<?= $ac_s ?>"<?= cam_markierung('rtsp_url' . $ac_s) ?> placeholder="<?php echo ac_e(cam_t('TEXT.P_RTSP')); ?>" value="<?= ac_e(cam_zugang_maske((string) $ac_k['rtsp_url'])) ?>">
     </div>
     <div>
@@ -1187,6 +1262,7 @@ foreach ($ac_zeigen as $ac_i):
         <input type="number" min="2" max="15" data-role="none" name="rtsp_quality<?= $ac_s ?>"<?= cam_markierung('rtsp_quality' . $ac_s) ?> value="<?= ac_e((string) $ac_k['rtsp_quality']) ?>">
     </div>
 </div>
+<div class="sm-small"><?php echo cam_t('TEXT.H_RTSP_MJPEG'); ?></div>
 <?php if ($ac_i === 1) { ?>
 <div class="sm-small"><?php echo cam_t('TEXT.AUFLSUNG_LEER_LASSEN_HEISST_DIE_KA'); ?> <span class="sm-mono">N1280x720</span> <?php echo cam_t('TEXT.N_NORMAL'); ?></div>
 <?php } ?>
@@ -1246,7 +1322,7 @@ foreach ($ac_zeigen as $ac_i):
 </div>
 <div class="sm-small"><?php echo cam_t('TEXT.DIE_BILDER_LANDEN_IM_UNTERORDNER'); ?> <span class="sm-mono">timelapse</span><?php echo cam_t('TEXT.DER_DATEINAME_IST_DAS_DATUM_IST'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.FFMPEG'); ?></span> <?php echo cam_t('TEXT.AUF_DEM_LOXBERRY_VORHANDEN_WIRD_NA'); ?> 
 <span class="sm-mono"><?php echo cam_t('TEXT.ZEITRAFFER_MP4'); ?></span> <?php echo cam_t('TEXT.AUS_ALLEN_BILDERN_NEU_ERZEUGT_ABRU'); ?> 
-<span class="sm-mono">http://<?= ac_e($ac_host) ?><?php echo cam_t('TEXT.PLUGINS'); ?><?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.ZEITRAFFER_MP4_2'); ?></span><?php echo cam_t('TEXT.FEHLT_FFMPEG_BLEIBEN_DIE_EINZELBIL'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.SUDO_APT_GET_INSTALL_Y_FFMPEG'); ?></span>).</div>
+<span class="sm-mono">http://<?= ac_e($ac_host) ?><?php echo cam_t('TEXT.PLUGINS'); ?><?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.ZEITRAFFER_MP4_2'); ?><?= $ac_bt ?></span><?php echo cam_t('TEXT.FEHLT_FFMPEG_BLEIBEN_DIE_EINZELBIL'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.SUDO_APT_GET_INSTALL_Y_FFMPEG'); ?></span>).</div>
 
 <h2><?php echo cam_t('TEXT.KI_OBJEKTERKENNUNG_OPTIONAL'); ?></h2>
 <div class="sm-row">
@@ -1315,7 +1391,6 @@ foreach ($ac_zeigen as $ac_i):
 <option value="rtsp"<?= $ac_cfg['stream_mode'] === 'rtsp' ? ' selected' : '' ?>><?php echo cam_t('TEXT.NUR_RTSP_FLSSIGES_VIDEO_BRAUCHT_FF'); ?></option>
 <option value="jpeg"<?= $ac_cfg['stream_mode'] === 'jpeg' ? ' selected' : '' ?>><?php echo cam_t('TEXT.NUR_SCHNAPPSCHSSE'); ?></option>
 </select>
-<div class="sm-warnung"><?php echo cam_t('TEXT.RTSP_KENNWORT_WARNUNG'); ?></div>
 <p class="sm-hint"><?php echo cam_t('TEXT.FFMPEG_AUF_DIESEM_LOXBERRY'); ?>
 <?php $ac_ff = cam_ffmpeg(); ?>
 <?= $ac_ff !== '' ? '<b style="color:#2e7d32;">' . cam_t('TEXT.VORHANDEN') . '</b> (' . ac_e($ac_ff) . ')' : '<b style="color:#c62828;">' . cam_t('TEXT.NICHT_VORHANDEN') . '</b> &ndash; ' . cam_t('TEXT.L_OHNE_FFMPEG') ?></p>
@@ -1341,10 +1416,6 @@ $ac_x3 = cam_rueckspiel_befund();
 if ($ac_x3) { ?>
 <div class="sm-alert sm-warn"><?= sprintf(cam_t('TEXT.SICH_X3_WARNUNG'), ac_e(implode(', ', $ac_x3))) ?></div>
 <?php } ?>
-<div class="sm-legende">
-<span><i class="sm-punkt sm-b-lesen"></i> <?php echo cam_t('LEGENDE.LESEN'); ?></span>
-<span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span>
-</div>
 <div class="sm-knopfreihe">
   <!-- ZWEI GETRENNTE Formulare. Das Sichern schickt einen Download und ruft
        exit auf; das Zurueckspielen braucht enctype="multipart/form-data".
@@ -1367,6 +1438,8 @@ if ($ac_x3) { ?>
 <!-- ================= MQTT ================= -->
 <div class="sm-pane<?= $ac_tab === 'tab-mqtt' ? ' sm-active' : '' ?>" id="tab-mqtt">
 <h2><?php echo cam_t('MQTT.H_TITEL'); ?></h2>
+<?php /* Seit 1.9.32 (E-E22): EINE Legende oben im Reiter - hier steht nur der orange Knopf Speichern. */ ?>
+<div class="sm-legende"><span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span></div>
 <?php $ac_mz = cam_mqtt_zustand_pruefen(); ?>
 <?php if (!$ac_mz['gefunden']) { ?>
 <div class="sm-alert sm-err"><?php echo cam_t('MQTT.KEIN_ABSCHNITT'); ?></div>
@@ -1374,6 +1447,11 @@ if ($ac_x3) { ?>
 <div class="sm-alert sm-err"><?php echo cam_t('MQTT.KEIN_AUTOSTART'); ?></div>
 <?php } else { ?>
 <div class="sm-alert sm-ok"><?= sprintf(cam_t('MQTT.OK'), (int) $ac_mz['udpport']) ?></div>
+<?php } ?>
+<?php /* Seit 1.9.32 (E-E11): MQTT ist fuer neue Anlagen ab Werk an. Steht es hier aus (bestehende Anlage), ein
+         grauer Satz - kein Fehler, der HTTP-Endpunkt bleibt. */
+if (empty($ac_cfg['mqtt_enabled'])) { ?>
+<div class="sm-small" style="color:#666;margin:6px 0;"><?php echo cam_t('MQTT.AUS_HINWEIS'); ?></div>
 <?php } ?>
 
 <div class="sm-step"><?php echo cam_t('MQTT.WARUM'); ?></div>
@@ -1388,20 +1466,18 @@ if ($ac_x3) { ?>
  *
  * Die Abo-Datei zaehlt mit (ACTiKamera-a1, X-6): seit 1.9.23 schreibt das
  * Plugin mqtt_subscriptions.cfg, und das Gateway abonniert daraus selbst
- * (Regeln/07). Bis 1.9.25 stand unter V1 trotzdem immer der rote Satz, das
- * Abo gehoere von Hand unter Subscriptions - auch wenn die Datei es schon
- * trug. Rot ist er jetzt nur noch, wenn die Datei fehlt oder ein anderes
+ * (Regeln/07). Rot ist der Satz nur, wenn die Datei fehlt oder ein anderes
  * Praefix traegt. */
 $ac_gwf = (int) $ac_mz['fassung'];
 list($ac_abo_pfad, $ac_abo_da) = cam_mqtt_abo_datei(false);
 if ($ac_gwf >= 2) { ?>
-<div class="sm-alert sm-ok"><?php echo cam_t('MQTT.ABO_V2'); ?> 
+<div class="sm-alert sm-ok"><?php echo cam_t('MQTT.ABO_V2'); ?>
 <span class="sm-mono"><?= sprintf(cam_t('MQTT.ABO_GEMESSEN'), $ac_gwf) ?></span></div>
 <?php } elseif ($ac_abo_da) { ?>
 <div class="sm-alert sm-ok"><?php echo cam_t('MQTT.ABO_V1_DATEI'); ?><?php if ($ac_gwf === 1) { ?>
 <span class="sm-mono"><?= sprintf(cam_t('MQTT.ABO_GEMESSEN'), $ac_gwf) ?></span><?php } ?></div>
 <?php } elseif ($ac_gwf === 1) { ?>
-<div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_WARNUNG'); ?> 
+<div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_WARNUNG'); ?>
 <span class="sm-mono"><?= sprintf(cam_t('MQTT.ABO_GEMESSEN'), $ac_gwf) ?></span></div>
 <?php } else { ?>
 <div class="sm-alert sm-err"><?php echo cam_t('MQTT.ABO_UNBEKANNT'); ?></div>
@@ -1410,15 +1486,40 @@ if ($ac_gwf >= 2) { ?>
     '<span class="sm-mono">' . ac_e($ac_abo_pfad) . '</span>',
     '<span class="sm-mono">' . ac_e(cam_mqtt_praefix($ac_cfg)) . '/#</span>') ?></div>
 
+<?php
+/* Die V2-Hakenliste (seit 1.9.32, E-E10): nur bei Gateway-Fassung 2 oder wenn
+ * die Fassung nicht feststellbar ist. Dieselbe Quelle wie die Namenstabelle im
+ * Reiter Einbindung (cam_mqtt_namenstabelle()). */
+$ac_nt = cam_mqtt_namenstabelle($ac_cfg);
+if ($ac_gwf >= 2 || $ac_gwf === 0) { ?>
+<h3 class="sm-h3"><?php echo cam_t('MQTT.H_V2'); ?></h3>
+<div class="sm-small"><?php echo cam_t('MQTT.V2_TEXT'); ?></div>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('MQTT.T_THEMA'); ?></th><th><?php echo cam_t('MQTT.T_GATEWAYNAME'); ?></th><th><?php echo cam_t('MQTT.T_NONCACHED'); ?></th></tr>
+<?php foreach ($ac_nt as $ac_ne) {
+    if (!$ac_ne['haken']) { continue; } ?>
+<tr><td><span class="sm-mono"><?= ac_e($ac_ne['voll']) ?></span></td><td><span class="sm-mono"><?= ac_e($ac_ne['name']) ?></span></td>
+    <td><?php echo $ac_ne['noncached'] ? cam_t('ALLGEMEIN.JA') : '&ndash;'; ?></td></tr>
+<?php } ?>
+</table>
+<div class="sm-small"><?php echo cam_t('MQTT.V2_OHNE'); ?></div>
+<div class="sm-small"><?= sprintf(cam_t('MQTT.V2_HAUS'), '<span class="sm-mono">haus/anwesenheit/jemand</span>',
+    '<span class="sm-mono">haus/anwesenheit/zaehler</span>', '<span class="sm-mono">' . ac_e(cam_mqtt_praefix($ac_cfg)) . '/status/befehle</span>') ?></div>
+<?php } ?>
+
 <h3 class="sm-h3"><?php echo cam_t('MQTT.H_THEMEN'); ?></h3>
 <table class="sm-tbl">
 <tr><th><?php echo cam_t('MQTT.T_THEMA'); ?></th><th><?php echo cam_t('MQTT.T_BEDEUTUNG'); ?></th><th><?php echo cam_t('MQTT.T_RETAINED'); ?></th><th><?php echo cam_t('MQTT.T_WERT'); ?></th></tr>
 <?php /* Die Liste kommt aus cam_mqtt_themenliste(), nicht aus cam_felder():
          cam_felder() fuehrt auch Felder, die gar nicht ueber MQTT gehen
-         (HERZ, seit 1.9.19 auch ALTER), und es fehlten umgekehrt die vier
-         Themen jeder Aufnahme und das Lebenszeichen. Der Reiter Test haelt
-         diese Liste gegen die cam_mqtt()-Aufrufe im Quelltext. */ ?>
-<?php $ac_w = cam_werte(); ?>
+         (HERZ, ZAEHLER), und es fehlten umgekehrt die Themen jeder Aufnahme
+         und das Lebenszeichen. Der Reiter Test haelt diese Liste gegen die
+         cam_mqtt()-Aufrufe im Quelltext. */ ?>
+<?php $ac_w = cam_werte();
+foreach (cam_kameras() as $ac_wk) {
+    foreach (cam_mqtt_zustand_zusatz($ac_wk) as $ac_wn => $ac_wv) { $ac_w[$ac_wn . cam_sx($ac_wk)] = $ac_wv; }
+}
+$ac_w['zaehler'] = cam_herzzaehler(); ?>
 <?php foreach (cam_mqtt_themenliste() as $ac_n => $ac_d) { ?>
 <tr><td><span class="sm-mono"><?= ac_e($ac_cfg['mqtt_topic']) ?>/<?= ac_e($ac_n) ?></span></td>
     <td><?php echo cam_t($ac_d[1]); ?></td>
@@ -1435,7 +1536,11 @@ if ($ac_gwf >= 2) { ?>
 <div class="sm-row"><label><input data-role="none" type="checkbox" name="mqtt_enabled" value="1"<?= cam_eingabe('mqtt_enabled', !empty($ac_cfg['mqtt_enabled']) ? '1' : '0') === '1' ? ' checked' : '' ?>> <?php echo cam_t('MQTT.L_EIN'); ?></label></div>
 <div class="sm-row"><label><?php echo cam_t('MQTT.L_TOPIC'); ?></label>
 <input data-role="none" type="text" name="mqtt_topic"<?= cam_markierung('mqtt_topic') ?> value="<?= ac_e(cam_eingabe('mqtt_topic', $ac_cfg['mqtt_topic'])) ?>" size="24"></div>
-<div class="sm-legende"><span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span></div>
+<?php /* Befehle aus Loxone (seit 1.9.32, Entscheidung 2, E-E1 bis E-E5): ein Haken, ab Werk aus, gespeichert mit
+         demselben Formular. Danach schaltet die Seite die Bruecke sofort (cam_bruecke_schalten()). */ ?>
+<h3 class="sm-h3"><?php echo cam_t('BEFEHL.H_BEFEHLE'); ?></h3>
+<div class="sm-row"><label><input data-role="none" type="checkbox" name="befehle_mqtt_ein" value="1"<?= cam_eingabe('befehle_mqtt_ein', !empty($ac_cfg['befehle_mqtt_ein']) ? '1' : '0') === '1' ? ' checked' : '' ?>> <?php echo cam_t('BEFEHL.L_ANNEHMEN'); ?></label></div>
+<div class="sm-small"><?php echo cam_t('BEFEHL.H_ANNEHMEN'); ?></div>
 <div class="sm-knopfreihe">
 <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button>
 </div>
@@ -1445,14 +1550,88 @@ if ($ac_gwf >= 2) { ?>
 <!-- ================= Einbindung in Loxone ================= -->
 <div class="sm-pane<?= $ac_tab === 'tab-loxone' ? ' sm-active' : '' ?>" id="tab-loxone">
 <h2><?php echo cam_t('TEXT.EINBINDUNG_IN_LOXONE_SCHRITT_FR_SC'); ?></h2>
-<p><?php echo cam_t('TEXT.ZIEL_BEIM_KLINGELN_LOXONE_INTERCOM'); ?> <i><?php echo cam_t('TEXT.ODER'); ?></i> <?php echo cam_t('TEXT.TASTER_AN_DER_HAUSTR_MACHT_DIE_KAM'); ?> 
+<?php /* Seit 1.9.32 (E-E22, N8): EINE Legende oben im Reiter - bis 1.9.31 standen hier zwei (Token, Vorlagen).
+         Gruen: Kopierknoepfe der Namenstabelle; grau: Vorlagen; orange: Token neu, Speichern des Lesezweigs. */ ?>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-lesen"></i> <?php echo cam_t('LEGENDE.LESEN'); ?></span>
+<span><i class="sm-punkt sm-b-technik"></i> <?php echo cam_t('LEGENDE.TECHNIK'); ?></span>
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span>
+</div>
+<p><?php echo cam_t('TEXT.ZIEL_BEIM_KLINGELN_LOXONE_INTERCOM'); ?> <i><?php echo cam_t('TEXT.ODER'); ?></i> <?php echo cam_t('TEXT.TASTER_AN_DER_HAUSTR_MACHT_DIE_KAM'); ?>
 <b><?php echo cam_t('TEXT.OHNE_KAMERA_PASSWORT_IN_DER_PROJEK'); ?></b>.</p>
 
-<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_1_VIRTUELLER_AUSGANG_LOXBE'); ?></b>
+<?php
+/* Schritt 1 (seit 1.9.32, Entscheidung 2, E-E10): Werte ueber das MQTT-Gateway. Die Namenstabelle kommt aus
+ * cam_mqtt_namenstabelle() - dieselbe Quelle wie Sendeliste, Hakenliste (Reiter MQTT) und Bausteinliste. */
+$ac_nt = cam_mqtt_namenstabelle($ac_cfg);
+?>
+<div class="sm-step"><b><?php echo cam_t('LOX.S_WERTE'); ?></b><br>
+<?php echo cam_t('LOX.WERTE_TEXT'); ?>
 <table class="sm-tbl">
-<tr><th><?php echo cam_t('TEXT.EIGENSCHAFT'); ?></th><th><?php echo cam_t('TEXT.WERT'); ?></th></tr>
-<tr><td><?php echo cam_t('TEXT.ADRESSE'); ?></td><td><span class="sm-mono">http://<?= ac_e($ac_host) ?></span></td></tr>
+<tr><th><?php echo cam_t('LOX.T_NAME'); ?></th><th><?php echo cam_t('LOX.T_BAUFORM'); ?></th><th><?php echo cam_t('MQTT.T_BEDEUTUNG'); ?></th>
+    <th><?php echo cam_t('LOX.T_WERTE'); ?></th><th><?php echo cam_t('MQTT.T_RETAINED'); ?></th><th><?php echo cam_t('LOX.T_MUSTER'); ?></th><th></th></tr>
+<?php foreach ($ac_nt as $ac_ne) { ?>
+<tr><td><span class="sm-mono"><?= ac_e($ac_ne['name']) ?></span><br><span class="sm-small"><?= ac_e($ac_ne['voll']) ?></span></td>
+    <td><?php echo cam_t($ac_ne['text'] ? 'LOX.B_TEXTEINGANG' : 'LOX.B_EINGANG'); ?></td>
+    <td><?php echo cam_t($ac_ne['bez']); ?><?= count(cam_kameras()) > 1 ? ' <i>[' . ac_e(cam_kname($ac_ne['kamera'])) . ']</i>' : '' ?></td>
+    <td><?= ac_e($ac_ne['bereich']) ?></td>
+    <td><?php echo cam_t($ac_ne['retain'] ? 'MQTT.RET_JA' : 'MQTT.RET_NEIN'); ?><?php echo $ac_ne['noncached'] ? ', ' . cam_t('LOX.NONCACHED') : ''; ?></td>
+    <td><?= $ac_ne['mp'] !== '' ? ac_e($ac_ne['mp']) : '&ndash;' ?></td>
+    <td><button data-role="none" type="button" class="sm-btn sm-b-lesen ac-kopie" data-kopie="<?= ac_e($ac_ne['name']) ?>"><?php echo cam_t('LOX.K_KOPIEREN'); ?></button></td></tr>
+<?php } ?>
+<?php foreach (array(array('haus_anwesenheit_jemand', 'haus/anwesenheit/jemand', 'LOX.HAUS_JEMAND', '0 … 1', true, 'Aufnahmen #23'),
+                     array('haus_anwesenheit_zaehler', 'haus/anwesenheit/zaehler', 'LOX.HAUS_ZAEHLER', '0 … 999', false, 'Aufnahmen #24')) as $ac_hw) { ?>
+<tr><td><span class="sm-mono"><?= ac_e($ac_hw[0]) ?></span><br><span class="sm-small"><?= ac_e($ac_hw[1]) ?></span></td>
+    <td><?php echo cam_t('LOX.B_EINGANG'); ?></td><td><?php echo cam_t($ac_hw[2]); ?></td><td><?= ac_e($ac_hw[3]) ?></td>
+    <td><?php echo cam_t($ac_hw[4] ? 'MQTT.RET_JA' : 'MQTT.RET_NEIN'); ?></td><td><?= ac_e($ac_hw[5]) ?></td>
+    <td><button data-role="none" type="button" class="sm-btn sm-b-lesen ac-kopie" data-kopie="<?= ac_e($ac_hw[0]) ?>"><?php echo cam_t('LOX.K_KOPIEREN'); ?></button></td></tr>
+<?php } ?>
 </table>
+<div class="sm-small"><?php echo cam_t('LOX.WERTE_RECHTE'); ?></div>
+<div class="sm-small"><?php echo cam_t('LOX.WERTE_HAUS'); ?></div>
+<div class="sm-small"><?php echo cam_t('LOX.WERTE_OBJEKTE'); ?></div>
+<div class="sm-small"><?php echo cam_t('LOX.WERTE_BILDEREIGNIS'); ?></div>
+</div>
+
+<?php
+/* Schritt 2 (seit 1.9.32, E-E1 bis E-E5, E-E20): Befehle ueber die Befehlsbruecke. Die Tabelle kommt aus
+ * bb_liste(), die Befehle der Vorlage aus cam_bruecke_vorlagenbefehle() - eine Quelle. */
+list($ac_bli, $ac_blf) = cam_bruecke_liste();
+?>
+<div class="sm-step"><b><?php echo cam_t('BEFEHL.S_BEFEHLE'); ?></b><br>
+<?php echo cam_t('BEFEHL.S_TEXT'); ?>
+<?php if ($ac_bli === null) { ?>
+<div class="sm-alert sm-err"><?= sprintf(cam_t('BEFEHL.T_LISTE_FEHLT'), ac_e($ac_blf)) ?></div>
+<?php } else { ?>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('MQTT.T_THEMA'); ?></th><th><?php echo cam_t('BEFEHL.T_ART'); ?></th><th><?php echo cam_t('BEFEHL.T_WIRKUNG'); ?></th><th><?php echo cam_t('BEFEHL.T_SPERRE'); ?></th></tr>
+<?php foreach ($ac_bli['befehle'] as $ac_bb) { ?>
+<tr><td><span class="sm-mono"><?= ac_e($ac_bb['thema']) ?></span></td>
+    <td><?= ac_e($ac_bb['art'] === 'auswahl' ? implode(' | ', $ac_bb['werte']) : '1') ?></td>
+    <td><?php echo cam_t($ac_bb['kachel']); ?></td><td><?= (int) $ac_bb['sperre_s'] ?> s</td></tr>
+<?php } ?>
+</table>
+<?php } ?>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('LOX.T_NAME'); ?></th><th><?php echo cam_t('TEXT.BEFEHL_BEI_EIN'); ?></th><th><?php echo cam_t('TEXT.WIRKUNG'); ?></th></tr>
+<?php foreach (cam_bruecke_vorlagenbefehle() as $ac_bv) { ?>
+<tr><td><span class="sm-mono"><?= ac_e($ac_bv['title']) ?></span></td><td><span class="sm-mono"><?= ac_e($ac_bv['on']) ?></span></td>
+    <td><?= ac_e($ac_bv['hint']) ?></td></tr>
+<?php } ?>
+<tr><td><span class="sm-mono">ACTI_TestPush</span></td><td><span class="sm-mono"><?= ac_e(cam_mqtt_praefix($ac_cfg)) ?>/befehl/testpush 1</span></td>
+    <td><?php echo cam_t('BEFEHL.K_TESTPUSH'); ?></td></tr>
+</table>
+<div class="sm-small"><?= sprintf(cam_t('BEFEHL.S_AUSGANG'), '<span class="sm-mono">/dev/udp/' . ac_e(preg_replace('/:\d+$/', '', $ac_host)) . '/' . (int) max(1, (int) cam_mqtt_zustand_pruefen()['udpport'] ?: 11884) . '</span>') ?></div>
+<div class="sm-small"><b><?php echo cam_t('TEXT.AUS_DER_PRAXIS'); ?></b> <?php echo cam_t('TEXT.ZWISCHEN_KLINGELSIGNAL_UND_BILD_GE'); ?></div>
+<div class="sm-knopfreihe">
+<form action="index.php" method="post" style="margin:0;">
+    <input data-role="none" type="hidden" name="download" value="xml_out">
+    <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
+    <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
+    <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo cam_t('LOX.K_VORLAGE_BRUECKE'); ?></button>
+</form>
+</div>
+<div class="sm-small"><?php echo cam_t('LOX.VORLAGE_BRUECKE_TEXT'); ?></div>
 </div>
 
 <div class="sm-step"><b><?php echo cam_t('TOKEN.H'); ?></b><br>
@@ -1463,9 +1642,6 @@ if ($ac_gwf >= 2) { ?>
 <span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?>/cam.php?selftest=1&amp;token=<?= ac_e($ac_token) ?></span><br>
 <?php echo cam_t('TOKEN.PRUEFEN_ANTWORT'); ?></div>
 <div class="sm-warnung"><?php echo cam_t('TOKEN.K_NEU_WARNUNG'); ?></div>
-<div class="sm-legende">
-<span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span>
-</div>
 <div class="sm-knopfreihe">
 <form action="index.php" method="post" style="margin:0;">
     <input data-role="none" type="hidden" name="neuestoken" value="1">
@@ -1476,89 +1652,75 @@ if ($ac_gwf >= 2) { ?>
 </div>
 </div>
 
-<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_2_VIRTUELLE_AUSGANGS_BEFEH'); ?></b>
-<table class="sm-tbl">
-<tr><th><?php echo cam_t('TEXT.BEFEHL_BEI_EIN'); ?></th><th><?php echo cam_t('TEXT.WIRKUNG'); ?></th></tr>
-<?php /* Aus DERSELBEN Quelle wie die Importdatei: cam_ausgangsbefehle().
-         Zwei Stellen, die dieselben Adressen aufzaehlen, laufen auseinander -
-         und bei einer Adresse mit Token faellt das niemandem auf, weil ein
-         virtueller Ausgang die Antwort nicht auswertet. */
-foreach (cam_ausgangsbefehle() as $ac_bf) { ?>
-<tr><td><span class="sm-mono"><?= ac_e($ac_bf['on']) ?></span></td>
-    <td><?= ac_e(isset($ac_bf['hint']) ? $ac_bf['hint'] : $ac_bf['comment']) ?></td></tr>
-<?php } ?>
-</table>
-<div class="sm-small"><b><?php echo cam_t('TEXT.AUS_DER_PRAXIS'); ?></b> <?php echo cam_t('TEXT.ZWISCHEN_KLINGELSIGNAL_UND_BILD_GE'); ?></div>
-<?php if (count(cam_kameras()) > 1) { ?>
-<div class="sm-small"><?php echo cam_t('TEXT.MEHRERE_BEFEHLE'); ?></div>
-<?php } ?>
-</div>
-
-<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_3_VIRTUELLER_HTTP_EINGANG_'); ?></b> <?php echo cam_t('TEXT.ABFRAGE_60_S'); ?>
-<table class="sm-tbl">
-<tr><th><?php echo cam_t('TEXT.EIGENSCHAFT'); ?></th><th><?php echo cam_t('TEXT.WERT'); ?></th></tr>
-<tr><td>URL</td><td><span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_2'); ?></span></td></tr>
-<tr><td><?php echo cam_t('TEXT.ABFRAGEZYKLUS'); ?></td><td><?php echo cam_t('TEXT.60_SEKUNDEN'); ?></td></tr>
-</table>
-<table class="sm-tbl">
-<tr><th><?php echo cam_t('TEXT.BEFEHLSERKENNUNG'); ?></th><th><?php echo cam_t('TEXT.BEDEUTUNG'); ?></th></tr>
-<?php /* Auch diese Tabelle entsteht aus der Feldtabelle - mit mehreren
-         Kameras waeren sieben ausgeschriebene Zeilen ohnehin unvollstaendig,
-         und die Befehlserkennung muss WORTGLEICH mit der Importdatei sein. */
-$ac_mehr = count(cam_kameras()) > 1;
-foreach (cam_felder() as $ac_fn => $ac_fd) {
-    $ac_fk = isset($ac_fd[6]) ? (int) $ac_fd[6] : 1; ?>
-<tr><td><span class="sm-mono"><?= ac_e('\i;' . $ac_fn . '=\i\v') ?></span></td>
-    <td><?php echo cam_t($ac_fd[3]); ?><?= $ac_mehr ? ' <i>[' . ac_e(cam_kname($ac_fk)) . ']</i>' : '' ?></td></tr>
-<?php } ?>
-</table>
-</div>
-
 <?php
 /**
- * Die Baustein-Listen fuer Schritt 4 (Welle Bild 20, 1.9.30; Hausherr 11.10.2026: Vollausstattung, ein absoluter
- * Laie soll das Maximum leicht uebernehmen koennen; Entwurf Welle 20 ac, Entscheidungen 1-16). Zwei Seiten aus
- * dem LoxBerry-Plugins Musterprojekt, dort in Loxone Config gebaut und verbunden (Musterprojekt/
- * baustein_listen.txt, Abschnitte "ACTi-Kamera" 17 und "ACTi-Kamera Aufnahmen" 22 Zeilen, wortgleich). Je
- * Tabellenzeile EIN Sprachschluessel BAUSTEIN.Z<seite>_<nn> = "Typ | Name | Parameter | Eingaenge" ohne
- * Auszeichnung; jede Zelle und jeder Satz wird maskiert ausgegeben.
+ * Die Baustein-Listen (Welle Bild 20, 1.9.30; seit 1.9.32 Gruppe 25, Entwurf Abschnitt 9): zwei Seiten aus dem
+ * LoxBerry-Plugins Musterprojekt (Musterprojekt/baustein_listen.txt, Abschnitte "ACTi-Kamera" 17 und "ACTi-Kamera
+ * Aufnahmen" 26 Zeilen, wortgleich). Je Tabellenzeile EIN Sprachschluessel BAUSTEIN.Z<seite>_<nn> = "Typ | Name |
+ * Parameter | Eingaenge" ohne Auszeichnung; jede Zelle und jeder Satz wird maskiert ausgegeben.
  *
- * Bis 1.9.29 stand hier eine Liste mit 28 Zeilen (X-8): die Push-Kette lief ueber drei Schwellwertschalter an
- * den abgefragten Ein/Aus-Werten PUSHAKTIV, PUSH und PTEST - hinter einem abgefragten Eingang gibt ein
- * Schwellwertschalter bei jeder Abfrage einen Impuls (Regeln/09), die Meldung kaeme jede Minute -, und eine
- * Ausfallerkennung fehlte, obwohl ERREICHBAR, FEHLER und HERZ geliefert werden.
+ * Seit 1.9.32 stehen dort Virtuelle Eingaenge mit Gateway-Namen (acti_OK ...) und die Befehle am Ausgang
+ * "LoxBerry MQTT-Gateway" statt des HTTP-Eingangs "ACTi Kamera" und des Ausgangs mit Aktionstoken.
  *
  * Rueckgabe: je Seite 'kopf' (Name der Musterseite), 'bild', 'schritte' und 'hinweise' (Saetze), 'zeilen'
- * (je ein Text mit vier Zellen) - alles reiner Text; ac_bs_text() rechnet Behaelter und Befehle.
+ * (je ein Text mit vier Zellen) - alles reiner Text; ac_bs_text() rechnet die Namen.
  */
 function ac_bausteinseiten()
 {
+    $z1 = array(
+        cam_t('BAUSTEIN.Z1_01'),
+        cam_t('BAUSTEIN.Z1_02'),
+        cam_t('BAUSTEIN.Z1_03'),
+        cam_t('BAUSTEIN.Z1_04'),
+        cam_t('BAUSTEIN.Z1_05'),
+        cam_t('BAUSTEIN.Z1_06'),
+        cam_t('BAUSTEIN.Z1_07'),
+        cam_t('BAUSTEIN.Z1_08'),
+        cam_t('BAUSTEIN.Z1_09'),
+        cam_t('BAUSTEIN.Z1_10'),
+        cam_t('BAUSTEIN.Z1_11'),
+        cam_t('BAUSTEIN.Z1_12'),
+        cam_t('BAUSTEIN.Z1_13'),
+        cam_t('BAUSTEIN.Z1_14'),
+        cam_t('BAUSTEIN.Z1_15'),
+        cam_t('BAUSTEIN.Z1_16'),
+        cam_t('BAUSTEIN.Z1_17'));
+    $z2 = array(
+        cam_t('BAUSTEIN.Z2_01'),
+        cam_t('BAUSTEIN.Z2_02'),
+        cam_t('BAUSTEIN.Z2_03'),
+        cam_t('BAUSTEIN.Z2_04'),
+        cam_t('BAUSTEIN.Z2_05'),
+        cam_t('BAUSTEIN.Z2_06'),
+        cam_t('BAUSTEIN.Z2_07'),
+        cam_t('BAUSTEIN.Z2_08'),
+        cam_t('BAUSTEIN.Z2_09'),
+        cam_t('BAUSTEIN.Z2_10'),
+        cam_t('BAUSTEIN.Z2_11'),
+        cam_t('BAUSTEIN.Z2_12'),
+        cam_t('BAUSTEIN.Z2_13'),
+        cam_t('BAUSTEIN.Z2_14'),
+        cam_t('BAUSTEIN.Z2_15'),
+        cam_t('BAUSTEIN.Z2_16'),
+        cam_t('BAUSTEIN.Z2_17'),
+        cam_t('BAUSTEIN.Z2_18'),
+        cam_t('BAUSTEIN.Z2_19'),
+        cam_t('BAUSTEIN.Z2_20'),
+        cam_t('BAUSTEIN.Z2_21'),
+        cam_t('BAUSTEIN.Z2_22'),
+        cam_t('BAUSTEIN.Z2_23'),
+        cam_t('BAUSTEIN.Z2_24'),
+        cam_t('BAUSTEIN.Z2_25'),
+        cam_t('BAUSTEIN.Z2_26'));
     return array(
         array('kopf' => 'ACTi-Kamera', 'bild' => 'einbindung_loxone.png',
               'schritte' => array(
                   sprintf(cam_t('BAUSTEIN.S1_SCHRITT1'), cam_t('REITER.EINSTELLUNGEN'), cam_t('TEXT.L_PRUEF_MINUTEN'), cam_t('REITER.TEST'), cam_t('TEXT.VERBINDUNG_PRFEN'), cam_t('TEXT.JETZT_EIN_BILD_AUFNEHMEN')),
-                  sprintf(cam_t('BAUSTEIN.S1_SCHRITT2'), cam_t('REITER.LOXONE'), cam_t('LOX.K_VORLAGE')),
+                  sprintf(cam_t('BAUSTEIN.S1_SCHRITT2'), cam_t('REITER.MQTT'), cam_t('MQTT.L_EIN')),
                   cam_t('BAUSTEIN.S1_SCHRITT3'),
                   cam_t('BAUSTEIN.S1_SCHRITT4'),
                   cam_t('BAUSTEIN.S1_SCHRITT5')),
-              'zeilen' => array(
-                  cam_t('BAUSTEIN.Z1_01'),
-                  cam_t('BAUSTEIN.Z1_02'),
-                  cam_t('BAUSTEIN.Z1_03'),
-                  cam_t('BAUSTEIN.Z1_04'),
-                  cam_t('BAUSTEIN.Z1_05'),
-                  cam_t('BAUSTEIN.Z1_06'),
-                  cam_t('BAUSTEIN.Z1_07'),
-                  cam_t('BAUSTEIN.Z1_08'),
-                  cam_t('BAUSTEIN.Z1_09'),
-                  cam_t('BAUSTEIN.Z1_10'),
-                  cam_t('BAUSTEIN.Z1_11'),
-                  cam_t('BAUSTEIN.Z1_12'),
-                  cam_t('BAUSTEIN.Z1_13'),
-                  cam_t('BAUSTEIN.Z1_14'),
-                  cam_t('BAUSTEIN.Z1_15'),
-                  cam_t('BAUSTEIN.Z1_16'),
-                  cam_t('BAUSTEIN.Z1_17')),
+              'zeilen' => $z1,
               'hinweise' => array(
                   cam_t('BAUSTEIN.S1_H1'),
                   cam_t('BAUSTEIN.S1_H2'),
@@ -1567,34 +1729,12 @@ function ac_bausteinseiten()
                   cam_t('BAUSTEIN.S1_H5'))),
         array('kopf' => 'ACTi-Kamera Aufnahmen', 'bild' => 'einbindung_loxone_aufnahmen.png',
               'schritte' => array(
-                  sprintf(cam_t('BAUSTEIN.S2_SCHRITT1'), cam_t('REITER.LOXONE'), cam_t('LOX.K_VORLAGE_AUS'), cam_t('TOKEN.K_NEU'), cam_t('REITER.EINSTELLUNGEN'), cam_t('TEXT.PUSH_FREIGABE_AN_LOXONE_MELDEN'), cam_t('TEXT.MELDEFENSTER_NACH_EINER_AUFNAHME_M')),
+                  sprintf(cam_t('BAUSTEIN.S2_SCHRITT1'), cam_t('REITER.MQTT'), cam_t('BEFEHL.L_ANNEHMEN'), cam_t('REITER.EINSTELLUNGEN'), cam_t('TEXT.PUSH_FREIGABE_AN_LOXONE_MELDEN'), cam_t('TEXT.MELDEFENSTER_NACH_EINER_AUFNAHME_M')),
                   cam_t('BAUSTEIN.S2_SCHRITT2'),
                   cam_t('BAUSTEIN.S2_SCHRITT3'),
                   cam_t('BAUSTEIN.S2_SCHRITT4'),
                   sprintf(cam_t('BAUSTEIN.S2_SCHRITT5'), cam_t('REITER.AUFNAHMEN'), cam_t('REITER.TEST'), cam_t('TEXT.TEST_PUSHNACHRICHT'))),
-              'zeilen' => array(
-                  cam_t('BAUSTEIN.Z2_01'),
-                  cam_t('BAUSTEIN.Z2_02'),
-                  cam_t('BAUSTEIN.Z2_03'),
-                  cam_t('BAUSTEIN.Z2_04'),
-                  cam_t('BAUSTEIN.Z2_05'),
-                  cam_t('BAUSTEIN.Z2_06'),
-                  cam_t('BAUSTEIN.Z2_07'),
-                  cam_t('BAUSTEIN.Z2_08'),
-                  cam_t('BAUSTEIN.Z2_09'),
-                  cam_t('BAUSTEIN.Z2_10'),
-                  cam_t('BAUSTEIN.Z2_11'),
-                  cam_t('BAUSTEIN.Z2_12'),
-                  cam_t('BAUSTEIN.Z2_13'),
-                  cam_t('BAUSTEIN.Z2_14'),
-                  cam_t('BAUSTEIN.Z2_15'),
-                  cam_t('BAUSTEIN.Z2_16'),
-                  cam_t('BAUSTEIN.Z2_17'),
-                  cam_t('BAUSTEIN.Z2_18'),
-                  cam_t('BAUSTEIN.Z2_19'),
-                  cam_t('BAUSTEIN.Z2_20'),
-                  cam_t('BAUSTEIN.Z2_21'),
-                  cam_t('BAUSTEIN.Z2_22')),
+              'zeilen' => $z2,
               'hinweise' => array(
                   cam_t('BAUSTEIN.S2_H1'),
                   cam_t('BAUSTEIN.S2_H2'),
@@ -1606,35 +1746,27 @@ function ac_bausteinseiten()
 }
 
 /**
- * Eine Zelle der Baustein-Seiten fuer die Ausgabe: der Behaelter in der Typzelle ("Vorlage ...") und die Namen
- * der Vorlagenbefehle (ACTI_...) kommen aus DENSELBEN Funktionen wie die Importdateien - cam_vorlage_kopf(),
- * cam_eingangsbefehle(), cam_ausgangsbefehle(), jeweils Kamera 1 (Entwurf Welle 20 ac, Abschnitt 4). Fuer
- * Kamera 1 sind sie gleich den Namen des Musterprojekts; laeuft eine Vorlage einmal auseinander, folgt die
- * Tabelle ihr. $karte: Name im Musterprojekt => Name aus der Vorlage.
+ * Ein Name der Baustein-Seiten fuer die Ausgabe: die Gateway-Namen (acti_OK ...) und die Befehlsnamen
+ * (ACTI_Bild_Klingel ...) kommen aus DENSELBEN Funktionen wie Namenstabelle und Vorlage - cam_gateway_name()
+ * ueber cam_mqtt_namenstabelle() und cam_bruecke_vorlagenbefehle(), jeweils Kamera 1. Beim Praefix "acti" sind sie
+ * gleich den Namen des Musterprojekts; ein anderes Praefix aendert die Titel mit. $karte: Name im Musterprojekt =>
+ * Name aus der Quelle.
  */
 function ac_bs_text($s, array $karte)
 {
     $s = (string) $s;
-    return isset($karte[$s]) ? $karte[$s] : strtr($s, $karte);
+    return isset($karte[$s]) ? $karte[$s] : $s;
 }
 
-$ac_bs_ein = cam_vorlage_kopf('ein', $ac_host);
-$ac_bs_aus = cam_vorlage_kopf('aus', $ac_host);
-$ac_bs_karte = array(
-    "\u{201e}ACTi Kamera senden\u{201c}" => "\u{201e}" . $ac_bs_aus['title'] . "\u{201c}",
-    "\u{201c}ACTi Kamera senden\u{201d}" => "\u{201c}" . $ac_bs_aus['title'] . "\u{201d}",
-    "\u{201e}ACTi Kamera\u{201c}" => "\u{201e}" . $ac_bs_ein['title'] . "\u{201c}",
-    "\u{201c}ACTi Kamera\u{201d}" => "\u{201c}" . $ac_bs_ein['title'] . "\u{201d}",
-);
-$ac_bs_befehle = array();
-foreach (cam_eingangsbefehle() as $ac_bc) {
-    if ((int) $ac_bc['kamera'] === 1) { $ac_bs_befehle['ACTI_' . $ac_bc['feld']] = $ac_bc['title']; }
+$ac_bs_karte = array();
+foreach ($ac_nt as $ac_ne) {
+    if ((int) $ac_ne['kamera'] === 1) { $ac_bs_karte['acti_' . $ac_ne['thema']] = $ac_ne['name']; }
 }
-foreach (cam_ausgangsbefehle() as $ac_bc) {
-    if ((int) $ac_bc['kamera'] === 1) { $ac_bs_befehle['ACTI_' . $ac_bc['art']] = $ac_bc['title']; }
+foreach (cam_bruecke_vorlagenbefehle() as $ac_bc) {
+    if ((int) $ac_bc['kamera'] === 1) { $ac_bs_karte['ACTI_' . $ac_bc['art']] = $ac_bc['title']; }
 }
 ?>
-<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b><br>
+<div class="sm-step"><b><?php echo cam_t('LOX.S_BAUSTEINE'); ?></b><br>
 <?php echo cam_t('BAUSTEIN.TEXT'); ?>
 <div class="sm-small" style="margin-top:6px;"><b><?php echo cam_t('TEXT.PRAXIS_ERFAHRUNG_ZUM_BENACHRICHTIG'); ?></b> <?php echo cam_t('TEXT.ER_SENDET_NUR_BEI_EINER_01_FLANKE_'); ?></div>
 <?php foreach (ac_bausteinseiten() as $ac_bsei) { ?>
@@ -1650,7 +1782,7 @@ foreach (cam_ausgangsbefehle() as $ac_bc) {
     <th><?= ac_e(cam_t('BAUSTEIN.T_PARAM')) ?></th><th><?= ac_e(cam_t('BAUSTEIN.T_VERB')) ?></th></tr>
 <?php foreach ($ac_bsei['zeilen'] as $ac_bsi => $ac_bsz) {
     $ac_bsc = array_pad(explode(' | ', $ac_bsz, 4), 4, ''); ?>
-<tr><td><?= (int) $ac_bsi + 1 ?></td><td><?= ac_e(ac_bs_text($ac_bsc[0], $ac_bs_karte)) ?></td><td><span class="sm-mono"><?= ac_e(ac_bs_text($ac_bsc[1], $ac_bs_befehle)) ?></span></td>
+<tr><td><?= (int) $ac_bsi + 1 ?></td><td><?= ac_e($ac_bsc[0]) ?></td><td><span class="sm-mono"><?= ac_e(ac_bs_text($ac_bsc[1], $ac_bs_karte)) ?></span></td>
     <td><?= ac_e($ac_bsc[2]) ?></td><td><?= ac_e($ac_bsc[3]) ?></td></tr>
 <?php } ?>
 </table>
@@ -1668,14 +1800,13 @@ foreach (cam_ausgangsbefehle() as $ac_bc) {
 <?php } ?>
 </div>
 
-<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_5_BILD_IN_DER_APP_ANZEIGEN'); ?></b><br>
+<div class="sm-step"><b><?php echo cam_t('LOX.S_BILD'); ?></b><br>
 <?php
 /* Die Adresse haengt seit 1.9.19 an zwei Schaltern: ist die feste Adresse
    abgeschaltet, gibt es sie nicht mehr, und ist ein Stromkennwort gesetzt,
-   verlangt cam.php?letztes=1 das Token. Beides hier zeigen statt einen Text
-   stehen zu lassen, der auf dieser Anlage nicht mehr stimmt. */
+   verlangt cam.php?letztes=1 das Token. Beide haengen NICHT am Haken
+   endpunkt_ein (E-E12). */
 $ac_stok_l = trim((string) $ac_cfg['stream_token']);
-// Vollstaendige Adresse zum Abschreiben, mit Token, wenn es eines gibt.
 $ac_letztes_adr = 'http://' . ac_e($ac_host) . '/plugins/' . ac_e($ac_plugin)
     . ($ac_stok_l !== ''
         ? cam_t('TEXT.CAM_PHP_LETZTES_1T') . ac_e($ac_stok_l)
@@ -1693,11 +1824,6 @@ $ac_letztes_adr = 'http://' . ac_e($ac_host) . '/plugins/' . ac_e($ac_plugin)
 <?php echo cam_t('TEXT.BISHER_STAND_DORT_TYPISCHERWEISE'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.HTTP_KAMERA_CGI_BIN_ENCODER_USER_A'); ?></span><?php echo cam_t('TEXT.DIESEN_EINTRAG_KANN_MAN_NACH_DEM_U'); ?></div>
 </div>
 
-<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_6_MQTT_ALTERNATIVE_JSON'); ?></b><br>
-<?php echo cam_t('TEXT.ALLE_WERTE_GIBT_ES_AUCH_BER_DAS_LO'); ?> 
-<span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_JSON_1'); ?></span>
-</div>
-
 <div class="sm-step"><b><?php echo cam_t('AUSL.H'); ?></b><br>
 <?php echo cam_t('AUSL.TEXT'); ?>
 <?php foreach (cam_kameras() as $ac_ak):
@@ -1709,7 +1835,7 @@ $ac_letztes_adr = 'http://' . ac_e($ac_host) . '/plugins/' . ac_e($ac_plugin)
        Antwort aus. */
 ?>
 <div style="margin-top:8px;">
-<?php if (count(cam_kameras()) > 1) { ?><b><?= ac_e(cam_kname($ac_ak)) ?></b><br><?php } ?> 
+<?php if (count(cam_kameras()) > 1) { ?><b><?= ac_e(cam_kname($ac_ak)) ?></b><br><?php } ?>
 <span class="sm-mono" style="display:block;padding:8px;word-break:break-all;"><?= ac_e($ac_adr) ?></span>
 <span class="sm-small"><?= sprintf(ac_e(cam_t('AUSL.LAENGE')), $ac_len) ?>
 <?php if ($ac_len > 64) { ?><b style="color:#c62828;"><?php echo cam_t('AUSL.ZU_LANG'); ?></b><?php } ?></span>
@@ -1719,11 +1845,66 @@ $ac_letztes_adr = 'http://' . ac_e($ac_host) . '/plugins/' . ac_e($ac_plugin)
 <div class="sm-small" style="margin-top:8px;"><?php echo cam_t('AUSL.HINWEIS'); ?></div>
 </div>
 
+<?php
+/* "Bestehende Anlagen: HTTP-Endpunkt" (seit 1.9.32, E-E12): zugeklappt, offen bei endpunkt_ein = 1. Der Haken
+ * sperrt nur den Lesezweig fuer Loxone (Statuszeile, ?json); die alten Vorlagen und Adressen stehen hier. */
+$ac_ep_ein = cam_endpunkt_ein($ac_cfg);
+?>
+<details<?= $ac_ep_ein ? ' open' : '' ?> style="margin-top:16px;">
+<summary><b><?php echo cam_t('LOX.H_BESTEHEND'); ?></b></summary>
+<div class="sm-hinweis"><?php echo cam_t('LOX.BESTEHEND_TEXT'); ?></div>
+<form action="index.php" method="post">
+<input data-role="none" type="hidden" name="save_endpunkt" value="1">
+<input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
+<input data-role="none" type="hidden" name="activetab" value="tab-loxone">
+<div class="sm-row"><label><input data-role="none" type="checkbox" name="endpunkt_ein" value="1"<?= $ac_ep_ein ? ' checked' : '' ?>> <?php echo cam_t('LOX.L_ENDPUNKT'); ?></label></div>
+<div class="sm-knopfreihe">
+<button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.SPEICHERN'); ?></button>
+</div>
+</form>
+
+<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_1_VIRTUELLER_AUSGANG_LOXBE'); ?></b>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('TEXT.EIGENSCHAFT'); ?></th><th><?php echo cam_t('TEXT.WERT'); ?></th></tr>
+<tr><td><?php echo cam_t('TEXT.ADRESSE'); ?></td><td><span class="sm-mono">http://<?= ac_e($ac_host) ?></span></td></tr>
+</table>
+</div>
+
+<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_2_VIRTUELLE_AUSGANGS_BEFEH'); ?></b>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('TEXT.BEFEHL_BEI_EIN'); ?></th><th><?php echo cam_t('TEXT.WIRKUNG'); ?></th></tr>
+<?php /* Aus DERSELBEN Quelle wie die Importdatei VQ_actikamera_HTTP.xml: cam_ausgangsbefehle(). */
+foreach (cam_ausgangsbefehle() as $ac_bf) { ?>
+<tr><td><span class="sm-mono"><?= ac_e($ac_bf['on']) ?></span></td>
+    <td><?= ac_e(isset($ac_bf['hint']) ? $ac_bf['hint'] : $ac_bf['comment']) ?></td></tr>
+<?php } ?>
+</table>
+<?php if (count(cam_kameras()) > 1) { ?>
+<div class="sm-small"><?php echo cam_t('TEXT.MEHRERE_BEFEHLE'); ?></div>
+<?php } ?>
+</div>
+
+<div class="sm-step"><b><?php echo cam_t('TEXT.SCHRITT_3_VIRTUELLER_HTTP_EINGANG_'); ?></b> <?php echo cam_t('TEXT.ABFRAGE_60_S'); ?>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('TEXT.EIGENSCHAFT'); ?></th><th><?php echo cam_t('TEXT.WERT'); ?></th></tr>
+<tr><td>URL</td><td><span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_2'); ?></span></td></tr>
+<tr><td><?php echo cam_t('TEXT.ABFRAGEZYKLUS'); ?></td><td><?php echo cam_t('TEXT.60_SEKUNDEN'); ?></td></tr>
+</table>
+<table class="sm-tbl">
+<tr><th><?php echo cam_t('TEXT.BEFEHLSERKENNUNG'); ?></th><th><?php echo cam_t('TEXT.BEDEUTUNG'); ?></th></tr>
+<?php $ac_mehr = count(cam_kameras()) > 1;
+foreach (cam_felder() as $ac_fn => $ac_fd) {
+    $ac_fk = isset($ac_fd[6]) ? (int) $ac_fd[6] : 1; ?>
+<tr><td><span class="sm-mono"><?= ac_e('\i;' . $ac_fn . '=\i\v') ?></span></td>
+    <td><?php echo cam_t($ac_fd[3]); ?><?= $ac_mehr ? ' <i>[' . ac_e(cam_kname($ac_fk)) . ']</i>' : '' ?></td></tr>
+<?php } ?>
+</table>
+<div class="sm-small"><?php echo cam_t('TEXT.ALLE_WERTE_GIBT_ES_AUCH_BER_DAS_LO'); ?>
+<span class="sm-mono">http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_PHP_JSON_1'); ?></span></div>
+</div>
+
 <h3 class="sm-h3"><?php echo cam_t('LOX.H_VORLAGE'); ?></h3>
 <div class="sm-small"><?= sprintf(cam_t('LOX.VORLAGE_TEXT'), count(cam_felder())) ?></div>
-<div class="sm-legende">
-<span><i class="sm-punkt sm-b-technik"></i> <?php echo cam_t('LEGENDE.TECHNIK'); ?></span>
-</div>
 <div class="sm-knopfreihe">
 <form action="index.php" method="post" style="margin:0;">
     <input data-role="none" type="hidden" name="download" value="xml_in">
@@ -1732,13 +1913,14 @@ $ac_letztes_adr = 'http://' . ac_e($ac_host) . '/plugins/' . ac_e($ac_plugin)
     <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo cam_t('LOX.K_VORLAGE'); ?></button>
 </form>
 <form action="index.php" method="post" style="margin:0;">
-    <input data-role="none" type="hidden" name="download" value="xml_out">
+    <input data-role="none" type="hidden" name="download" value="xml_out_http">
     <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
     <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
     <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo cam_t('LOX.K_VORLAGE_AUS'); ?></button>
 </form>
 </div>
 <div class="sm-small"><?php echo cam_t('LOX.VORLAGE_AUS_TEXT'); ?></div>
+</details>
 </div>
 
 <!-- ================= Aufnahmen ================= -->
@@ -1860,17 +2042,23 @@ foreach ($ac_pr as $ac_z) {
 
 <h3 class="sm-h3"><?php echo cam_t('TEXT.ANSEHEN'); ?></h3>
 <div class="sm-knopfreihe">
-<a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?test=1&amp;token=<?= ac_e($ac_token) ?>" target="_blank"><?php echo cam_t('TEXT.VERBINDUNG_PRFEN_2'); ?></a>
+<?php /* Seit 1.9.32 (E-E17): ohne Aktionstoken in der Adresse, ueber die angemeldete Seite. */ ?>
+<a class="sm-btn sm-b-lesen" href="index.php?ansicht=test" target="_blank"><?php echo cam_t('TEXT.VERBINDUNG_PRFEN_2'); ?></a>
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam_stream.php<?= $ac_bt1 ?>" target="_blank"><?php echo cam_t('TEXT.LIVEBILD_ANSEHEN'); ?></a>
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?letztes=1<?= $ac_bt ?>" target="_blank"><?php echo cam_t('TEXT.LETZTES_BILD_FFNEN'); ?></a>
+<?php if (cam_endpunkt_ein($ac_cfg)) { ?>
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php" target="_blank"><?php echo cam_t('TEXT.LOXONE_ZEILE_ABRUFEN'); ?></a>
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?json=1" target="_blank"><?php echo cam_t('TEXT.JSON_ANSICHT'); ?></a>
+<?php } ?>
 </div>
+<?php if (!cam_endpunkt_ein($ac_cfg)) { ?>
+<div class="sm-small" style="color:#666;"><?php echo cam_t('TEST.LESEZWEIG_AUS_GRAU'); ?></div>
+<?php } ?>
 
 <h3 class="sm-h3"><?php echo cam_t('TEXT.TECHNISCHE_AUSKUNFT'); ?></h3>
 <div class="sm-knopfreihe">
-<a class="sm-btn sm-b-technik" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?diag=1&amp;token=<?= ac_e($ac_token) ?>" target="_blank"><?php echo cam_t('TEXT.DIAGNOSE_ALLE_VARIANTEN'); ?></a>
-<a class="sm-btn sm-b-technik" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?sys=1&amp;token=<?= ac_e($ac_token) ?>" target="_blank"><?php echo cam_t('TEXT.KAMERA_AUSKUNFT_2'); ?></a>
+<a class="sm-btn sm-b-technik" href="index.php?ansicht=diag" target="_blank"><?php echo cam_t('TEXT.DIAGNOSE_ALLE_VARIANTEN'); ?></a>
+<a class="sm-btn sm-b-technik" href="index.php?ansicht=sys" target="_blank"><?php echo cam_t('TEXT.KAMERA_AUSKUNFT_2'); ?></a>
 <form action="index.php" method="post">
     <input data-role="none" type="hidden" name="rtsppruefen" value="1">
     <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
@@ -1894,7 +2082,12 @@ foreach ($ac_pr as $ac_z) {
     <input data-role="none" type="hidden" name="activetab" value="tab-test">
     <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.ZEITRAFFERBILD_AUFNEHMEN'); ?></button>
 </form>
-<a class="sm-btn sm-b-aktion" href="/plugins/<?= ac_e($ac_plugin) ?>/cam.php?ptest=1&amp;token=<?= ac_e($ac_token) ?>" target="_blank"><?php echo cam_t('TEXT.TEST_PUSHNACHRICHT_2'); ?></a>
+<form action="index.php" method="post">
+    <input data-role="none" type="hidden" name="ptestnow" value="1">
+    <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
+    <input data-role="none" type="hidden" name="activetab" value="tab-test">
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo cam_t('TEXT.TEST_PUSHNACHRICHT_2'); ?></button>
+</form>
 </div>
 
 <div class="sm-small" style="margin-top:14px;">
@@ -1925,6 +2118,17 @@ foreach ($ac_pr as $ac_z) {
 <div class="sm-log"><?= ac_e(implode("\n", $ac_loglines)) ?></div>
 <?php } else { ?>
 <div class="sm-alert sm-info"><?php echo cam_t('TEXT.NOCH_KEINE_PROTOKOLL_EINTRGE_VORHA'); ?></div>
+<?php } ?>
+<?php /* A3 (seit 1.9.32): die Fehlerausgabe des Minutentakts - bis 1.9.31 nirgends zu sehen. Die letzten 80
+         Zeilen, gelesen ohne die ganze Datei (cam_datei_ende()). */
+$ac_cerr = cam_cron_err_pfad();
+$ac_cerr_z = cam_datei_ende($ac_cerr, 80); ?>
+<h3 class="sm-h3"><?php echo cam_t('TEXT.H_CRON_ERR'); ?></h3>
+<div class="sm-small"><?php echo cam_t('TEXT.DATEI'); ?> <span class="sm-mono"><?= ac_e($ac_cerr) ?></span></div>
+<?php if ($ac_cerr_z) { ?>
+<div class="sm-log"><?= ac_e(implode("\n", array_reverse($ac_cerr_z))) ?></div>
+<?php } else { ?>
+<div class="sm-alert sm-info"><?php echo cam_t('TEXT.CRON_ERR_LEER'); ?></div>
 <?php } ?>
 <div class="sm-legende">
 <span><i class="sm-punkt sm-b-aktion"></i> <?php echo cam_t('LEGENDE.AKTION'); ?></span>
@@ -1959,6 +2163,15 @@ foreach ($ac_pr as $ac_z) {
         Array.prototype.forEach.call(felder, function (f) { f.value = t.dataset.pane; });
     }); });
     zeige(aktiv);
+    /* Kopierknoepfe der Namenstabelle (seit 1.9.32): den Gateway-Namen in die
+       Zwischenablage; ohne Zwischenablage (http, alter Browser) wird er
+       markiert. */
+    document.querySelectorAll('.ac-kopie').forEach(function (k) { k.addEventListener('click', function () {
+        var t = k.getAttribute('data-kopie') || '';
+        if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(t); return; }
+        var f = document.createElement('textarea'); f.value = t; document.body.appendChild(f); f.select();
+        try { document.execCommand('copy'); } catch (e) {} document.body.removeChild(f);
+    }); });
 })();
 </script>
 <?php

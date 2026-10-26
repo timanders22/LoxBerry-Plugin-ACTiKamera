@@ -214,6 +214,20 @@ else
 fi
 # Der Merker aus preinstall.sh gilt nur fuer diesen einen Lauf.
 rm -f "$BASE/data/plugins/$PFOLDER.neuinstallation" 2>/dev/null
+# Befehlsbruecke (seit 1.9.32, E-E5): nur bei einer Neuinstallation - bei einem
+# Update liegt die Marke noch, und postupgrade.sh startet nach ihrem Entfernen.
+# Ab Werk ist der Haken aus; dann sagt befehlsbruecke.sh "Haken aus".
+if [ "$AC_UPGRADE" != "1" ]; then
+    BBSH="$BASE/bin/plugins/$PFOLDER/befehlsbruecke.sh"
+    if [ -f "$BBSH" ]; then
+        BB_AUS=$(timeout 40 bash "$BBSH" start 2>&1 | head -n 1)
+        case "$BB_AUS" in
+            *gestartet*|*laeuft*) echo "<OK> Befehlsbruecke: $BB_AUS" ;;
+            "Haken aus - kein Start.") echo "<INFO> Befehlsbruecke: aus (Reiter MQTT, Haken 'Befehle ueber MQTT annehmen')." ;;
+            *) echo "<WARNING> Befehlsbruecke: $BB_AUS - der Minutentakt versucht es erneut." ;;
+        esac
+    fi
+fi
 # Die Erstanleitung nur, wenn keine eingerichtete Konfiguration vorliegt.
 # postinstall.sh laeuft auch bei jedem Upgrade (Regeln/06); danach war der
 # Rat, die Zugangsdaten einzutragen, falsch und legte nahe, sie seien weg.

@@ -12,6 +12,13 @@
  *   ?timelapse=1       -> Zeitrafferbild jetzt aufnehmen
  *   ?cleanup=1         -> Archiv jetzt aufraeumen
  *   ?ptest=1           -> Test-Pushnachricht ausloesen (PTEST=1 fuer 5 Minuten)
+ *   ?video=1           -> das Zeitraffer-Video (video/mp4, seit 1.9.32; Stromkennwort wie ?bild)
+ *
+ * Seit 1.9.32 (Entscheidung 2, E-E12): die Statuszeile und ?json=1 - der
+ * Lesezweig fuer Loxone - antworten nur mit dem Haken endpunkt_ein (Update:
+ * an, Neuinstallation: aus, Werte dann ueber MQTT); sonst 403
+ * ACTI;OK=0;ERR=ENDPUNKT_AUS. Aktionen mit Aktionstoken, der Bildabruf, das
+ * Video, cam_stream.php und e.php haengen nicht an diesem Haken.
  *
  * Der Aufruf enthaelt bewusst KEINE Zugangsdaten - die liegen nur in der
  * Plugin-Konfiguration. Damit verschwindet das Kamera-Passwort aus der
@@ -139,7 +146,7 @@ if ($anlass === '') {
  * eines aendert sich nichts.
  */
 if (isset($_GET['bild']) || isset($_GET['serie']) || isset($_GET['zeitraffer'])
-    || isset($_GET['letztes'])) {
+    || isset($_GET['letztes']) || isset($_GET['video'])) {
     $ac_scfg = cam_config();
     $ac_stok = (string) $ac_scfg['stream_token'];
     if ($ac_stok !== '' && !hash_equals($ac_stok, ac_get('t'))) {
@@ -174,6 +181,25 @@ if (isset($_GET['bild']) || isset($_GET['serie']) || isset($_GET['zeitraffer'])
         echo "Noch kein Bild vorhanden.\n";
         exit;
     }
+    /* Das Zeitraffer-Video (seit 1.9.32, A9/E3): es liegt im Archiv, nicht mehr
+       offen im Webordner - die alte Adresse /plugins/<ordner>/zeitraffer.mp4
+       antwortet seit dem Update mit 404. Hier gilt das Stromkennwort wie fuer
+       jede Aufnahme. */
+    if (isset($_GET['video'])) {
+        $ac_v = cam_zeitraffer_video($ac_kam);
+        if ($ac_v === '') {
+            ac_weg('Zeitraffer-Video abgerufen, es gibt noch keines (Kamera ' . $ac_kam . ')');
+            header('HTTP/1.1 404 Not Found');
+            header('Content-Type: text/plain; charset=utf-8');
+            echo "Noch kein Zeitraffer-Video vorhanden.\n";
+            exit;
+        }
+        header('Content-Type: video/mp4');
+        header('Content-Length: ' . filesize($ac_v));
+        header('Cache-Control: private');
+        readfile($ac_v);
+        exit;
+    }
     if (isset($_GET['serie'])) {
         $ac_d = cam_archivdatei('serie', ac_get('serie'),
             (int) ac_get('nr', '0'), $ac_kam);
@@ -197,44 +223,18 @@ if (isset($_GET['bild']) || isset($_GET['serie']) || isset($_GET['zeitraffer'])
     exit;
 }
 
+/* sys und diag: dieselbe Ausgabe wie der Reiter Test (index.php?ansicht=...,
+   angemeldet, ohne Token in der Adresse - seit 1.9.32, E-E17). Die Zweige hier
+   bleiben fuer Altlinks, mit Aktionstoken. */
 if (isset($_GET['sys'])) {
     header('Content-Type: text/plain; charset=utf-8');
-    echo "AUSKUNFT DER SYSTEM-SCHNITTSTELLE  /cgi-bin/cmd/system\n";
-    echo str_repeat('-', 78) . "\n";
-    foreach (array('GET_STREAM', 'GET_MODEL', 'GET_FIRMWARE_VERSION', 'GET_MAC',
-                   'VIDEO_RESOLUTION', 'CHANNEL_ENABLE') as $ac_b) {
-        list($ac_a, $ac_c, $ac_e2) = cam_system($ac_b, $ac_kam);
-        $ac_t = $ac_a === false ? ('FEHLER: ' . $ac_e2) : trim(cam_maske((string) $ac_a));
-        if (strlen($ac_t) > 400) { $ac_t = substr($ac_t, 0, 400) . ' …'; }
-        printf("%-22s HTTP %-4d %s\n", $ac_b, $ac_c, str_replace(array("\r", "\n"), ' ', $ac_t));
-    }
-    echo str_repeat('-', 78) . "\n";
-    $ac_ff = cam_ffmpeg();
-    echo 'ffmpeg: ' . ($ac_ff !== '' ? $ac_ff : 'nicht vorhanden') . "\n";
-    echo 'Kamerastrom: ' . cam_maske(cam_mjpeg_url($ac_kam)) . "\n";
-    echo 'RTSP-Adresse: ' . (cam_rtsp_maske(cam_rtsp_url(false, $ac_kam)) ?: 'nicht ermittelbar') . "\n";
+    echo cam_ansicht_sys($ac_kam);
     exit;
 }
 
 if (isset($_GET['diag'])) {
     header('Content-Type: text/plain; charset=utf-8');
-    $d_cfg = cam_kcfg($ac_kam);
-    echo 'DIAGNOSE - ' . cam_kname($ac_kam) . "\n";
-    echo 'Gebaute URL: ' . cam_maske(cam_url('SNAPSHOT', true, $ac_kam)) . "\n";
-    echo 'Benutzer:    "' . $d_cfg['user'] . '" (' . strlen($d_cfg['user']) . " Zeichen)\n";
-    echo 'Passwort:    ' . strlen($d_cfg['pass']) . ' Zeichen'
-       . ($d_cfg['pass'] !== '' ? ', beginnt mit "' . substr($d_cfg['pass'], 0, 1) . '", endet auf "'
-         . substr($d_cfg['pass'], -1) . '"' : ' - LEER!') . "\n";
-    echo "\nVergleichen Sie diese Angaben mit einer nachweislich funktionierenden URL\n"
-       . "(z. B. aus einer bestehenden Kamera-Einbindung). Weichen Benutzer oder Laenge ab,\n"
-       . "ist das die Ursache - dann die vollstaendige URL in den Einstellungen hinterlegen.\n";
-    echo str_repeat('-', 100) . "\n";
-    foreach (cam_diag($ac_kam) as $z) {
-        printf("%-4s HTTP %-4s %5s ms  %-9s %-42s %s\n",
-            $z['ok'] ? 'OK' : '--', $z['http'], $z['ms'], $z['auth'],
-            substr($z['befehl'], 0, 42), $z['antwort']);
-    }
-    echo "\nEine Zeile mit OK zeigt den Weg, der funktioniert - er wird automatisch gemerkt.\n";
+    echo cam_ansicht_diag($ac_kam);
     exit;
 }
 
@@ -245,13 +245,20 @@ if (isset($_GET['test'])) {
     exit;
 }
 
+/* Seit 1.9.32 ueber cam_testpush() - dieselbe Stelle wie der Knopf im Reiter
+   Test und die Befehlsbruecke: Merker, Protokollzeile, sofort ueber MQTT
+   (A10). */
 if (isset($_GET['ptest'])) {
-    ac_weg('Test-Pushnachricht ausgeloest');
-    if (!is_dir(cam_paths()['tmp'])) { @mkdir(cam_paths()['tmp'], 0775, true); }
-    @file_put_contents(cam_paths()['tmp'] . '/ptest', time());
+    $ac_pt = cam_testpush('http');
     header('Content-Type: text/plain; charset=utf-8');
-    echo "PTEST;OK=1;DAUER=300\nHinweis: Loxone pollt zyklisch - die Push-Nachricht kommt innerhalb von 5 Minuten,\n"
-       . "sofern der Test-Benachrichtigungsbaustein laut Anleitung verdrahtet ist.\n";
+    if (!$ac_pt['ok']) {
+        header('HTTP/1.1 500 Internal Server Error');
+        echo "PTEST;OK=0;ERR=MERKER\n";
+        exit;
+    }
+    echo "PTEST;OK=1;DAUER=300\nHinweis: ueber MQTT kommt PTEST sofort; der HTTP-Eingang in Loxone liest es mit\n"
+       . "der naechsten Abfrage. Die Push-Nachricht kommt, sofern der Test-Benachrichtigungsbaustein laut\n"
+       . "Anleitung verdrahtet ist.\n";
     exit;
 }
 
@@ -296,6 +303,27 @@ if (isset($_GET['cleanup'])) {
     $ac_weg_n = cam_cleanup();
     ac_weg('Archiv aufgeraeumt, ' . (int) $ac_weg_n . ' Aufnahmen entfernt');
     $ergebnis = 'CLEANUP;OK=1;INFO=' . $ac_weg_n . ' Aufnahmen entfernt';
+}
+
+/* Das Tor des Lesezweigs (seit 1.9.32, Entscheidung 2, E-E12): ohne den Haken
+   endpunkt_ein antworten Statuszeile und ?json nicht - die Werte kommen ueber
+   MQTT. Eine Aktion mit Aktionstoken antwortet dann nur mit ihrer
+   Ergebniszeile, ohne den Statusanhang. Die Protokollzeile ist gebremst
+   (einmal je Stunde), sonst schriebe ein weiter abfragender virtueller
+   HTTP-Eingang jede Minute eine. */
+$ac_c = cam_config();
+if (!cam_endpunkt_ein($ac_c)) {
+    if ($ergebnis !== '') {
+        header('Content-Type: text/plain; charset=utf-8');
+        echo $ergebnis . "\n";
+        exit;
+    }
+    cam_log_selten('endpunkt_aus', 'cam.php: Lesezweig abgewiesen (endpunkt_ein = 0; Aufrufer ' . $ac_ip
+        . ') - die Werte kommen ueber MQTT; einschalten im Reiter Einbindung, Abschnitt Bestehende Anlagen.');
+    header('HTTP/1.1 403 Forbidden');
+    header('Content-Type: text/plain; charset=utf-8');
+    echo (isset($_GET['json']) ? '{"OK":0,"ERR":"ENDPUNKT_AUS"}' : 'ACTI;OK=0;ERR=ENDPUNKT_AUS') . "\n";
+    exit;
 }
 
 $st = cam_state($ac_kam);

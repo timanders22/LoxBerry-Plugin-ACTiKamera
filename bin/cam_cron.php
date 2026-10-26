@@ -1,8 +1,13 @@
 <?php
 /**
  * Wird jede Minute aufgerufen und entscheidet selbst, was ansteht:
+ *   - Waechter der Befehlsbruecke, Herzschlag und Lebenszeichen ueber MQTT
+ *     (seit 1.9.32 vorn, vor allem, was lange dauern kann)
  *   - Zeitraffer-Bild zur eingestellten Uhrzeit (einmal taeglich)
  *   - Archiv-Bereinigung taeglich um 03:35
+ *   - Erreichbarkeit der Kamera, Zustand nach MQTT (nur Geaendertes)
+ * Dazu zwei Aufrufformen mit Schalter: --mqtt-leeren (Deinstallation) und
+ * --aufnahme (abgekoppelte Aufnahme der Befehlsbruecke, seit 1.9.32).
  *
  * WARUM NICHT AUF DIE MINUTE GENAU VERGLICHEN WIRD
  * Frueher stand hier  if ($jetzt === $soll ...)  - also ein Vergleich auf die
@@ -82,6 +87,19 @@ if (in_array('--mqtt-leeren', isset($argv) ? (array) $argv : array(), true)) {
     exit(cam_mqtt_leeren());
 }
 
+/* ---------------- Abgekoppelte Aufnahme der Befehlsbruecke (seit 1.9.32) ----
+ * cam_aufnahme_starten() startet "cam_cron.php --aufnahme foto|clip <kamera>
+ * <anlass> mqtt" als abgekoppelten Kindprozess (E-E3, N4): der Dienst der
+ * Bruecke wartet nie auf die Kamera. Der Zweig steht VOR der Upgrade-Pruefung,
+ * prueft die Marke aber selbst - waehrend einer Aktualisierung wird nichts
+ * aufgenommen, mit einer Protokollzeile statt still. Argumente streng geprueft
+ * (sonst Rueckgabe 2). */
+$ac_av = isset($argv) ? (array) $argv : array();
+$ac_ai = array_search('--aufnahme', $ac_av, true);
+if ($ac_ai !== false) {
+    exit(cam_aufnahme_lauf(array_slice($ac_av, $ac_ai + 1)));
+}
+
 /* ---------------- Waehrend einer Aktualisierung: nichts tun ----------------
  * Zwischen der neuen Cron-Datei und postinstall.sh liegt fast eine Minute
  * (Regeln/06). In dieser Zeit ist cam.json das "{}" aus dem Archiv, und
@@ -102,6 +120,31 @@ $p = cam_paths();
 if (!is_dir($p['tmp'])) {
     @mkdir($p['tmp'], 0775, true);
 }
+
+/* ---------------- Waechter der Befehlsbruecke (seit 1.9.32, E-E5) ----------
+ * Vorn, vor Zeitraffer, Bereinigung und Erreichbarkeit: startet einen
+ * abgestuerzten Dienst neu bzw. haelt ihn an, wenn der Haken aus ist. Dieser
+ * Takt haelt keine Sperre - der Dienst erbt nichts. Waehrend der Upgrade-Marke
+ * kommt der Lauf gar nicht hierher (oben), und die Bruecke ruht ohnehin. */
+if (cam_bruecke_laden()) {
+    try {
+        bb_waechter();
+    } catch (Throwable $ac_t) {
+        cam_log_selten('bruecke', 'Waechter der Befehlsbruecke: ' . get_class($ac_t) . ': ' . $ac_t->getMessage());
+    }
+}
+
+/* ---------------- Herzschlag und Lebenszeichen (seit 1.9.32 vorn, N9) ------
+ * Erst setzen, dann senden: daran erkennt der Reiter Test und - ueber HTTP -
+ * auch Loxone, ob der Minutentakt ueberhaupt noch laeuft. Eine Prozessnummer
+ * beantwortet das nicht, ein Prozess kann dastehen und nichts mehr tun.
+ * Bis 1.9.31 stand beides am Ende hinter Zeitraffer (mit A9 bis 300 s ffmpeg),
+ * Bereinigung und Erreichbarkeit; ein langer Lauf verzoegerte das
+ * Lebenszeichen. Ueber MQTT geht je Lauf zaehler und je Kamera OK und
+ * ERREICHBAR (cam_mqtt_lebenszeichen(), E-E7) - nie retained. */
+cam_herzschlag();
+cam_mqtt_lebenszeichen();
+
 $heute = date('Y-m-d');
 $jetzt_min = (int) date('H') * 60 + (int) date('i');
 
@@ -156,6 +199,11 @@ if (!cam_config_eingerichtet()) {
     cam_cleanup();
 }
 
+/* ---------------- Reste des Livebilds (seit 1.9.32, N15) ----------------
+ * Die Uebergabedatei des RTSP-Wegs (cam_stream.php) bleibt nur liegen, wenn
+ * Apache den Arbeiter hart beendet; nach 15 Minuten wird sie geraeumt. */
+cam_livebild_reste();
+
 /* ---------------- Erreichbarkeit der Kamera ----------------
  * Ohne diese Pruefung sagt OK nur, dass eine Adresse eingetragen ist; die
  * Kamera kann seit Tagen stromlos sein. Der Abruf holt kein Bild, sondern
@@ -176,12 +224,6 @@ if ($ac_takt > 0) {
     }
 }
 
-/* ---------------- Herzschlag ----------------
- * Erst setzen, dann senden: daran erkennt der Reiter Test und - ueber HTTP -
- * auch Loxone, ob der Minutentakt ueberhaupt noch laeuft. Eine Prozessnummer
- * beantwortet das nicht, ein Prozess kann dastehen und nichts mehr tun. */
-cam_herzschlag();
-
 /* ---------------- Abo-Datei des Gateways (M7) ----------------
  * Nur bei eingeschaltetem MQTT und nur, wenn sie fehlt oder ein anderes
  * Praefix traegt. Ein Update raeumt den Konfigordner ab; dieser Takt legt sie
@@ -189,25 +231,14 @@ cam_herzschlag();
 cam_mqtt_abo_datei(true);
 
 /* ---------------- Zustand nach MQTT ----------------
- * Der Minutentakt ist auch der Herzschlag fuer die Statuswerte: nur so
- * bekommt Loxone mit, dass die Kamera seit einer Stunde schweigt. Gesendet
- * wird ausschliesslich, was sich geaendert hat (siehe cam_mqtt_zustand). */
-cam_mqtt_zustand();
-
-/* Und der Herzschlag geht in JEDEM Takt hinaus, auch wenn sich sonst nichts
- * geaendert hat. Wer nur bei Aenderungen sendet, hoert bei einer Stoerung
- * einfach auf - die zuletzt gesendeten Werte bleiben im Broker stehen, und in
- * Loxone sieht ein toter Dienst genauso aus wie ein ruhiges Haus. In Loxone
- * gehoert dazu eine Einschaltverzoegerung deutlich ueber dem Takt, damit ein
- * einzelner verpasster Durchlauf keine Meldung ausloest. */
-/* Das Lebenszeichen traegt seit 1.9.19 nur noch online und ts.
+ * Gesendet wird ausschliesslich, was sich geaendert hat, und alle 30 Minuten
+ * der volle Satz (siehe cam_mqtt_zustand) - am Ende, damit eine eben
+ * festgestellte Erreichbarkeit noch in diesem Lauf hinausgeht. Aufnahmen und
+ * Test-Push senden seit 1.9.32 sofort selbst (A10); der Lauf hier findet
+ * danach keine Aenderung mehr.
  *
- * Bis 1.9.18 hingen erreichbar<N>, fehler<N> und name<N> mit darin - drei
- * Themen in KLEINSCHREIBUNG, die in keiner Themenliste des Reiters
- * "Einbindung in Loxone" stehen (die Liste kennt nur ERREICHBAR und FEHLER
- * aus der Feldtabelle). Am 06.09.2026 am Broker gemessen: in 130 Sekunden
- * gingen acti/erreichbar, acti/fehler und acti/name je zweimal hinaus,
- * waehrend acti/ERREICHBAR gar nicht kam. Dieselben Werte liefert
- * cam_mqtt_zustand() weiter oben unter ihren dokumentierten Namen - und seit
- * 1.9.19 retained, also auch nach einem Neustart des Brokers sofort da. */
-cam_mqtt(array('online' => 1, 'ts' => date('c')));
+ * Das Lebenszeichen steht seit 1.9.32 vorn (cam_mqtt_lebenszeichen():
+ * zaehler, OK, ERREICHBAR). Die Themen online und ts gibt es nicht mehr:
+ * online war immer 1 und kam unter Gateway V2 genau einmal an, ts ist ein
+ * ISO-Text, den kein Virtueller Eingang lesen kann (E-E7). */
+cam_mqtt_zustand();

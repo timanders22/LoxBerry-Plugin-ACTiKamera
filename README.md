@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.31 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.33 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -12,6 +12,50 @@ in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxo
 nur noch `cam.php?foto=1&token=…` auf; die Zugangsdaten bleiben auf dem LoxBerry.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
+
+## Neu in 1.9.33
+
+Nachbesserung nach dem Gerätetest von 1.9.32 (1.9.32 wurde nicht veröffentlicht).
+
+* **Livebild startet rund 24 s schneller:** ohne eingetragene RTSP-Adresse fragte das Plugin die Kamera bisher
+  per `GET_STREAM` – sie antwortet darauf aber mit dem Videostrom selbst, nicht mit einer Adresse (drei
+  Versuche, 24 s). Jetzt wird die Adresse sofort aus Kamera-Adresse, RTSP-Port und Strom gebildet; ebenso in
+  der RTSP-Prüfung. Die Kamera-Auskunft im Reiter Test fragt `GET_STREAM` nicht mehr ab.
+* **Livebild über RTSP mit Startfrist:** kommt nach 12 s kein erstes Bild, wird ffmpeg beendet. Bei der
+  Bildquelle „Automatisch“ geht es mit den Schnappschüssen weiter, bei „Nur RTSP“ kommt ein Fehlerbild. Bisher
+  wartete `cam_stream.php` bis zu 15 Minuten stumm, und je Versuch hingen ffmpeg und ein Webserver-Prozess.
+* **Grund im Protokoll**, laienverständlich und ohne Adresse oder Kennwort – z. B. „MJPEG über 2040 Pixel – das
+  lässt sich über RTSP nicht übertragen; stream2 wählen“, „Anmeldung abgelehnt (401)“, „Connection refused“.
+* **Schließen ohne Bild wird bemerkt:** solange noch kein Bild da ist, geht jede Sekunde ein unsichtbares
+  Lebenszeichen hinaus (Präambel vor der ersten Trennmarke) – ffmpeg endet 1–2 s nach dem Schließen.
+* **Hinweis „MJPEG über 2040 Pixel – stream2 wählen“** im Reiter Einstellungen bei „Welcher Strom“ und in der
+  RTSP-Prüfung im Reiter Test. Hintergrund: Stream 1 vieler ACTi-Kameras ist MJPEG 2048×1536; RTP/JPEG
+  (RFC 2435) trägt höchstens 2040 Pixel, ffmpeg meldet dann „Picture size 0x0“. Stream 2 (H.264) geht.
+
+## Neu in 1.9.32
+
+Hausform: Werte über das MQTT-Gateway, Befehle über die Befehlsbrücke, dazu Korrekturen der Fremdprüfung.
+
+* **MQTT ab Werk an** für neue Anlagen; bestehende bleiben, wie sie sind (preupgrade sagt es, wenn MQTT aus ist).
+  Jede Minute das Lebenszeichen `zaehler` sowie `OK` und `ERREICHBAR` (nie retained; unter Gateway V2
+  „Noncached“). **`online` und `ts` entfallen.** `ALTER` geht wieder über MQTT (flüchtig), neu `zeit_unix`
+  (retained, -1 ohne Bild). Aufnahmen und Test-Push senden **sofort**, nicht erst im nächsten Minutentakt.
+  Eine ausgetragene Kamera bekommt für Zahlen -1, für Texte „-“.
+* **Namenstabelle** im Reiter Einbindung (Gateway-Namen wie `acti_OK`, Kopierknopf), **V2-Hakenliste** im Reiter
+  MQTT. Das Musterprojekt nimmt Virtuelle Eingänge statt des HTTP-Eingangs.
+* **Befehlsbrücke 1.0.1**: `acti/befehl/foto|clip[/kamera]` mit dem Anlass als Wert und `acti/befehl/testpush`,
+  Haken „Befehle über MQTT annehmen“ (ab Werk aus). Die Aufnahme läuft abgekoppelt; die Mindestpause gilt für
+  alle Wege. Vorlage **VQ_actikamera.xml** ist jetzt die Brückenvorlage; die HTTP-Vorlage heißt
+  VQ_actikamera_HTTP.xml.
+* **HTTP-Lesezweig** (Statuszeile, `?json=1`) nur mit dem Haken `endpunkt_ein` – bei einem Update an, bei einer
+  Neuinstallation aus. Bilder, Livebild, `e.php` und Aktionen mit Token bleiben offen.
+* **Livebild über RTSP ohne Kennwort auf der Kommandozeile** (ffconcat-Datei 0600, ohne Schale, ffmpeg wird
+  sauber beendet). Der Warnkasten dazu ist weg.
+* **Zeitraffer-Video im Archiv**, abrufbar über `cam.php?video=1` (Stromkennwort); die alte Adresse
+  `/plugins/actikamera/zeitraffer.mp4` gibt es nicht mehr. Erzeugung atomar, höchstens 300 s, eine je Kamera.
+* Test-Push als Formular; „Verbindung prüfen“, „Diagnose“, „Kamera-Auskunft“ ohne Token in der Adresse;
+  `cron.err` im Reiter Logdateien; Zurückspielen räumt bei Präfixwechsel ab; Deinstallation mit Präfix-Wache;
+  Protokollkürzung unteilbar; eine Legende oben je Reiter.
 
 ## Neu in 1.9.31
 
@@ -233,7 +277,7 @@ der dreifache Prüftakt. `OK` heißt weiter „Adresse eingetragen“.
   nach jeder Aufnahme
 - **Zeitraffer**: täglich zur eingestellten Uhrzeit ein Bild in den Unterordner
   `timelapse` (Dateiname = Datum); ist `ffmpeg` vorhanden, wird daraus
-  `zeitraffer.mp4` neu erzeugt
+  `zeitraffer.mp4` neu erzeugt (seit 1.9.32 im Archiv, `cam.php?video=1`)
 - **Archiv-Bereinigung** täglich um 03:35 Uhr, nach **Alter, Anzahl und Größe**
   (jeweils 0 = unbegrenzt) über Bilder, Bildserien und Zeitraffer — die
   jeweils neueste Aufnahme bleibt immer erhalten
@@ -241,10 +285,11 @@ der dreifache Prüftakt. `OK` heißt weiter „Adresse eingetragen“.
   erkannte Objekte erscheinen im JSON, in den Webhooks, per MQTT und als
   `ERKANNT=` in der Loxone-Ausgabe; `PERSON=1` ist der fertige Schalter
 - **Webhooks**: Webhook 1 als POST mit JSON, Webhook 2 als GET mit Parametern
-- **MQTT** über das LoxBerry MQTT Gateway, mit Herzschlag (`online`, `ts`), damit
+- **MQTT** über das LoxBerry MQTT Gateway, mit Lebenszeichen (`zaehler` je Minute), damit
   ein toter Dienst nicht wie ein ruhiges Haus aussieht; **JSON** für Drittsoftware
-- **Fertige Importdateien für Loxone Config** — eine für die virtuellen Eingänge,
-  eine für die virtuellen Ausgänge samt Aktionstoken
+- **Befehle aus Loxone** über die Befehlsbrücke (MQTT) und weiter über HTTP mit Aktionstoken
+- **Fertige Importdateien für Loxone Config** — Befehle über das Gateway (VQ_actikamera.xml),
+  für bestehende Anlagen der HTTP-Eingang und die HTTP-Ausgänge samt Aktionstoken
 - Reiter: Einstellungen, MQTT, Einbindung in Loxone (Schritt für Schritt, mit zwei
   Baustein-Seiten aus dem Musterprojekt), Aufnahmen, Test, Logdateien
 
@@ -391,8 +436,9 @@ Token HTTP 403 und `SELFTEST;OK=0;ERR=TOKEN`.
 
 | Aufruf | Token | Zweck |
 |---|---|---|
-| `/plugins/actikamera/cam.php` | nein | Loxone-Zeile `ACTI;OK=..;ALTER=..;PUSHAKTIV=..;…` |
-| `…/cam.php?json=1` | nein | Zustand als JSON |
+| `/plugins/actikamera/cam.php` | nein³ | Loxone-Zeile `ACTI;OK=..;ALTER=..;PUSHAKTIV=..;…` |
+| `…/cam.php?json=1` | nein³ | Zustand als JSON |
+| `…/cam.php?video=1` | nein¹ | Zeitraffer-Video (seit 1.9.32) |
 | `…/cam.php?letztes=1` | nein¹ | letztes Bild als JPEG (seit 1.9.19) |
 | `…/cam.php?bild=<Datei>` | nein¹ | eine bestimmte gespeicherte Aufnahme |
 | `…&kamera=<n>` | — | an jedem Aufruf: welche Kamera gemeint ist (ohne Angabe die erste) |
@@ -418,6 +464,9 @@ antwortete mit HTTP 403, `?letztes=1` mit HTTP 200 und dem aktuellen Bild.
 
 ² Eigenes, kurzes Token je Kamera — es darf **nur** aufnehmen, nicht aufräumen
 und nicht die Diagnose lesen.
+
+³ Seit 1.9.32 nur mit dem Haken `endpunkt_ein` (Reiter Einbindung, „Bestehende Anlagen“; nach einem Update
+an, nach einer Neuinstallation aus). Sonst `403` mit `ACTI;OK=0;ERR=ENDPUNKT_AUS`.
 
 ## Sicherheit und Datenschutz
 

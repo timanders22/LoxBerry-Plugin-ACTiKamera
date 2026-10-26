@@ -139,15 +139,43 @@ fi
 # (siehe preupgrade.sh). Liegt aus einem abgebrochenen Upgrade noch ein
 # cam.log im Sicherungsordner, bleibt es unbenutzt und geht mit ihm weg.
 
-# Das letzte Bild und der Zeitraffer liegen im Webordner, den der Installer
-# abraeumt. Ohne diesen Schritt zeigt die Kamera-Kachel in Loxone bis zur
-# naechsten Aufnahme 404, waehrend ALTER weiter ein Bild meldet.
+# Das letzte Bild liegt im Webordner, den der Installer abraeumt. Ohne diesen
+# Schritt zeigt die Kamera-Kachel in Loxone bis zur naechsten Aufnahme 404,
+# waehrend ALTER weiter ein Bild meldet.
 WEB="$BASE/webfrontend/html/plugins/$PFOLDER"
 if [ -d "$WEB" ]; then
-    for E in "$SICHER"/letztesbild*.jpg "$SICHER"/zeitraffer*.mp4; do
+    for E in "$SICHER"/letztesbild*.jpg; do
         [ -e "$E" ] && cp -p "$E" "$WEB/" 2>/dev/null
     done
 fi
+# Das Zeitraffer-Video liegt seit 1.9.32 im ARCHIV (A9/E3, E-E15): ein aus dem
+# Webordner gesichertes zeitraffer<n>.mp4 geht einmal nach
+# <archiv>/timelapse<n>/zeitraffer.mp4 - nur, wenn dort noch keines liegt. Die
+# alte offene Adresse /plugins/<ordner>/zeitraffer.mp4 gibt es danach nicht
+# mehr; abrufbar ist es ueber cam.php?video=1 (Stromkennwort wie ?bild).
+AC_AR="$BASE/data/plugins/$PFOLDER.archiv"
+if command -v php >/dev/null 2>&1 && [ -f "$CF" ]; then
+    AC_EIGEN=$(php -r '$d = json_decode((string) @file_get_contents($argv[1]), true);
+        $a = (is_array($d) && isset($d["archiv_pfad"]) && is_string($d["archiv_pfad"])) ? rtrim(trim($d["archiv_pfad"]), "/") : "";
+        echo ($a !== "" && is_dir($a) && is_writable($a)) ? $a : "";' "$CF" 2>/dev/null)
+    [ -n "$AC_EIGEN" ] && AC_AR="$AC_EIGEN"
+fi
+for E in "$SICHER"/zeitraffer*.mp4; do
+    [ -f "$E" ] || continue
+    AC_N=$(basename "$E" .mp4); AC_N=${AC_N#zeitraffer}
+    case "$AC_N" in ''|2|3|4) ;; *) continue ;; esac
+    AC_Z="$AC_AR/timelapse$AC_N/zeitraffer.mp4"
+    if [ -e "$AC_Z" ]; then
+        echo "<INFO> Zeitraffer-Video: im Archiv liegt schon $AC_Z - das gesicherte bleibt unbenutzt."
+        continue
+    fi
+    mkdir -p "$AC_AR/timelapse$AC_N" 2>/dev/null
+    if cp -p "$E" "$AC_Z" 2>/dev/null && cmp -s "$E" "$AC_Z"; then
+        echo "<INFO> Zeitraffer-Video ins Archiv uebernommen ($AC_Z). Die alte Adresse /plugins/$PFOLDER/zeitraffer$AC_N.mp4 gibt es nicht mehr - neu: /plugins/$PFOLDER/cam.php?video=1 (mit &t=<Stromkennwort>, falls gesetzt)."
+    else
+        echo "<WARNING> Das gesicherte Zeitraffer-Video liess sich nicht ins Archiv kopieren: $E"
+    fi
+done
 
 # Zweitschrift als zweiter, unabhaengiger Weg: sie traegt dieselbe
 # Konfiguration und ueberlebt das Abraeumen, weil sie NEBEN dem Ordner liegt.
@@ -182,6 +210,41 @@ else
     rm -rf "$SICHER" 2>/dev/null
 fi
 
+# endpunkt_ein festschreiben (seit 1.9.32, Entscheidung 2, E-E12): eine
+# EINGERICHTETE Datei (mindestens ein Schluessel ausser den selbst erzeugten
+# Token - dasselbe Kriterium wie cam_config_eingerichtet()) ohne den Schluessel
+# bekommt endpunkt_ein=1: der HTTP-Lesezweig einer bestehenden Anlage bleibt
+# erreichbar. Fuer cam.json und die Zweitschrift; Nebendatei .neu (umask 077),
+# Gegenprobe (gleich bis auf endpunkt_ein), mv -f, chmod 600. Scheitert es,
+# gilt die Lese-Regel cam_uebergang() beim Lesen. Erst NACH dem Aufraeumen der Upgrade-Sicherung: deren
+# Gegenprobe vergleicht sie byteweise mit cam.json (sonst bliebe sie liegen, und ein zweiter Lauf spielte sie ein).
+ac_endpunkt_festschreiben() { # $1 Datei
+    [ -f "$1" ] && command -v php >/dev/null 2>&1 || return 0
+    php -r '$f = $argv[1]; $d = json_decode((string) @file_get_contents($f), true);
+        if (!is_array($d)) { exit(1); }
+        $r = $d; foreach (array("aktionstoken", "ausloeser_token", "ausloeser_token2", "ausloeser_token3", "ausloeser_token4") as $s) { unset($r[$s]); }
+        if (count($r) === 0 || array_key_exists("endpunkt_ein", $d)) { exit(1); }
+        $d["endpunkt_ein"] = 1;
+        $j = json_encode($d, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($j === false) { exit(3); }
+        $alt = umask(077); $ok = (file_put_contents($f . ".neu", $j) === strlen($j)); umask($alt);
+        exit($ok ? 0 : 3);' "$1" 2>/dev/null
+    ac_rc=$?
+    [ "$ac_rc" = 1 ] && return 0
+    if [ "$ac_rc" = 0 ] && php -r '$a = json_decode((string) @file_get_contents($argv[1]), true);
+        $n = json_decode((string) @file_get_contents($argv[2]), true);
+        if (!is_array($a) || !is_array($n) || !isset($n["endpunkt_ein"]) || $n["endpunkt_ein"] !== 1) { exit(1); }
+        unset($n["endpunkt_ein"]); exit($a === $n ? 0 : 1);' "$1" "$1.neu" 2>/dev/null \
+       && mv -f "$1.neu" "$1" 2>/dev/null && chmod 600 "$1" 2>/dev/null; then
+        echo "<INFO> Konfiguration ergaenzt: endpunkt_ein=1 in $(basename "$1") (bestehende Anlage - der HTTP-Lesezweig fuer Loxone bleibt erreichbar; abschalten im Reiter Einbindung)."
+    else
+        [ -f "$1.neu" ] && { : > "$1.neu"; rm -f "$1.neu"; } 2>/dev/null
+        echo "<WARNING> endpunkt_ein liess sich in $1 nicht festschreiben - das Plugin liest den Wert beim Lesen (1)."
+    fi
+}
+ac_endpunkt_festschreiben "$CF"
+ac_endpunkt_festschreiben "$BK"
+
 # Die Marke aus preupgrade.sh geht ZULETZT weg - erst danach duerfen die
 # Plugin-Seite und der Minutentakt wieder schreiben. Sie hier zu entfernen und
 # nicht schon in postinstall.sh ist Absicht: postinstall.sh laeuft vor diesem
@@ -195,5 +258,20 @@ if [ -f "$MARKE" ]; then
         echo "<WARNING> Die Marke $MARKE liess sich nicht entfernen."
         echo "<WARNING> Sie verfaellt von selbst eine Stunde nach ihrer Entstehung."
     fi
+fi
+
+# Die Befehlsbruecke starten (seit 1.9.32, E-E5) - erst jetzt, nach dem
+# Entfernen der Marke (solange sie liegt, startet sie nicht). befehlsbruecke.sh
+# startet nur mit den Haken "Befehle ueber MQTT annehmen" und "Werte ueber MQTT
+# veroeffentlichen"; ein ausgelassener Start holt der Waechter im Minutentakt
+# binnen 60 s nach.
+BBSH="$BASE/bin/plugins/$PFOLDER/befehlsbruecke.sh"
+if [ -f "$BBSH" ]; then
+    BB_AUS=$(timeout 40 bash "$BBSH" start 2>&1 | head -n 1)
+    case "$BB_AUS" in
+        *gestartet*|*laeuft*) echo "<OK> Befehlsbruecke: $BB_AUS" ;;
+        "Haken aus - kein Start.") echo "<INFO> Befehlsbruecke: aus (Reiter MQTT, Haken 'Befehle ueber MQTT annehmen')." ;;
+        *) echo "<WARNING> Befehlsbruecke: $BB_AUS - der Minutentakt versucht es erneut." ;;
+    esac
 fi
 exit 0

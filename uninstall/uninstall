@@ -23,10 +23,25 @@
 #
 # Angefasst wird ausschliesslich die eigene Datei. Ein pauschales rm -rf auf
 # das Konfigurationsverzeichnis traefe alle Plugins.
+#
+# Uninstall-Praefix (A7/E1, seit 1.9.32; am Geraet gemessen 08.10.2026,
+# plugininstall.pl :1570/:1603): beim Deinstallieren ruft der Installer JEDES
+# data/system/uninstall/<name>* - auch dieses Skript, wenn ein Plugin
+# deinstalliert wird, dessen NAME ein Praefix von "actikamera" ist; $2 ist dann
+# DESSEN Name. Dann gehoert der Lauf nicht uns: nichts tun. Bis 1.9.31 haette
+# das die Zweitschrift dieser Anlage geloescht (Befund E1). Bauart Ferien
+# 1.2.29 / APC-UPS NG 1.2.24.
+if [ -n "${2:-}" ] && [ "${2:-}" != "actikamera" ] && [ "${2:-}" != "$(basename "$0")" ]; then
+    echo "<INFO> ACTi Kamera: aufgerufen fuer das Plugin '${2:-}', nicht fuer actikamera - nichts angefasst."
+    exit 0
+fi
 ARGV3=$3
 ARGV5=$5
 PFOLDER="${ARGV3:-actikamera}"
 BASE="${ARGV5:-$LBHOMEDIR}"
+case "$PFOLDER" in
+    ''|*/*|.|..) echo "<FAIL> Unzulaessiger Ordnername '$PFOLDER' - nichts geloescht."; exit 1 ;;
+esac
 # Die LoxBerry-Wurzel. Der Installer uebergibt sie als fuenftes Argument;
 # $LBHOMEDIR gilt nur mit config/plugins UND data/plugins darunter. Sonst wird
 # vom eigenen Ablageort aufwaerts gesucht, und Wurzel ist nur, was
@@ -72,9 +87,64 @@ fi
 # nichts bestaetigt; cam_mqtt_leeren() fragt deshalb vorher und nach jeder
 # Runde den Broker (hoechstens drei Runden). VOR dem Loeschen der Ordner,
 # denn Praefix und Port stehen in der Konfiguration.
+# Seit 1.9.32 (A7): als loxberry, wenn dieses Skript als root laeuft (es
+# liest und sendet nur), und hoechstens 120 s - bis 1.9.31 lief es als root und
+# ohne Frist (Bauart Marstek 1.1.28).
+#
+# Davor die Befehlsbruecke (seit 1.9.32, E-E5; Bauart Ferien 1.2.29): anhalten
+# (stop beendet Dienst und mosquitto_sub, auch ein verwaistes), argumentweise
+# nachzaehlen, die Optionsdateien mit dem Broker-Kennwort ueberschreiben und
+# den Ordner befehle/ entfernen. Im Broker bleibt nichts: Quittungen und
+# status/befehle sind nie zurueckbehalten.
+BBSH="$BASE/bin/plugins/$PFOLDER/befehlsbruecke.sh"
+BBPHP="$BASE/bin/plugins/$PFOLDER/befehlsbruecke.php"
+BBDIR="$BASE/data/plugins/$PFOLDER/befehle"
+if [ -f "$BBSH" ]; then
+    timeout 40 bash "$BBSH" stop
+fi
+BB_REST=0
+for d in /proc/[0-9]*; do
+    mapfile -d '' -t a 2>/dev/null < "$d/cmdline" || continue
+    if [ "${#a[@]}" -eq 2 ] && [ "${a[1]}" = "$BBPHP" ] && [[ "${a[0]}" =~ (^|/)php[0-9.]*$ ]]; then
+        kill -9 "${d#/proc/}" 2>/dev/null
+        BB_REST=$((BB_REST + 1))
+    fi
+done
+BB_ABOS=0
+for d in /proc/[0-9]*; do
+    read -r c 2>/dev/null < "$d/comm" || continue
+    [ "$c" = "mosquitto_sub" ] || continue
+    mapfile -d '' -t e 2>/dev/null < "$d/environ" || continue
+    for x in "${e[@]}"; do
+        if [ "$x" = "XDG_CONFIG_HOME=$BBDIR/mosquitto" ]; then kill -9 "${d#/proc/}" 2>/dev/null; BB_ABOS=$((BB_ABOS + 1)); fi
+    done
+done
+[ "$BB_REST" -gt 0 ] && echo "<WARNING> Befehlsbruecke: $BB_REST Dienst(e) erst mit kill -9 beendet."
+[ "$BB_ABOS" -gt 0 ] && echo "<WARNING> Befehlsbruecke: $BB_ABOS mosquitto_sub erst mit kill -9 beendet."
+if [ -d "$BBDIR" ]; then
+    for f in "$BBDIR/mosquitto/mosquitto_sub" "$BBDIR/mosquitto/mosquitto_pub"; do
+        if [ -f "$f" ]; then
+            n=$(stat -c %s "$f" 2>/dev/null || echo 64)
+            head -c "$n" /dev/zero > "$f" 2>/dev/null
+        fi
+    done
+    rm -rf "${BBDIR:?}"
+fi
+if [ -e "$BBDIR/mosquitto/mosquitto_sub" ] || [ -e "$BBDIR/mosquitto/mosquitto_pub" ]; then
+    echo "<WARNING> Befehlsbruecke: Optionsdateien liegen noch unter $BBDIR/mosquitto - von Hand entfernen."
+elif [ -f "$BBSH" ]; then
+    echo "<OK> Befehlsbruecke angehalten, ihre Zugangsdaten entfernt."
+fi
+
 LAUF="$BASE/bin/plugins/$PFOLDER/cam_cron.php"
 if [ -f "$LAUF" ] && command -v php >/dev/null 2>&1; then
-    LBHOMEDIR="$BASE" LBPPLUGINDIR="$PFOLDER" php "$LAUF" --mqtt-leeren 2>&1
+    if [ "$(id -u)" = "0" ] && id loxberry >/dev/null 2>&1; then
+        su -s /bin/bash loxberry -c "$(printf '%q ' env "LBHOMEDIR=$BASE" "LBPPLUGINDIR=$PFOLDER" \
+            timeout -k 5 120 php "$LAUF" --mqtt-leeren)" < /dev/null 2>&1 || true
+    else
+        env "LBHOMEDIR=$BASE" "LBPPLUGINDIR=$PFOLDER" timeout -k 5 120 php "$LAUF" --mqtt-leeren \
+            < /dev/null 2>&1 || true
+    fi
 else
     echo "<INFO> cam_cron.php oder php fehlt - zurueckbehaltene MQTT-Themen wurden nicht geleert."
 fi
@@ -161,5 +231,16 @@ fi
 DATA="$BASE/data/plugins/$PFOLDER.archiv"
 if [ -d "$DATA" ]; then
     echo "<INFO> Die Aufnahmen unter $DATA bleiben erhalten und koennen von Hand geloescht werden."
+fi
+# Der Zwischenspeicher /tmp/<ordner> (Merker ptest, letzte<n>.txt,
+# mqtt_letzte.json, Sperren; seit 1.9.32 aus dem Ordnernamen, A8). $PFOLDER
+# hat die Wache oben bestanden (kein Schraegstrich, nicht leer, nicht . oder ..).
+if [ -d "/tmp/$PFOLDER" ] && [ ! -L "/tmp/$PFOLDER" ]; then
+    rm -rf "/tmp/${PFOLDER:?}" 2>/dev/null
+    if [ -e "/tmp/$PFOLDER" ]; then
+        echo "<WARNING> Der Zwischenspeicher /tmp/$PFOLDER liess sich nicht entfernen."
+    else
+        echo "<OK> Zwischenspeicher /tmp/$PFOLDER entfernt."
+    fi
 fi
 exit 0
