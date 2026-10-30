@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.33 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.34 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -12,6 +12,17 @@ in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxo
 nur noch `cam.php?foto=1&token=…` auf; die Zugangsdaten bleiben auf dem LoxBerry.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
+
+## Neu in 1.9.34
+
+Pflegefassung der Nachtwelle (29.10.2026), ohne neue Funktion und ohne Änderung am Verhalten:
+
+* **Befehlsbrücke 1.0.2** (gemeinsame Stammfassung). Die Vorlage der MQTT-Befehle (`VQ_actikamera.xml`) baut das Plugin selbst; sie hatte schon
+  Windows-Zeilenenden (CRLF). Ein Neuimport ist nicht nötig.
+* **Reiter Test, neue Zeile „Gateway V2: sind alle Datenpunkte der Hakenliste angehakt?“** Unter MQTT-Gateway V2
+  liest das Plugin `config/system/subscriptions.json` und nennt jeden Datenpunkt der Hakenliste (Reiter MQTT),
+  der dort nicht angehakt ist, und jeden, bei dem „Noncached“ nicht stimmt (`OK` und `ERREICHBAR` brauchen es, die übrigen nicht).
+  Unter Gateway V1 und bei ausgeschalteter MQTT-Veröffentlichung heißt die Zeile „trifft nicht zu“.
 
 ## Neu in 1.9.33
 
