@@ -387,6 +387,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ptestnow'])) {
 }
 /* Der HTTP-Lesezweig fuer Loxone (seit 1.9.32, E-E12): eigenes Formular im
    Reiter Einbindung, Abschnitt "Bestehende Anlagen". */
+/* 1.9.35: Sprachansagen, eigenes Formular, eigene Datei. Die Testansage spricht immer. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ansage_test'])) {
+    list($ac_at, $ac_ag) = cam_ansage_test();
+    if ($ac_at) { $ac_saved = true; $ac_note = cam_t('ANSAGEPLUGIN.M_TEST_OK'); } else { $ac_err = cam_t('ANSAGEPLUGIN.M_TEST_FEHL') . ' ' . $ac_ag; }
+    $ac_tab = 'tab-settings';
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ansage_speichern'])) {
+    list($ac_ao, $ac_af, $ac_ah) = cam_ansage_post($_POST);
+    if ($ac_af) { $ac_err = implode(' ', $ac_af); }
+    elseif ($ac_ao) { $ac_saved = true; $ac_note = trim(cam_t('ANSAGEPLUGIN.M_OK') . ' ' . implode(' ', $ac_ah)); }
+    else { $ac_err = cam_t('ANSAGEPLUGIN.M_FEHL'); }
+    $ac_tab = 'tab-settings';
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_endpunkt'])) {
     $ac_ep = cam_config();
     $ac_ep['endpunkt_ein'] = isset($_POST['endpunkt_ein']) ? 1 : 0;
@@ -760,7 +773,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_sichern'])) {
     if ($ac_x3) {
         $ac_kopf['_warnung'] = sprintf(cam_t('TEXT.SICH_X3_KOPF'), implode(', ', $ac_x3));
     }
-    $cam_js = json_encode($ac_kopf + cam_config(),
+    $cam_js = json_encode($ac_kopf + cam_ansage_fuer_sicherung(cam_config()),     // 1.9.35: nie ein Sprechtoken
         JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($cam_js !== false) {
         header('Content-Type: application/json; charset=utf-8');
@@ -929,6 +942,7 @@ if ($ac_rahmen) {
    Hier stand bis 1.9.16 ein Uebersetzungsaufruf mitten im CSS-Kommentar:
    der Schluesselpruefer hielt den Schluessel fuer benutzt, und ein Wert mit
    Stern-Schraegstrich haette den ganzen Stilblock beendet. */
+.acw .sm-hilfe { font-size: 0.85em; color: #555; margin: 4px 0 0; max-width: 640px; }
 .acw .sm-h3 { color: #4f7d17; font-size: 1.0em; font-weight: 700; margin: 16px 0 2px; }
 .acw .sm-knopfreihe { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 4px; align-items: stretch; }
 .acw .sm-knopfreihe form { margin: 0; display: flex; }
@@ -1408,6 +1422,7 @@ foreach ($ac_zeigen as $ac_i):
 </form>
 <?php $ac_cfg = $ac_cfg_gespeichert; $ac_notify = $ac_notify_gespeichert; ?>
 
+<?= cam_ansage_form_html('<input data-role="none" type="hidden" name="formtoken" value="' . ac_e(cam_formtoken()) . '"><input data-role="none" type="hidden" name="activetab" value="tab-settings">') ?>
 <h2><?= cam_t('TEXT.H_SICHERUNG') ?></h2>
 <div class="sm-hinweis"><?= cam_t('TEXT.SICH_ERKLAERUNG') ?></div>
 <div class="sm-warnung"><?= cam_t('TEXT.SICH_WARNUNG') ?></div>

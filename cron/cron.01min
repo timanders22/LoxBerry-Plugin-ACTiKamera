@@ -25,6 +25,10 @@ if [ -f "REPLACELBPBINDIR/cam_cron.php" ]; then
     tail -n 300 "$ERR" > "$ERR.neu" 2>/dev/null && mv -f "$ERR.neu" "$ERR"
   fi
   touch "$ERR" 2>/dev/null
+  # 1.9.35 (Nachzug 01.11.2026, Bauart Renault NG 2.1.23): ist die Fehlerdatei nicht schreibbar, braeche die
+  # Umlenkung den Befehl ab, BEVOR er startet - bis 1.9.34 kein Lauf und keine Spur. Dann geht die Fehlerausgabe
+  # nach /dev/null, und der Lauf findet statt.
+  [ -f "$ERR" ] && [ -w "$ERR" ] || ERR=/dev/null
   if command -v su >/dev/null 2>&1 && [ "$(id -u)" = "0" ]; then
     su loxberry -s /bin/sh -c '/usr/bin/php "REPLACELBPBINDIR/cam_cron.php"' >/dev/null 2>>"$ERR"
   else

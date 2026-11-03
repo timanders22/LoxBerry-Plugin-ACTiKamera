@@ -115,7 +115,8 @@ if (function_exists('cam_upgrade_laeuft') && cam_upgrade_laeuft()) {
     exit(0);
 }
 
-$cfg = cam_config();
+/* bis 1.9.34 hiess dieses Feld $cfg: das LoxBerry-SDK ueberschreibt ein globales $cfg beim ersten Lesen von general.json (Ausfall MGiSmart 01.11.2026). */
+$ac_lauf_cfg = cam_config();
 $p = cam_paths();
 if (!is_dir($p['tmp'])) {
     @mkdir($p['tmp'], 0775, true);
@@ -166,8 +167,8 @@ function cam_faellig($merkerdatei, $soll_min, $jetzt_min, $heute)
 }
 
 /* ---------------- Zeitraffer ---------------- */
-if (!empty($cfg['timelapse']) && preg_match('/^\d{1,2}:\d{2}$/', (string) $cfg['timelapse_time'])) {
-    $t = array_map('intval', explode(':', (string) $cfg['timelapse_time']));
+if (!empty($ac_lauf_cfg['timelapse']) && preg_match('/^\d{1,2}:\d{2}$/', (string) $ac_lauf_cfg['timelapse_time'])) {
+    $t = array_map('intval', explode(':', (string) $ac_lauf_cfg['timelapse_time']));
     $soll_min = min(23, $t[0]) * 60 + min(59, $t[1]);
     /* Je Kamera ein eigener Merker: faellt eine Kamera aus, soll die andere
        ihr Zeitrafferbild trotzdem bekommen. */
@@ -213,7 +214,7 @@ cam_livebild_reste();
  * Strecke nicht jede Minute angefasst wird. Gemerkt wird der Zeitpunkt in
  * derselben Zustandsdatei - ein eigener Merker unter /tmp waere nach jedem
  * Neustart weg, und die Pruefung liefe dann oefter als eingestellt. */
-$ac_takt = max(0, (int) $cfg['pruef_minuten']);
+$ac_takt = max(0, (int) $ac_lauf_cfg['pruef_minuten']);
 if ($ac_takt > 0) {
     foreach (cam_kameras() as $ac_id) {
         $ac_b = cam_betrieb($ac_id);

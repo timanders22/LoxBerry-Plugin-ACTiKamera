@@ -53,7 +53,8 @@ return array(
                      'eingreifend' => false,
                      'mqtt_ein'    => !empty($c['mqtt_enabled']));
     },
-    'protokoll' => function ($stufe, $text) { cam_log('Befehlsbruecke: ' . ($stufe === 'INFO' ? '' : $stufe . ': ') . $text); },
+    // 1.9.35: bb_log() setzt "Befehlsbruecke: " schon vor den Text - bis 1.9.34 stand es doppelt (Nachzug 01.11.2026, wie MGiSmart 1.1.30).
+    'protokoll' => function ($stufe, $text) { cam_log(($stufe === 'INFO' ? '' : $stufe . ': ') . $text); },
     'befehle' => array(
         'foto' => array('art' => 'auswahl', 'werte' => $ac_anlaesse, 'eingreifend' => false,
             'sperre_s' => 5, 'begruendung' => 'Klingel: ein zweites Klingeln nach 5 s soll ein zweites Bild bekommen; bremsen tut die Mindestpause im Plugin',

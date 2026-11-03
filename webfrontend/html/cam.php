@@ -73,7 +73,9 @@ function ac_weg($text)
  * Abweisung wie sonst auch; der Selbsttest ist keine Abkuerzung an der
  * Sicherheit vorbei.
  */
-if (isset($_GET['selftest'])) {
+/* 1.9.35 (Nachzug 01.11.2026, wie Renault NG 2.1.23): !empty statt isset - bis 1.9.34 galt auch ?selftest=0 und ?selftest= als Selbsttest,
+ * und eine Adresse mit diesem Anhang tat nie etwas anderes. */
+if (!empty($_GET['selftest'])) {
     header('Content-Type: text/plain; charset=utf-8');
     $ac_fehl = cam_token_pruefen(ac_get('token'));
     if ($ac_fehl === '') {
