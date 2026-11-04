@@ -1991,7 +1991,7 @@ function cam_ansage_token_pflegen($cfg = null)
 function cam_ansage_vor_ort($cfg = null)
 {
     if ($cfg === null) { $cfg = cam_ansage_cfg(); }
-    return ansage_token_fuer_lauf(cam_tts($cfg), isset($cfg['ansage_token_herkunft']) ? $cfg['ansage_token_herkunft'] : array(), cam_ansage_k());
+    return ansage_tafel_einreihen(ansage_token_fuer_lauf(cam_tts($cfg), isset($cfg['ansage_token_herkunft']) ? $cfg['ansage_token_herkunft'] : array(), cam_ansage_k()), cam_ansage_regeln($cfg), cam_ansage_k(), true);     // Stamm 1.4.0: die Tafel, wenn sie bereitsteht
 }
 
 /** Der Block fuer die Pruefzeile: nur die eingerichteten Ziele; ist keines eingerichtet, sagt die Zeile "aus" statt eines Kreuzes. */
@@ -3632,7 +3632,7 @@ function cam_test($id = 1)
     list($body, $weg, $err) = cam_fetch_jpeg($id);
     $ms = round((microtime(true) - $start) * 1000);
     if ($body === false || $body === '') {
-        return 'FEHLER: ' . ($err !== '' ? $err : 'keine Antwort')
+        return 'FEHLER: ' . ($err !== '' ? $err : cam_t('TEST.E_KEINE_ANTWORT'))
              . ' - Adresse, Benutzer und Passwort pruefen. Der Knopf "Diagnose" '
              . 'probiert alle Befehls- und Anmeldevarianten durch.';
     }
