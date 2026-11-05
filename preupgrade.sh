@@ -15,6 +15,10 @@
 ARGV3=$3
 ARGV5=$5
 PFOLDER="${ARGV3:-actikamera}"
+# 05.11.2026: ein Ordnername mit "/" oder "." waere ein Pfad hinaus (dieselbe Formel wie MGiSmart und Govee).
+case "$PFOLDER" in
+    ''|.|..|*/*) echo "<FAIL> Unbrauchbarer Ordnername '$PFOLDER' - nichts angefasst."; exit 2 ;;
+esac
 BASE="${ARGV5:-$LBHOMEDIR}"
 
 # Die LoxBerry-Wurzel. Der Installer uebergibt sie als fuenftes Argument;
@@ -49,7 +53,7 @@ if [ -z "$BASE" ]; then
     echo "<WARNING> fuenftes Argument noch in \$LBHOMEDIR, und oberhalb dieses Skripts"
     echo "<WARNING> traegt kein Verzeichnis config/plugins, data/plugins und"
     echo "<WARNING> config/system/general.json. Es wurde nichts gesichert."
-    exit 1
+    exit 2
 fi
 
 # 0. Die Marke "Aktualisierung laeuft" - als ERSTES, vor jedem anderen
@@ -123,12 +127,36 @@ if [ -e "$SICHER" ] || [ -L "$SICHER" ]; then
 fi
 mkdir -p "$SICHER"
 chmod 0700 "$SICHER" 2>/dev/null
+# ---------- Update-Schutz (05.11.2026, Bauart Govee 0.9.34) ----------
+# plugininstall.pl bricht nur bei Rueckgabewert >1 vor purge_installation ab. Die Kopie entsteht als <Ziel>.neu.<pid>, traegt 0600,
+# BEVOR Inhalt hineinkommt, wird mit cmp verglichen und erst dann per mv an ihren Platz gestellt: eine heile Sicherung bleibt heil.
+ZS_FEHL=""
+zs_hinlegen() {   # $1 Quelle, $2 Ziel
+    [ -d "$2" ] && return 1
+    zs_neu="$2.neu.$$"
+    rm -f "$zs_neu" 2>/dev/null
+    if { : > "$zs_neu"; } 2>/dev/null && chmod 600 "$zs_neu" 2>/dev/null \
+       && cp "$1" "$zs_neu" 2>/dev/null && cmp -s "$1" "$zs_neu" \
+       && mv -f "$zs_neu" "$2" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "$zs_neu" 2>/dev/null
+    return 1
+}
+zs_schluss() {   # Fehlschlag gesammelt: Marke weg, Abbruch vor purge_installation
+    [ -n "$ZS_FEHL" ] || return 0
+    echo "<FAIL> Nicht gesichert:$ZS_FEHL - die Aktualisierung wird abgebrochen, damit der Purge die Originale nicht loescht."
+    echo "<FAIL> Die bisherige Fassung bleibt installiert. Bitte Platz und Rechte unter config/plugins und data/plugins pruefen."
+    [ "$AC_MARKE_VORHER" = 1 ] || rm -f "$MARKE" 2>/dev/null
+    exit 2
+}
 
 # 1. Konfiguration
 if [ -f "$BASE/config/plugins/$PFOLDER/cam.json" ]; then
-    cp -p "$BASE/config/plugins/$PFOLDER/cam.json" "$SICHER/cam.json" \
-        && chmod 0600 "$SICHER/cam.json" \
-        || echo "<WARNING> Die Konfiguration konnte nicht gesichert werden."
+    if ! zs_hinlegen "$BASE/config/plugins/$PFOLDER/cam.json" "$SICHER/cam.json"; then
+        echo "<WARNING> Die Konfiguration konnte nicht gesichert werden."
+        ZS_FEHL="$ZS_FEHL cam.json"
+    fi
 fi
 # Seit 1.9.32 (E-E11): neue Anlagen senden ab Werk ueber MQTT; eine bestehende
 # bleibt, wie sie ist. Ist MQTT hier aus (oder fehlt der Schluessel in einer
@@ -163,6 +191,7 @@ fi
 # 3. Aufnahmen aus dem Verzeichnis holen, das der Installer gleich abraeumt.
 #    Dies ist der EINZIGE Zeitpunkt, zu dem sie noch da sind: postinstall.sh
 #    laeuft erst danach, und dann ist data/plugins/<ordner>/ leer.
+zs_schluss
 ALT="$BASE/data/plugins/$PFOLDER"
 NEU="$BASE/data/plugins/$PFOLDER.archiv"
 if [ -d "$ALT" ]; then
