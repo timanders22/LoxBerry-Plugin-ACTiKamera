@@ -115,6 +115,13 @@ if (function_exists('cam_upgrade_laeuft') && cam_upgrade_laeuft()) {
     exit(0);
 }
 
+/* Seit 1.9.41 (Regeln/05): fehlende Vorgaben einmal in cam.json schreiben -
+ * vor dem ersten Lesen der Konfiguration in diesem Lauf. Schreibt nur, wenn
+ * etwas fehlt, und nur in eine eingerichtete Datei mit Aktionstoken. */
+if (function_exists('cam_config_vervollstaendigen')) {
+    cam_config_vervollstaendigen();
+}
+
 /* bis 1.9.34 hiess dieses Feld $cfg: das LoxBerry-SDK ueberschreibt ein globales $cfg beim ersten Lesen von general.json (Ausfall MGiSmart 01.11.2026). */
 $ac_lauf_cfg = cam_config();
 $p = cam_paths();

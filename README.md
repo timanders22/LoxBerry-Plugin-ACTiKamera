@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.40 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.41 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -12,6 +12,11 @@ in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxo
 nur noch `cam.php?foto=1&token=…` auf; die Zugangsdaten bleiben auf dem LoxBerry.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
+
+## Neu in 1.9.41
+
+- **Konfiguration wird nach einem Update vervollständigt:** Fehlen in `cam.json` Einstellungen, die eine neuere Fassung mitbringt, trägt der Minutentakt (`bin/cam_cron.php`) sie jetzt einmal in die Datei ein, vor dem ersten Lesen der Konfiguration; das Protokoll `cam.log` nennt die ergänzten Namen, keine Werte. Bisher ergänzte das Plugin fehlende Einstellungen nur beim Lesen; in die Datei kamen sie erst beim nächsten Speichern im Formular. Für `endpunkt_ein` und `mqtt_enabled` gilt dabei wie bisher die Regel für Bestandsdateien (1 bzw. 0), nicht die Vorgabe einer Neuinstallation.
+- Geschrieben werden die Werte aus der Datei, wie sie dort stehen, plus die fehlenden Vorgaben; Schlüssel, die das Plugin nicht kennt, bleiben stehen. Leere Objekte (`{}`) bleiben dabei leere Objekte, oben wie verschachtelt, und werden nicht zu einer leeren Liste (`[]`). Die Zweitschrift zieht mit, der Merker der Selbstheilung im Reiter Test bleibt stehen. Nicht angefasst werden eine fehlende oder unlesbare `cam.json`, eine ohne Aktionstoken, eine, in der außer den selbst erzeugten Token noch nichts gespeichert wurde, und jede Datei während einer Aktualisierung. Gemessen im Prüfstand auf dem Arbeitsrechner unter PHP 7.4 und 8.4; am Gerät ist es noch nicht gemessen.
 
 ## Neu in 1.9.40
 

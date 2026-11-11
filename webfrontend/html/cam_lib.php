@@ -981,7 +981,10 @@ function cam_datei_schreiben($pfad, $inhalt, $rechte = null)
     return true;
 }
 
-function cam_config_save(array $cfg)
+/* $quittieren = false (seit 1.9.41) nur fuer cam_config_vervollstaendigen():
+   das Nachtragen fehlender Vorgaben ist kein ausdrueckliches Speichern und
+   darf den Merker der Selbstheilung nicht quittieren. */
+function cam_config_save(array $cfg, $quittieren = true)
 {
     $p = cam_paths();
     if (!is_dir(dirname($p['config']))) {
@@ -1006,7 +1009,7 @@ function cam_config_save(array $cfg)
     }
     /* Ein ausdrueckliches Speichern quittiert den Merker der Selbstheilung
        (Reiter Test, Zeile "Konfiguration heil"). */
-    if (is_file(cam_heil_merker())) {
+    if ($quittieren && is_file(cam_heil_merker())) {
         @unlink(cam_heil_merker());
     }
     /* Die Zweitschrift wird NIE durch einen Stand ersetzt, der weniger
@@ -1034,6 +1037,102 @@ function cam_config_save(array $cfg)
         cam_selbstheilung($ac_alt);
     }
     return true;
+}
+
+/** Leere Objekte des Rohtextes ($o, json_decode ohne true) im Feld $a wieder als Objekt fuehren (11.11.2026),
+ *  damit json_encode() sie als {} und nicht als [] schreibt - oben wie verschachtelt, auch unter fremden
+ *  Schluesseln. Nur fuer cam_config_vervollstaendigen(); das Speichern im Formular bleibt, wie es ist.
+ *  Bauart Bewaesserung 0.9.56 (bw_json_leere_objekte()). */
+function cam_json_leere_objekte($a, $o)
+{
+    if (!is_array($a)) { return $a; }
+    if (is_object($o)) {
+        if (!get_object_vars($o) && $a === array()) { return new stdClass(); }
+        foreach ($a as $k => $v) {
+            $ks = (string) $k;
+            if (is_array($v) && property_exists($o, $ks)) { $a[$k] = cam_json_leere_objekte($v, $o->$ks); }
+        }
+    } elseif (is_array($o)) {
+        foreach ($a as $k => $v) {
+            if (is_array($v) && array_key_exists($k, $o)) { $a[$k] = cam_json_leere_objekte($v, $o[$k]); }
+        }
+    }
+    return $a;
+}
+
+/**
+ * Konfiguration vervollstaendigen (seit 1.9.41, Regeln/05 "Die Konfiguration
+ * wird vervollstaendigt, nicht nur ergaenzt"; Bauform Docker NG 1.3.7).
+ *
+ * Bis 1.9.40 ergaenzte cam_config() fehlende Schluessel bei jedem Lesen nur
+ * im Speicher; in cam.json kamen sie erst mit dem naechsten Speichern im
+ * Formular. Aufgerufen vom Minutentakt (bin/cam_cron.php) vor dem ersten
+ * Lesen der Konfiguration; weil nur bei FEHLENDEN Schluesseln geschrieben
+ * wird, bleibt es bei einem Schreibvorgang.
+ *
+ * - Nur wenn cam.json ein Objekt ist, das Merkwort (Aktionstoken) traegt und
+ *   eingerichtet ist (cam_config_eingerichtet()): eine fehlende, kaputte oder
+ *   nur vom Oeffnen der Seite stammende Datei ist Sache der Selbstheilung
+ *   bzw. des ersten Speicherns. Sonst galte eine Anlage, in der niemand etwas
+ *   gewaehlt hat, als eingerichtet, und die Bereinigung liefe mit den
+ *   Vorgabetagen (siehe cam_cron.php, Archiv-Bereinigung).
+ * - Geschrieben werden die WERTE AUS DER DATEI, nicht die von cam_config()
+ *   aufbereiteten; fremde Schluessel bleiben stehen. Fehlende Schluessel
+ *   bekommen den Wert, den auch cam_config() liest: erst die Lese-Regel fuer
+ *   Bestandsdateien (cam_uebergang()), dann die Vorgaben - sonst schaltete
+ *   das Nachtragen von endpunkt_ein = 0 den Lesezweig einer Bestandsanlage
+ *   still ab.
+ * - Geschrieben wird ueber cam_config_save() (0600, Zweitschrift wie beim
+ *   Speichern), ohne den Merker der Selbstheilung zu quittieren.
+ * - Genau eine Protokollzeile mit den Namen, nie mit Werten.
+ *
+ * Rueckgabe: array('stand' => ruht|ohne_datei|ohne_merkwort|nicht_eingerichtet
+ *                  |vollstaendig|ergaenzt|fehler, 'schluessel' => array(...))
+ */
+function cam_config_vervollstaendigen()
+{
+    if (!cam_selbstheilung() || cam_upgrade_laeuft()) {
+        return array('stand' => 'ruht', 'schluessel' => array());
+    }
+    $p = cam_paths();
+    clearstatcache(true, $p['config']);
+    if (!is_file($p['config'])) {
+        return array('stand' => 'ohne_datei', 'schluessel' => array());
+    }
+    $roh = @file_get_contents($p['config']);
+    $datei = is_string($roh) ? json_decode($roh, true) : null;
+    if (!is_array($datei) || !cam_hat_token($datei)) {
+        return array('stand' => 'ohne_merkwort', 'schluessel' => array());
+    }
+    // Ein leeres Objekt der Datei ({}) bliebe nach json_decode(..., true) ein leeres Feld und kaeme beim
+    // Schreiben als [] zurueck - der Rohwert wird erhalten, bevor ergaenzt wird (11.11.2026).
+    $datei = cam_json_leere_objekte($datei, json_decode($roh));
+    if (!cam_config_eingerichtet()) {
+        return array('stand' => 'nicht_eingerichtet', 'schluessel' => array());
+    }
+    $soll = cam_uebergang($datei) + cam_alle_vorgaben();
+    $fehlend = array();
+    foreach ($soll as $k => $w) {
+        if (!array_key_exists($k, $datei)) {
+            if ($k === 'notify') {
+                // dieselben Unterschluessel, die cam_config() beim Lesen ergaenzt
+                $w = (is_array($w) ? $w : array()) + array('push' => 1, 'push_minutes' => 2);
+            }
+            $datei[$k] = $w;
+            $fehlend[] = $k;
+        }
+    }
+    if (!$fehlend) {
+        return array('stand' => 'vollstaendig', 'schluessel' => array());
+    }
+    if (!cam_config_save($datei, false)) {
+        cam_log('Konfiguration NICHT vervollstaendigt: cam.json liess sich nicht schreiben ('
+            . count($fehlend) . ' fehlende Schluessel).');
+        return array('stand' => 'fehler', 'schluessel' => $fehlend);
+    }
+    cam_log('Konfiguration vervollstaendigt - ' . count($fehlend)
+        . ' fehlende Vorgaben in cam.json geschrieben: ' . implode(', ', $fehlend));
+    return array('stand' => 'ergaenzt', 'schluessel' => $fehlend);
 }
 
 /**
