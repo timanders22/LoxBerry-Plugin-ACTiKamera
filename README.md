@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.41 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.42 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -12,6 +12,21 @@ in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxo
 nur noch `cam.php?foto=1&token=…` auf; die Zugangsdaten bleiben auf dem LoxBerry.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
+
+## Neu in 1.9.42
+
+- **Verhalten geändert – Einstellungen sichern und zurückspielen über das gemeinsame Sicherungsmodul (Fassung 1.2.3):** Die Knöpfe im Reiter *Einstellungen* arbeiten jetzt mit dem gemeinsamen Sicherungsmodul. Für den Anwender ändert sich:
+  - Die Sicherungsdatei trägt im Kopf das Kennzeichen `_plugin` = `LoxBerry-Plugin-ACTiKamera` und die Fassung (`_fassung`). Bis 1.9.41 stand dort „ACTi Kamera (<Ordner>), Fassung …“; solche Sicherungen (1.9.23 bis 1.9.41) werden weiter angenommen. Eine Datei eines anderen Plugins und eine Datei ohne Kennzeichen werden als Ganzes abgewiesen; bis 1.9.41 wurden sie gelesen wie eine eigene. Sicherungen von 1.9.14 bis 1.9.22 hatten keinen Kopf; sie lassen sich von einer fremden Datei nicht sicher unterscheiden und werden seit dieser Fassung abgewiesen.
+  - Eine Einstellung, die diese Fassung nicht kennt, wird nicht übernommen und mit ihrem Namen gemeldet, nie mit ihrem Wert – oben in der Datei und in den Blöcken (Benachrichtigung, Sprachansagen, Ansageregeln, Ansageanlässe). Die übrigen Einstellungen werden zurückgespielt. Bis 1.9.41 wies ein unbekannter Name die ganze Datei ab.
+  - Ein leerer Wert in der Sicherung überschreibt keinen bestehenden; der bisherige Wert bleibt, und die Meldung nennt den Namen. Bis 1.9.41 galt das nur für die Token; ein anderer leerer Wert, der nicht leer sein darf, wies die ganze Datei ab.
+  - Einträge in `cam.json`, die dieses Plugin nicht kennt (etwa aus einer Bearbeitung von Hand), bleiben beim Zurückspielen nicht mehr stehen; bis 1.9.41 blieben sie erhalten.
+  - Fehlt einer Sicherung eine Einstellung, die ihre Fassung noch nicht kannte (die Felder einer Kamera, `endpunkt_ein`, `befehle_mqtt_ein`, die Sprachansagen), behält sie wie bisher ihren geltenden Wert; die Meldung nennt sie jetzt. Fehlt eine Einstellung, die jede Fassung mit Kopf geschrieben hat, wird die Datei wie bisher mit ihrem Namen abgewiesen.
+  - Zwischen dem Feld für die Sicherungsdatei und dem Knopf „Zurückspielen“ steht ein Haken „Ja, die geltenden Einstellungen durch die Sicherung ersetzen“, ab Werk aus. Ohne ihn wird die Datei nicht gelesen und nichts geändert, und die Meldung sagt es.
+  - Nach dem Zurückspielen sagt die Meldung, dass der Minutentakt ab seinem nächsten Lauf mit den zurückgespielten Einstellungen arbeitet.
+  - Unverändert: Jeder Wert wird geprüft wie bisher; eine Datei mit einem unzulässigen Wert ändert gar nichts, und alle Beanstandungen werden genannt. Kamerakennwort, Aktionstoken, Auslöse- und Stromtoken gehören in die Datei, die Sprechtoken nicht; eine Datei mit Sprechtoken wird abgewiesen, die geltenden bleiben. Die Datei darf höchstens 256 KB groß sein. Nach dem Zurückspielen wird zurückgelesen, die Zweitschrift zieht mit, und wie beim Speichern im Reiter MQTT wird bei einem Präfixwechsel abgeräumt und die Befehlsbrücke geschaltet. Würde das Zurückspielen die eigene Sicherung abweisen, sagen das der Reiter und der Kopf der Datei mit den Namen der Einstellungen.
+- **Der Datenordner übersteht ein Update:** Bei jedem Update löscht LoxBerry den Datenordner des Plugins (`data/plugins/actikamera/`, darin unter anderem die Merker der Retain-Abräumung, das Ergebnis der RTSP-Prüfung und der Merker der Selbstheilung). Das Bildarchiv liegt daneben (`data/plugins/actikamera.archiv`) und ist davon nicht betroffen. Jetzt sichert `preupgrade.sh` über den gemeinsamen Baustein `upgrade_daten.sh` (Fassung 1.0.0) den ganzen Datenordner mit Unterordnern, Rechten und Zeitstempeln neben den Ordner (`data/plugins/actikamera.upgrade_daten/`, Ordner 0700) – ohne Sperr- und PID-Dateien und Sockets – und zählt die Kopie Datei für Datei gegen. `postinstall.sh` spielt als Erstes jede Datei zurück, die nach dem Update fehlt; was die neue Fassung schon angelegt hat, wird nicht überschrieben, und was davon nicht aus dem Archiv stammt, nennt das Installationsprotokoll mit Namen. Danach wird die Sicherung entfernt. Eine Sicherung, die älter als eine Stunde ist, wird nicht eingespielt und bleibt liegen; die Deinstallation räumt sie mit ab. Die bisherigen eigenen Sicherungen in `preupgrade.sh` bleiben, wie sie sind.
+- **Verhalten geändert – lieber kein Update als ein leerer Datenordner:** Lässt sich der Datenordner nicht vollständig sichern (zu wenig Platz, fehlende Rechte, eine unlesbare Datei), meldet `preupgrade.sh` das mit `<FAIL>` und bricht die Aktualisierung ab; die bisherige Fassung bleibt mit ihrem Datenordner installiert.
+- Am Gerät nicht gemessen; geprüft mit einem Prüfstand unter PHP 7.4 und 8.4 auf dem Arbeitsrechner, der über einen Webserver die echten Knöpfe drückt.
 
 ## Neu in 1.9.41
 

@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/sprachausgabe.php';     // Stamm, fuer die Vorgaben der Sprachansagen schon beim ersten Lesen der Konfiguration
+require_once __DIR__ . '/sicherung.php';         // gemeinsames Sicherungsmodul (seit 1.9.42)
 /**
  * ACTi Kamera - gemeinsame Bibliothek
  *
@@ -1815,48 +1816,6 @@ function cam_ansage_wert($k, $w)
     return false;
 }
 
-/** Fuer die Sicherung: nie ein Sprechtoken, nie der Herkunftsvermerk. Ausgabeart, Ziele, Regeln und Haken reisen mit. */
-function cam_ansage_fuer_sicherung(array $c)
-{
-    unset($c['ansage_token_herkunft'], $c['ansage_aus_datei']);
-    if (isset($c['tts']) && is_array($c['tts'])) { $c['tts'] = ansage_sicherung_bereinigen($c['tts']); }
-    return $c;
-}
-
-/**
- * Vor dem Zurueckspielen. Eine Datei mit Sprechtoken wird abgewiesen (der Block wird unbrauchbar gemacht, die Wertpruefung nennt ihn). Die geltenden Token und der Vermerk bleiben.
- * Fehlt ein Schluessel (Sicherung einer aelteren Fassung), gilt der geltende Wert: Ein bewusstes AUS geht beim Zurueckspielen nicht verloren.
- */
-function cam_ansage_sicherung_vor($roh)
-{
-    $d = json_decode((string) $roh, true);
-    if (!is_array($d)) { return $roh; }
-    $inhalt = false;
-    foreach (array_keys($d) as $k) { if ((string) $k !== '' && ((string) $k)[0] !== '_') { $inhalt = true; } }
-    if (!$inhalt) { return $roh; }
-    $j = cam_ansage_cfg();
-    unset($d['ansage_token_herkunft'], $d['ansage_aus_datei']);
-    $jt = isset($j['tts']) && is_array($j['tts']) ? $j['tts'] : array();
-    if (array_key_exists('tts', $d)) {
-        $g = '';
-        $p = is_array($d['tts']) ? ansage_wert_pruefen($d['tts'], $g, cam_ansage_modi()) : null;
-        if (ansage_sicherung_mangel($d['tts']) || $p === null) {
-            $d['tts'] = 'ABGEWIESEN';
-        } else {
-            list($tv) = ansage_vervollstaendigen($p, 'aus');
-            $d['tts'] = ansage_sicherung_tokens_behalten($tv, $jt);
-        }
-    } else {
-        $d['tts'] = cam_tts($j);
-    }
-    foreach (array_diff(cam_ansage_schluessel(), array('tts', 'ansage_token_herkunft', 'ansage_aus_datei')) as $k) {
-        if (!array_key_exists($k, $d) && array_key_exists($k, $j)) { $d[$k] = $j[$k]; }
-    }
-    $d['ansage_token_herkunft'] = isset($j['ansage_token_herkunft']) && is_array($j['ansage_token_herkunft']) ? $j['ansage_token_herkunft'] : array();
-    $d['ansage_aus_datei'] = 1;
-    return (string) json_encode($d);
-}
-
 /**
  * Die Hauptkonfiguration. Liegt eine ansage.json aus einer Probe vom 01.11., wird sie EINMAL uebernommen (Vermerk ansage_aus_datei) und bleibt liegen.
  */
@@ -2381,33 +2340,6 @@ function cam_zugang_entmaske($neu, $alt)
             function ($t) use ($pw) { return $t[1] . ':' . $pw . '@'; }, $neu);
     }
     return (string) $neu;
-}
-
-/**
- * Die eigene Fassung - fuer den Kopf der Sicherung (U14). Installiert aus
- * data/system/plugindatabase.json ueber den Ordnernamen (Regeln/03, die
- * plugin.cfg wird nicht installiert), im Archiv aus der plugin.cfg daneben.
- * '' = nicht feststellbar.
- */
-function cam_fassung()
-{
-    $p = cam_paths();
-    if ($p['lbhome'] !== '') {
-        $db = @json_decode((string) @file_get_contents($p['lbhome'] . '/data/system/plugindatabase.json'), true);
-        $liste = (is_array($db) && isset($db['plugins']) && is_array($db['plugins'])) ? $db['plugins'] : (is_array($db) ? $db : array());
-        foreach ($liste as $e) {
-            if (is_array($e) && isset($e['folder'], $e['version']) && is_scalar($e['version'])
-                && (string) $e['folder'] === $p['ordner']) {
-                return (string) $e['version'];
-            }
-        }
-        return '';
-    }
-    $cfgd = dirname(dirname(__DIR__)) . '/plugin.cfg';
-    if (is_file($cfgd) && preg_match('/^VERSION=([0-9][0-9.]*)/m', (string) @file_get_contents($cfgd), $m)) {
-        return $m[1];
-    }
-    return '';
 }
 
 /** URL fuer die Anzeige: Passwort durch Sterne ersetzen, Laenge bleibt sichtbar. */
@@ -5904,141 +5836,130 @@ function cam_t($schluessel)
 
 
 /**
- * Eine Sicherungsdatei einlesen - und dabei NICHTS durchgehen lassen.
+ * 1.9.42: Die Beschreibung dieser Linie fuer das gemeinsame Sicherungsmodul
+ * (Werkzeuge/gemeinsam/sicherung.php, Auftrag des Hausherrn 12.11.2026, Welle 1,
+ * Gruppe 5a). Lesen, Pruefen und Zurueckspielen macht das Modul; bis 1.9.41 stand
+ * hier eine eigene Schleife (cam_sicherung_lesen()). Gemessen 15.11.2026 mit
+ * Werkzeuge/sicherung_pruefstand.py --profil ist an 1.9.41: ein unbekannter
+ * Schluessel oben wies die ganze Datei ab, eine Datei ohne Kennzeichen oder mit
+ * dem eines anderen Plugins wurde gelesen wie eine eigene, und der Knopf
+ * "Einstellungen zurueckspielen" wirkte ohne Haken.
  *
- * Der wichtigste Punkt: eine halb gueltige Datei ueberschreibt GAR NICHTS.
- * Wer eine Sicherung zurueckspielt, will entweder den ganzen Stand oder
- * gar keinen - eine zur Haelfte uebernommene Konfiguration ist schlimmer
- * als die alte, und man sieht es ihr nicht an.
+ * Kennzeichen: bis 1.9.41 schrieb der Knopf _plugin = "ACTi Kamera (<Ordner>),
+ * Fassung <Fassung>" (seit 1.9.23, gemessen an allen Fassungen 1.9.14 bis
+ * 1.9.41) - mit Leerzeichen, Klammern und Ordner keine Namensform, die das Modul
+ * annimmt. Seit 1.9.42 traegt die Datei den Namen des Repositorys (Regeln/05,
+ * Punkt 1); das alte Kennzeichen nimmt 'kennzeichen_frueher_muster' weiter an.
+ * 1.9.14 bis 1.9.22 schrieben keinen Kopf; eine solche Datei ist nicht sicher von
+ * einer fremden zu unterscheiden und wird abgewiesen (Entscheidung des Hausherrn
+ * 12.11.2026).
  *
- * Unbekannte Schluessel sind eine Beanstandung, kein stiller Verlust: sie
- * stammen aus einer anderen Fassung oder einem anderen Plugin.
- *
- * Rueckgabe: array(Konfiguration|null, Beanstandungen[], uebernommene Werte,
- *                  Hinweise[]) - die Hinweise seit 1.9.23 (C1).
+ * Wie bisher: bekannt ist jeder Schluessel aus cam_alle_vorgaben() (je Kamera und
+ * pluginweit); jeder Wert geht durch cam_wert_pruefen() mit dem Satz
+ * TEXT.SICH_WERT; eine halb gueltige Datei aendert nichts, alle Beanstandungen
+ * werden gesammelt; ein fehlender Schluessel aus cam_vorgaben() weist die Datei
+ * ab. Was fehlen darf, behaelt den geltenden Wert und wird jetzt genannt: die
+ * Felder je Kamera (wie bisher, bis 1.9.41 still), die Spaetliste
+ * cam_sicherung_spaeter() und die Sprachansagen (seit 1.9.35; bis 1.9.41 setzte
+ * cam_ansage_sicherung_vor() sie still auf den geltenden Wert). Ein leeres Token
+ * laesst das geltende stehen (Regel 3 des Moduls; bis 1.9.41 eigener Satz
+ * TEXT.SICH_TOKEN_BEHALTEN). Eine Datei mit Sprechtoken wird abgewiesen; die
+ * Vermerke ansage_token_herkunft und ansage_aus_datei kommen nie aus einer Datei.
  */
-function cam_sicherung_lesen($roh, &$namen = null)
+function cam_sicherung_beschreibung()
 {
-    $roh = cam_ansage_sicherung_vor($roh);     // 1.9.35: Token und Vermerk bleiben die geltenden
-    /* $namen (X-3): die Namen der beanstandeten Schluessel, fuer die Warnung
-       am Knopf "Einstellungen sichern" - Namen, nie Werte. */
-    $namen = array();
-    $mangel = array();
-    $hinweise = array();
-    $daten = json_decode((string) $roh, true);
-    if (!is_array($daten)) {
-        return array(null, array(cam_t('TEXT.SICH_KEIN_JSON')), 0, array());
+    $p = cam_paths();
+    $tts = array_merge(array_keys(ansage_werk_block()), ansage_geheim());
+    $schluessel = array(
+        'tts' => sicherung_block($tts, array('ziele' => sicherung_liste(array('art', 'wo', 'laut', 'sprache', 'ein'))
+                                                        + array('fehlt' => 'behalten')))
+                 + array(
+                     'sichern' => 'ansage_sicherung_bereinigen',
+                     'pruefen' => function ($w, $k = '', $neu = null, $roh = null) {
+                         /* 1.9.35: eine Sicherung dieses Plugins traegt nie ein Sprechtoken - traegt die Datei eines,
+                          * wird sie abgewiesen. Gemessen am Block der DATEI, denn Regel 3 des Moduls setzt ein leeres
+                          * Feld vorher auf den geltenden Wert. */
+                         if (ansage_sicherung_mangel($roh) || cam_ansage_wert('tts', ansage_sicherung_bereinigen($w)) !== true) {
+                             return ac_e(sprintf(cam_t('TEXT.SICH_WERT'), 'tts', 'ansage'));
+                         }
+                         return '';
+                     },
+                     'wandeln' => function ($w) {
+                         $g = '';
+                         return ansage_wert_pruefen(ansage_sicherung_bereinigen($w), $g, cam_ansage_modi());
+                     }),
+        'ansage_regeln' => sicherung_block(array_keys(ansage_regeln_vorgaben())),
+        'ansage_haken' => sicherung_block(array('kamera')),
+        'notify' => sicherung_block(array('push', 'push_minutes')),
+    );
+    foreach (cam_sicherung_fehlen_darf() as $s) {
+        if (!isset($schluessel[$s])) { $schluessel[$s] = array(); }
+        $schluessel[$s]['fehlt'] = 'behalten';
     }
-    /* Eine JSON-LISTE ist keine Sicherung (U15). Bis 1.9.22 lief [1,2] in
-       die Schleife, und $k[0] auf einem ganzzahligen Schluessel gab unter
-       PHP 8 eine Warnung mitten in der Seite. */
-    if ($daten && array_keys($daten) === range(0, count($daten) - 1)) {
-        return array(null, array(cam_t('TEXT.SICH_KEIN_JSON')), 0, array());
+    return array(
+        'kennzeichen' => 'LoxBerry-Plugin-ACTiKamera',
+        'kennzeichen_frueher_muster' => '/^ACTi Kamera \([A-Za-z0-9_.\-]{1,64}\)(, Fassung [A-Za-z0-9_.\-]{1,32})?\z/',
+        'hinweis' => cam_t('TEXT.SICH_KOPF_HINWEIS'),
+        /* _fassung aus der Plugin-Datenbank bzw. plugin.cfg - keine fuenfte Stelle neben den vier, die
+         * Werkzeuge/fassung_setzen.py pflegt. */
+        'home' => (string) $p['lbhome'], 'ordner' => (string) $p['ordner'],
+        'plugin_cfg' => dirname(dirname(__DIR__)) . '/plugin.cfg',
+        'vorgaben' => cam_alle_vorgaben(),
+        'schluessel' => $schluessel,
+        'nie_aus_datei' => array('ansage_token_herkunft', 'ansage_aus_datei'),
+        'pruefen' => function ($k, $w) {
+            $g = cam_wert_pruefen((string) $k, $w);
+            return $g === '' ? '' : ac_e(sprintf(cam_t('TEXT.SICH_WERT'), (string) $k, $g));
+        },
+        'vorbereiten' => 'cam_sicherung_vorbereiten',
+        'jetzt' => 'cam_ansage_cfg',
+        't' => 'cam_t',
+    );
+}
+
+/**
+ * 1.9.42: Was einer Sicherung dieser Linie fehlen darf (Regeln/05 Punkt 6 und 7):
+ * die Felder je Kamera (bis 1.9.41 behielten sie still den geltenden Wert), die
+ * Spaetliste cam_sicherung_spaeter() und die Sprachansagen. Sie behalten den
+ * geltenden Wert, und die Meldung nennt sie.
+ */
+function cam_sicherung_fehlen_darf()
+{
+    $aus = array_merge(cam_sicherung_spaeter(), array('tts', 'ansage_regeln', 'ansage_haken'));
+    foreach (array_keys(cam_alle_vorgaben()) as $k) {
+        if (!array_key_exists($k, cam_vorgaben())) { $aus[] = $k; }
     }
-    /* Grundlage ist der BESTEHENDE Stand, nicht die nackte Vorgabenliste.
-     *
-     * Bis 1.9.16 stand hier "$neu = cam_vorgaben();" - 22 Schluessel gegen die
-     * 86, die cam_config() fuehrt. Das hatte zwei Folgen, beide gemessen:
-     * die selbst erzeugte Sicherung wurde mit 64 Beanstandungen abgelehnt
-     * (die beiden Knoepfe waren kein Paar), und eine Teildatei, die durchkam,
-     * loeschte alles, was nicht darin stand - Aktionstoken, Kameraadresse,
-     * Benutzer, Kennwort und alle vier Ausloese-Token. Wer weniger sichert,
-     * als er hat, darf beim Zurueckspielen nicht mehr verlieren, als er
-     * gesichert hat: ein fehlender Schluessel behaelt seinen jetzigen Wert.
-     */
-    $neu = cam_config();
-    $bekannt = array_keys(cam_alle_vorgaben());
-    $anzahl = 0;
-    foreach ($daten as $k => $w) {
-        /* Der lesbare Kopf (_hinweis, _stand) wird UEBERGANGEN, nicht
-           beanstandet - er ist keine Einstellung. */
-        if (!is_string($k)) {
-            // {"0":1}: ein ganzzahliger Schluessel ist keine Einstellung (U15).
-            $mangel[] = sprintf(cam_t('TEXT.SICH_FREMD'), (string) $k);
-            $namen[] = (string) $k;
-            continue;
-        }
-        if ($k !== '' && $k[0] === '_') {
-            continue;
-        }
-        if (!in_array($k, $bekannt, true)) {
-            $mangel[] = sprintf(cam_t('TEXT.SICH_FREMD'), (string) $k);
-            $namen[] = (string) $k;
-            continue;
-        }
-        /* Jeder WERT wird geprueft, nicht nur der Schluessel. Bis 1.9.16
-           wurde "NEINDANKE" als Mindestpause anstandslos uebernommen. */
-        $grund = cam_wert_pruefen($k, $w);
-        if ($grund !== '') {
-            $mangel[] = sprintf(cam_t('TEXT.SICH_WERT'), (string) $k, $grund);
-            $namen[] = (string) $k;
-            continue;
-        }
-        /* Ein LEERES Aktions- oder Ausloese-Token heisst "kein Token
-         * gesichert" (C1/U4, Regeln/05): das geltende bleibt, und die Meldung
-         * sagt es. Bis 1.9.22 wurde es leer geschrieben; im selben Aufruf
-         * heilte cam_config() aus der Zweitschrift, alle zurueckgespielten
-         * Werte fielen auf den alten Stand, und die Seite meldete
-         * "uebernommen". Leere Ausloese-Token wuerfelte die Seite beim
-         * naechsten Aufbau still neu. Behalten statt Abweisen wie Renault-NG
-         * 2.1.13: eine sonst gueltige Sicherung bleibt zurueckspielbar, und die
-         * Adressen in Loxone gelten weiter. */
-        if ($w === '' && in_array($k, cam_selbsterzeugte_schluessel(), true)) {
-            $hinweise[] = sprintf(cam_t('TEXT.SICH_TOKEN_BEHALTEN'), $k);
-            continue;
-        }
-        $neu[$k] = $w;
-        $anzahl++;
+    return $aus;
+}
+
+/**
+ * 1.9.42: Vor dem Speichern (Rueckruf 'vorbereiten' des Moduls):
+ *  - der Block tts wird wie bis 1.9.41 vervollstaendigt, und die geltenden
+ *    Sprechtoken bleiben (die Sicherung traegt keine); kam er nicht aus der
+ *    Datei, steht dort schon der geltende;
+ *  - Regel dieser Linie seit 1.9.35 (bis 1.9.41 in cam_ansage_sicherung_vor()):
+ *    ansage_aus_datei = 1 - nach dem Zurueckspielen gilt die Sprachausgabe der
+ *    Sicherung, eine liegengebliebene ansage.json aus der Probe vom 01.11. wird
+ *    nicht mehr uebernommen. Den Herkunftsvermerk ansage_token_herkunft haelt
+ *    das Modul ('nie_aus_datei').
+ */
+function cam_sicherung_vorbereiten($neu, $jetzt, $r)
+{
+    if (!in_array('tts', $r['fehlt_behalten'], true) && isset($neu['tts']) && is_array($neu['tts'])) {
+        $jt = (is_array($jetzt) && isset($jetzt['tts']) && is_array($jetzt['tts'])) ? $jetzt['tts'] : array();
+        list($tv) = ansage_vervollstaendigen($neu['tts'], 'aus');
+        $neu['tts'] = ansage_sicherung_tokens_behalten($tv, $jt);
     }
-    if ($anzahl === 0) {
-        $mangel[] = cam_t('TEXT.SICH_LEER');
-    }
-    // Eine halb gueltige Datei aendert GAR NICHTS.
-    /* FEHLENDE Schluessel sind eine Beanstandung, kein stiller Rueckfall.
-     *
-     * Bis hierher war die Vorgabenliste der Ausgangspunkt, und nur was in
-     * der Datei stand wurde darueber geschrieben. Eine Datei mit einem
-     * einzigen Schluessel lief damit ohne Beanstandung durch, wurde
-     * gespeichert, und alle uebrigen Einstellungen fielen auf Werk
-     * zurueck - quittiert mit "1 Wert uebernommen".
-     *
-     * Gemessen an VolkswagenID 0.9.11 am 03.09.2026 unter PHP 7.4 und 8.4:
-     * dort fiel dabei auch das Aktionstoken auf '', und jede im Miniserver
-     * eingetragene Adresse war stumm ungueltig. Am 07.09.2026 ueber den
-     * Bestand ausgerollt (30 Linien).
-     *
-     * Der Hausstandard sagt: eine halb gueltige Datei aendert gar nichts.
-     * Verglichen wird gegen die VORGABEN, nicht gegen $bekannt: was
-     * ausserhalb der Konfigurationsdatei liegt - Zugangsdaten in einer
-     * eigenen Datei - faellt nicht auf Werk zurueck und darf hier fehlen. */
-    $fehlend = array();
-    foreach (array_keys(cam_vorgaben()) as $fk) {
-        if (!array_key_exists($fk, $daten)) {
-            /* Die Spaetliste (seit 1.9.32, Pflicht N2): diese Schluessel gibt
-               es erst seit der Fassung 1.9.32 - eine aeltere Sicherung kennt
-               sie nicht. Sie behalten den GELTENDEN Wert ($neu beginnt mit
-               cam_config()), und der Hinweis sagt es. Ohne diese Ausnahme
-               liesse sich keine 1.9.31-Sicherung mehr zurueckspielen. */
-            if (in_array($fk, cam_sicherung_spaeter(), true)) {
-                $hinweise[] = sprintf(cam_t('TEXT.SICH_SPAETER'), $fk, (string) $neu[$fk]);
-                continue;
-            }
-            $fehlend[] = $fk;
-        }
-    }
-    if ($fehlend) {
-        $mangel[] = sprintf(cam_t('TEXT.SICH_FEHLEND'), count($fehlend),
-            htmlspecialchars(implode(', ', $fehlend), ENT_QUOTES, 'UTF-8'));
-        foreach ($fehlend as $fk) { $namen[] = $fk; }
-    }
-    return array($mangel ? null : $neu, $mangel, $anzahl, $hinweise);
+    $neu['ansage_aus_datei'] = 1;
+    return $neu;
 }
 
 /**
  * Bestuende die EIGENE Sicherung jetzt das Zurueckspielen? (X-3)
  *
- * Gebaut wie der Knopf "Einstellungen sichern" (Kopf + cam_config()) und durch
- * DIESELBE cam_sicherung_lesen() geschickt. Rueckgabe: die Namen der
+ * Seit 1.9.42 ueber das gemeinsame Sicherungsmodul: die Datei, die der Knopf
+ * "Einstellungen sichern" liefert, gegen dieselbe Pruefung wie das
+ * Zurueckspielen (sicherung_selbstpruefung()). Rueckgabe: die Namen der
  * Einstellungen, an denen es scheitern wuerde (leer = geht durch) - nie Werte.
  * Bis 1.9.25 merkte man das erst beim Umzug auf den zweiten LoxBerry: ein
  * gespeicherter Wert ausserhalb der Grenzen (von Hand oder aus einer alten
@@ -6046,18 +5967,9 @@ function cam_sicherung_lesen($roh, &$namen = null)
  */
 function cam_rueckspiel_befund()
 {
-    $js = json_encode(array('_stand' => date('c')) + cam_config(),
-        JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if ($js === false) {
-        return array('JSON');
-    }
-    $namen = array();
-    $r = cam_sicherung_lesen($js, $namen);
-    if ($r[0] !== null) {
-        return array();
-    }
-    $namen = array_values(array_unique($namen));
-    return $namen ? $namen : array('?');
+    $b = cam_sicherung_beschreibung();
+    $j = cam_ansage_cfg();
+    return sicherung_selbstpruefung($b, sicherung_bauen($b, cam_config()), $j);
 }
 
 /* ==================================================================

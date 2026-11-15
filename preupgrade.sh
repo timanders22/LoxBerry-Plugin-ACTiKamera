@@ -12,6 +12,10 @@
 # der Installer loescht data/plugins/<ordner>/ ohne jede Bedingung, aber
 # "rm -rf .../<ordner>/" trifft "<ordner>.upgrade_sicherung" nicht. Der Punkt
 # im Namen ist der ganze Unterschied.
+# [upgrade_daten] Argumente des Installers festhalten - unten sichert der gemeinsame Baustein
+# [upgrade_daten] upgrade_daten.sh (neben diesem Skript) den ganzen Datenordner.
+UPGD_ORDNER="$3"; UPGD_WURZEL="$5"
+
 ARGV3=$3
 ARGV5=$5
 PFOLDER="${ARGV3:-actikamera}"
@@ -207,5 +211,14 @@ if [ -d "$ALT" ]; then
     done
     [ -e "$ALT/herzschlag.json" ] && [ ! -e "$NEU/herzschlag.json" ] \
         && mv "$ALT/herzschlag.json" "$NEU/" 2>/dev/null
+fi
+# [upgrade_daten] Gemeinsamer Baustein (Werkzeuge/gemeinsam/upgrade_daten.sh): den ganzen Datenordner
+# [upgrade_daten] neben den Ordner sichern; misslingt das, bricht die Aktualisierung mit Rueckgabe 2 ab.
+if [ -f "$(dirname "$0")/upgrade_daten.sh" ] && . "$(dirname "$0")/upgrade_daten.sh"; then
+    upgrade_daten_sichern "$UPGD_ORDNER" "$UPGD_WURZEL" || exit 2
+else
+    echo "<FAIL> Der Baustein upgrade_daten.sh fehlt neben $(basename "$0") - die Aktualisierung wird abgebrochen,"
+    echo "<FAIL> die bisherige Fassung bleibt installiert."
+    exit 2
 fi
 exit 0

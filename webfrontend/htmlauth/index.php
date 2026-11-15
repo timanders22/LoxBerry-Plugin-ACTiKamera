@@ -753,8 +753,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
  * kaeme trotzdem nicht an die Anlage; die Datei waere wertlos. Damit
  * traegt sie ein Geheimnis, und der Hinweis am Knopf sagt das.
  *
- * Seit 1.9.23 mit lesbarem Kopf (U14, Regeln/05 Punkt 2): _hinweis, _plugin,
- * _stand. Das Zurueckspielen uebergeht Schluessel, die mit _ beginnen.
+ * Seit 1.9.23 mit lesbarem Kopf (U14, Regeln/05 Punkt 2). Seit 1.9.42 baut Kopf
+ * und Inhalt das gemeinsame Sicherungsmodul (sicherung_bauen()): _hinweis,
+ * _plugin = LoxBerry-Plugin-ACTiKamera, _fassung, _stand, und _warnung, wenn das
+ * Zurueckspielen diese Datei abwiese (X-3, mit den Namen, nie mit Werten).
+ * Sprechtoken und die Vermerke der Sprachansage gehoeren nicht hinein.
  *
  * Sichern und Zurueckspielen stehen seit 1.9.23 VOR dem Lesen der
  * Konfiguration fuer die Seite (U2, B2): bis 1.9.22 las die Seite sie vorher,
@@ -762,21 +765,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && function_e
  * anschliessendes "Speichern" machte das Zurueckspielen still rueckgaengig
  * (keep_days fiel zurueck, stream_token wurde leer). */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_sichern'])) {
-    $ac_fass = function_exists('cam_fassung') ? cam_fassung() : '';
-    $ac_kopf = array(
-        '_hinweis' => cam_t('TEXT.SICH_KOPF_HINWEIS'),
-        '_plugin'  => 'ACTi Kamera (' . $ac_plugin . ')' . ($ac_fass !== '' ? ', Fassung ' . $ac_fass : ''),
-        '_stand'   => date('c'),
-    );
-    /* X-3: Wuerde das Zurueckspielen diese Datei abweisen, sagt es der Kopf -
-       mit den Namen, nie mit Werten. Geliefert wird sie trotzdem. */
-    $ac_x3 = cam_rueckspiel_befund();
-    if ($ac_x3) {
-        $ac_kopf['_warnung'] = sprintf(cam_t('TEXT.SICH_X3_KOPF'), implode(', ', $ac_x3));
-    }
-    $cam_js = json_encode($ac_kopf + cam_ansage_fuer_sicherung(cam_config()),     // 1.9.35: nie ein Sprechtoken
-        JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if ($cam_js !== false) {
+    $cam_js = sicherung_json(sicherung_bauen(cam_sicherung_beschreibung(), cam_config()));
+    if ($cam_js !== '') {
         while (ob_get_level() > 0) { @ob_end_clean(); }
         header('Content-Type: application/json; charset=utf-8');
         header('Content-Disposition: attachment; filename="actikamera_einstellungen_'
@@ -790,38 +780,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_sichern'])) {
 
 /* ---------------- Einstellungen zurueckspielen ----------------
  *
- * is_uploaded_file() ZUERST: ohne diese Pruefung liesse sich jede Datei
- * des Servers unterschieben. Dann die Groessengrenze - eine Sicherung
- * dieses Plugins ist wenige Kilobyte gross; alles darueber wird gar
- * nicht erst gelesen. */
+ * Seit 1.9.42 ueber das gemeinsame Sicherungsmodul. sicherung_eingang() prueft
+ * den Haken zurueck_ok (ohne ihn wird nichts gelesen und nichts geaendert),
+ * is_uploaded_file() ZUERST (ohne diese Pruefung liesse sich jede Datei des
+ * Servers unterschieben) und die Groessengrenze des Moduls (256 KB wie bisher).
+ * sicherung_zurueckspielen() liest, prueft, verwirft Unbekanntes mit Namen,
+ * laesst einen leeren Wert den bisherigen stehen und aendert bei einer
+ * Beanstandung gar nichts. Die Schritte dieser Linie stehen in den Rueckrufen:
+ * speichern (cam_config_save() zieht die Zweitschrift mit), und danach wie bis
+ * 1.9.41 das Zuruecklesen (C1) und die Folgen wie beim Speichern im Reiter MQTT
+ * (A1: Praefixwechsel bzw. Abschalten leert unter dem alten Praefix, Abo-Datei
+ * und voller Satz sofort, die Bruecke folgt dem zurueckgespielten Haken). Die
+ * Saetze des Moduls sind maskiert; die Meldung dieser Seite wird roh ausgegeben. */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_zurueck'])) {
-    if (!isset($_FILES['cam_sicherung']) || !is_array($_FILES['cam_sicherung'])
-        || !isset($_FILES['cam_sicherung']['tmp_name'])
-        || !@is_uploaded_file($_FILES['cam_sicherung']['tmp_name'])) {
-        $ac_note = cam_t('TEXT.SICH_KEINE_DATEI');
-        $ac_note_rot = true;
-    } elseif ((int) $_FILES['cam_sicherung']['size'] > 262144) {
-        $ac_note = cam_t('TEXT.SICH_ZU_GROSS');
-        $ac_note_rot = true;
-    } else {
-        /* A1 (seit 1.9.32): der Stand VOR dem Zurueckspielen - fuer das Leeren
-           unter dem alten Praefix und das Schalten der Bruecke danach. */
-        $ac_zr_alt = cam_config();
-        $ac_zr_alt_ein = !empty($ac_zr_alt['mqtt_enabled']);
-        $ac_zr_alt_praefix = cam_mqtt_praefix($ac_zr_alt);
-        $ac_sl = cam_sicherung_lesen(
-            (string) @file_get_contents($_FILES['cam_sicherung']['tmp_name']));
-        list($cam_neu, $cam_fehler, $cam_n) = $ac_sl;
-        $cam_hinw = isset($ac_sl[3]) ? (array) $ac_sl[3] : array();
-        if ($cam_neu === null) {
-            /* ALLE Beanstandungen, nicht nur die erste - und geaendert
-             * wird nichts. */
-            $ac_note = cam_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', array_map('ac_e', $cam_fehler));
-            $ac_note_rot = true;
-        } elseif (!cam_config_save($cam_neu)) {
-            $ac_note = cam_t('TEXT.SICH_SCHREIBFEHLER');
-            $ac_note_rot = true;
-        } else {
+    $ac_sb = cam_sicherung_beschreibung();
+    list($ac_sroh, $ac_sr) = sicherung_eingang($ac_sb, $_POST, $_FILES, 'cam_sicherung');
+    if ($ac_sr === null) {
+        $ac_sb['speichern'] = function ($neu) { return cam_config_save($neu); };
+        $ac_sb['zweitschrift'] = function () {
+            $p = cam_paths();
+            return array($p['config'], $p['backup']);
+        };
+        $ac_sb['nachziehen'] = function ($neu, $jetzt) use (&$ac_note_rot) {
             /* Erfolg erst nach dem ZURUECKLESEN (C1, CLAUDE.md 2: Wirkung statt
              * Rueckgabewert). Bis 1.9.22 stand hier "uebernommen", sobald
              * cam_config_save() true lieferte - mit leerem Token heilte
@@ -829,33 +809,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cam_zurueck'])) {
              * Werte fielen still auf den alten Stand zurueck. Verglichen wird
              * die Datei (roh) gegen den geschriebenen Stand, dann noch einmal
              * nach cam_config(), die heilen koennte. */
-            $ac_rueck = cam_config_roh();
-            $ac_rueck2 = cam_config();
-            $ac_angekommen = ($ac_rueck == $cam_neu)
-                && (string) $ac_rueck2['aktionstoken'] === (string) $cam_neu['aktionstoken']
-                && cam_config_roh() == $cam_neu;
-            if ($ac_angekommen) {
-                $ac_note = sprintf(cam_t('TEXT.SICH_UEBERNOMMEN'), $cam_n)
-                    . ($cam_hinw ? ' ' . implode(' ', array_map('ac_e', $cam_hinw)) : '');
-                /* A1 (seit 1.9.32): dieselben Folgen wie das Speichern im Reiter
-                   MQTT - Praefixwechsel bzw. Abschalten leert unter dem alten
-                   Praefix, Abo-Datei und voller Satz sofort - und die Bruecke
-                   folgt dem zurueckgespielten Haken. */
-                list($ac_zr_note, $ac_zr_rot) = cam_mqtt_nach_speichern($ac_zr_alt_ein, $ac_zr_alt_praefix);
-                if ($ac_zr_note !== '') {
-                    $ac_note .= ' ' . $ac_zr_note;
-                    $ac_note_rot = $ac_note_rot || $ac_zr_rot;
-                }
-                list($ac_bok, $ac_bfehl) = cam_bruecke_meldungen(cam_bruecke_schalten(cam_config()));
-                if ($ac_bok) { $ac_note .= ' ' . implode(' ', $ac_bok); }
-                if ($ac_bfehl) { $ac_note .= ' ' . implode(' ', $ac_bfehl); $ac_note_rot = true; }
-            } else {
-                $ac_note = cam_t('TEXT.SICH_NICHT_ANGEKOMMEN');
+            $rueck = cam_config_roh();
+            $rueck2 = cam_config();
+            $angekommen = ($rueck == $neu)
+                && (string) $rueck2['aktionstoken'] === (string) $neu['aktionstoken']
+                && cam_config_roh() == $neu;
+            if (!$angekommen) {
                 $ac_note_rot = true;
                 cam_log('Zurueckspielen: geschrieben, aber beim Zuruecklesen nicht so angekommen.');
+                return array(cam_t('TEXT.SICH_NICHT_ANGEKOMMEN'));
             }
-        }
+            $saetze = array();
+            list($zr_note, $zr_rot) = cam_mqtt_nach_speichern(!empty($jetzt['mqtt_enabled']), cam_mqtt_praefix($jetzt));
+            if ($zr_note !== '') {
+                $saetze[] = $zr_note;
+                $ac_note_rot = $ac_note_rot || $zr_rot;
+            }
+            list($bok, $bfehl) = cam_bruecke_meldungen(cam_bruecke_schalten(cam_config()));
+            foreach ($bok as $s) { $saetze[] = $s; }
+            foreach ($bfehl as $s) { $saetze[] = $s; $ac_note_rot = true; }
+            $saetze[] = cam_t('TEXT.SICH_DIENST');     // cam_cron.php liest cam.json bei jedem Lauf
+            return $saetze;
+        };
+        $ac_sb['log'] = 'cam_log';
+        $ac_sr = sicherung_zurueckspielen($ac_sb, $ac_sroh);
     }
+    $ac_sm = sicherung_meldungen($ac_sb, $ac_sr);
+    $ac_note = implode(' ', array_merge($ac_sm['fehler'], $ac_sm['hinweise']));
+    $ac_note_rot = $ac_note_rot || (bool) $ac_sm['fehler'];
 }
 
 /* ==================================================================
@@ -1447,6 +1428,7 @@ if ($ac_x3) { ?>
     <input data-role="none" type="hidden" name="activetab" value="tab-settings">
     <input data-role="none" type="hidden" name="formtoken" value="<?= ac_e(cam_formtoken()) ?>">
     <input data-role="none" type="file" name="cam_sicherung" accept=".json">
+    <?= sicherung_haken_zeile(cam_sicherung_beschreibung()) ?>
     <button data-role="none" class="sm-btn sm-b-aktion" type="submit" name="cam_zurueck" value="1"><?= cam_t('TEXT.K_ZURUECK') ?></button>
   </form>
 </div>
