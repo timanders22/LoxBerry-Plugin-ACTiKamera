@@ -1190,6 +1190,59 @@ function cam_token_pruefen($mitgegeben)
 }
 
 /**
+ * Traegt die Anfrage das richtige Stromkennwort? (seit 1.9.43)
+ *
+ * Zwei Wege fuer dasselbe Kennwort: die Adresse (t=...) fuer Loxone - die
+ * App und der Intercom-Baustein koennen keine Kopfzeilen setzen - und die
+ * Kopfzeile X-Token fuer alle, die es koennen (Skripte, andere Plugins).
+ * In der Kopfzeile steht das Kennwort in keinem Protokoll, das Adressen
+ * aufzeichnet. Entscheidung des Hausherrn vom 17.11.2026. Der Name X-Token
+ * ist derselbe, den das Sprachsteuerung-Plugin fuer sein Aktionstoken
+ * annimmt; die Kopfzeile Authorization reicht Apache je nach Einbindung von
+ * PHP nicht an das Skript weiter.
+ *
+ * Ohne hinterlegtes Stromkennwort bleibt alles frei abrufbar wie bisher
+ * (Rueckgabe ''), gleich was die Anfrage mitbringt.
+ *
+ * Abgewiesen wird:
+ *   - t als Liste (t[]=...) oder eine Kopfzeile, die kein Text ist;
+ *   - Adresse UND Kopfzeile mit verschiedenen Werten, auch wenn einer davon
+ *     stimmt: zwei Angaben, die sich widersprechen, sind eine Frage, keine
+ *     Erlaubnis (WIDERSPRUCH);
+ *   - kein Kennwort oder ein falsches (TOKEN).
+ * Eine leere Kopfzeile oder ein leeres t= zaehlt als Angabe, nicht als
+ * fehlend - fail closed.
+ *
+ * Rueckgabe: '' = in Ordnung, sonst der Grund fuer Protokoll und Antwort.
+ */
+function cam_stromtoken_pruefen($soll)
+{
+    $soll = (string) $soll;
+    if ($soll === '') {
+        return '';
+    }
+    $adresse = null;
+    if (isset($_GET['t'])) {
+        if (!is_string($_GET['t'])) {
+            return 'TOKEN';
+        }
+        $adresse = $_GET['t'];
+    }
+    $kopf = null;
+    if (isset($_SERVER['HTTP_X_TOKEN'])) {
+        if (!is_string($_SERVER['HTTP_X_TOKEN'])) {
+            return 'TOKEN';
+        }
+        $kopf = $_SERVER['HTTP_X_TOKEN'];
+    }
+    if ($adresse !== null && $kopf !== null && !hash_equals($adresse, $kopf)) {
+        return 'WIDERSPRUCH';
+    }
+    $ist = $kopf !== null ? $kopf : (string) $adresse;
+    return hash_equals($soll, $ist) ? '' : 'TOKEN';
+}
+
+/**
  * Ein kurzes Token wuerfeln - zum Abtippen gedacht.
  *
  * Ohne die Zeichen, die man beim Abschreiben verwechselt: kein l gegen 1,

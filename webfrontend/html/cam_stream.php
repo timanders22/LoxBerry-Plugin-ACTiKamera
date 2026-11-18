@@ -6,6 +6,9 @@
  *
  * Aufruf:  cam_stream.php[?fps=2][&sec=300][&t=<Token>]
  *          cam_stream.php?einzeln=1   -> nur ein einzelnes JPEG (fuer Vorschau)
+ *          Das Token geht seit 1.9.43 auch in der Kopfzeile X-Token statt
+ *          in t= (fuer Abrufer, die Kopfzeilen setzen koennen; Loxone kann
+ *          es nicht und bleibt bei t=).
  *
  * (c) ACTi Kamera Plugin Authors - MIT-Lizenz
  */
@@ -50,17 +53,23 @@ $ac_cfg = cam_kcfg($ac_kam);
 
 // Optionaler Zugriffsschutz. Ohne hinterlegtes Token ist der Strom frei abrufbar
 // (im Heimnetz gewollt, damit Loxone ihn ohne Anmeldung anzeigen kann).
-$ac_token = (string) $ac_cfg['stream_token'];
-if ($ac_token !== '') {
-    $ac_hat = ac_get('t');
-    if (!hash_equals($ac_token, $ac_hat)) {
-        cam_log('cam_stream.php: abgewiesen, Stromkennwort falsch oder fehlend'
-                . ' (Aufrufer ' . $ac_ip . ')');
-        header('HTTP/1.1 403 Forbidden');
-        header('Content-Type: text/plain; charset=utf-8');
-        echo "Zugriff verweigert: falsches oder fehlendes Token.\n";
-        exit;
-    }
+// Seit 1.9.43 per t= ODER Kopfzeile X-Token - siehe cam_stromtoken_pruefen().
+$ac_tfehl = cam_stromtoken_pruefen((string) $ac_cfg['stream_token']);
+if ($ac_tfehl === 'WIDERSPRUCH') {
+    cam_log('cam_stream.php: abgewiesen, Token in Adresse und Kopfzeile verschieden'
+            . ' (Aufrufer ' . $ac_ip . ')');
+    header('HTTP/1.1 403 Forbidden');
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "Zugriff verweigert: Token in Adresse und Kopfzeile X-Token sind verschieden.\n";
+    exit;
+}
+if ($ac_tfehl !== '') {
+    cam_log('cam_stream.php: abgewiesen, Stromkennwort falsch oder fehlend'
+            . ' (Aufrufer ' . $ac_ip . ')');
+    header('HTTP/1.1 403 Forbidden');
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "Zugriff verweigert: falsches oder fehlendes Token.\n";
+    exit;
 }
 
 // Einzelbild - fuer die Vorschau in der Oberflaeche und fuer IntAlertImage

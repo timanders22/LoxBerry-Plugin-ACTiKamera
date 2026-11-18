@@ -921,6 +921,19 @@ if ($ac_rahmen) {
 .acw, .acw * { text-shadow: none !important; }
 .acw h2 { color: #6dac20; margin: 18px 0 6px; font-size: 1.15em; }
 
+/* .sm-feld wortgetreu aus VORLAGE_hausstandard.css.html (seit 1.9.43): die gemeinsamen
+   Module (Sicherung, Sprachansagen) setzen die Klasse, bis 1.9.42 war sie hier nicht definiert. */
+.sm-feld { margin: 14px 0; }
+.sm-feld > label { display: block; font-weight: 600; font-size: 0.9em; color: #555; margin: 0 0 4px; }
+/* Bedienelemente werden von jQuery Mobile umgebaut und bekommen einen eigenen
+   Behaelter. Begrenzt man das Feld selbst, bleibt der Behaelter breit - man
+   sieht ein schmales Feld in einem breiten weissen Kasten. Und beim
+   Auswahlfeld liegt das unsichtbare <select> ueber dem Knopf und faengt die
+   Klicks ab; wer es gestaltet, schiebt es weg. Deshalb wird ausschliesslich
+   der Behaelter begrenzt. */
+.sm-feld .ui-input-text, .sm-feld .ui-select, .sm-feld .ui-textinput { max-width: 520px; }
+.sm-feld .ui-input-text input, .sm-feld .ui-input-text textarea { font-size: 0.95em; }
+
 /* Gleich grosse Schaltflaechen mit gleichem Abstand, ob Link oder Formular.
    Hier stand bis 1.9.16 ein Uebersetzungsaufruf mitten im CSS-Kommentar:
    der Schluesselpruefer hielt den Schluessel fuer benutzt, und ein Wert mit
@@ -1818,6 +1831,15 @@ $ac_letztes_adr = 'http://' . ac_e($ac_host) . '/plugins/' . ac_e($ac_plugin)
 <?php } else { ?>
 <?php echo cam_t('TEXT.BILD_NUR_MIT_TOKEN'); ?>
 <span class="sm-mono"><?= $ac_letztes_adr ?></span>
+<?php } ?>
+<?php
+/* Seit 1.9.43 (Entscheidung des Hausherrn 17.11.2026): das Stromkennwort geht
+   auch in der Kopfzeile X-Token. Nur mit gesetztem Kennwort gezeigt - ohne
+   eines braucht der Abruf weder t= noch Kopfzeile. Die Adressen mit t= oben
+   bleiben, Loxone kann keine Kopfzeilen setzen. */
+if ($ac_stok_l !== '') { ?>
+<div class="sm-small" style="margin-top:4px;"><?php echo cam_t('LOX.KOPF_TOKEN'); ?><br>
+<span class="sm-mono">curl -H "X-Token: <?= ac_e($ac_stok_l) ?>" "http://<?= ac_e($ac_host) ?>/plugins/<?= ac_e($ac_plugin) ?><?php echo cam_t('TEXT.CAM_STREAM_PHP_EINZELN_1'); ?>"</span></div>
 <?php } ?>
 <div class="sm-small" style="margin-top:4px;"><b><?php echo cam_t('TEXT.DAMIT_VERSCHWINDET_DAS_KAMERA_PASS'); ?></b>
 <?php echo cam_t('TEXT.BISHER_STAND_DORT_TYPISCHERWEISE'); ?> <span class="sm-mono"><?php echo cam_t('TEXT.HTTP_KAMERA_CGI_BIN_ENCODER_USER_A'); ?></span><?php echo cam_t('TEXT.DIESEN_EINTRAG_KANN_MAN_NACH_DEM_U'); ?></div>

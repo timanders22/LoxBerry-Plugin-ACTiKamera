@@ -150,8 +150,17 @@ if ($anlass === '') {
 if (isset($_GET['bild']) || isset($_GET['serie']) || isset($_GET['zeitraffer'])
     || isset($_GET['letztes']) || isset($_GET['video'])) {
     $ac_scfg = cam_config();
-    $ac_stok = (string) $ac_scfg['stream_token'];
-    if ($ac_stok !== '' && !hash_equals($ac_stok, ac_get('t'))) {
+    /* Seit 1.9.43 auch ueber die Kopfzeile X-Token - siehe
+       cam_stromtoken_pruefen() in cam_lib.php. */
+    $ac_sfehl = cam_stromtoken_pruefen((string) $ac_scfg['stream_token']);
+    if ($ac_sfehl === 'WIDERSPRUCH') {
+        ac_weg('Bildabruf abgewiesen, Token in Adresse und Kopfzeile verschieden');
+        header('HTTP/1.1 403 Forbidden');
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "Zugriff verweigert: Token in Adresse und Kopfzeile X-Token sind verschieden.\n";
+        exit;
+    }
+    if ($ac_sfehl !== '') {
         ac_weg('Bildabruf abgewiesen, Stromkennwort falsch oder fehlend');
         header('HTTP/1.1 403 Forbidden');
         header('Content-Type: text/plain; charset=utf-8');

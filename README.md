@@ -1,6 +1,6 @@
 # LoxBerry-Plugin: ACTi Kamera
 
-Version 1.9.42 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
+Version 1.9.43 · LoxBerry ab 3.0 · PHP 7.4 und 8.x
 
 Holt Bilder von einer **ACTi-Netzwerkkamera** (E-Serie und alle Modelle mit der
 klassischen CGI-Schnittstelle) und stellt sie Loxone bereit — **ohne dass
@@ -12,6 +12,19 @@ in jedem Backup und jeder Kopie, die man weitergibt. Mit diesem Plugin ruft Loxo
 nur noch `cam.php?foto=1&token=…` auf; die Zugangsdaten bleiben auf dem LoxBerry.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
+
+## Neu in 1.9.43
+
+- **Stromkennwort auch in der Kopfzeile:** `cam_stream.php` und der Bildabruf über `cam.php` (`?letztes=1`, `?bild=`, `?serie=`, `?zeitraffer=`, `?video=1`) nehmen das Stromkennwort jetzt auch in der Kopfzeile `X-Token` an, nicht nur als `t=` in der Adresse. Wer selbst Kopfzeilen setzen kann (ein Skript, ein anderes Plugin), gibt es dort mit; dann steht es in keinem Protokoll, das Adressen aufzeichnet. Beispiel: `curl -H "X-Token: <Kennwort>" "http://<LoxBerry>/plugins/actikamera/cam_stream.php?einzeln=1"`.
+  - Die Adressen mit `t=` bleiben unverändert gültig. Loxone kann keine Kopfzeilen senden; für die App und den Intercom-Baustein ändert sich nichts.
+  - Stehen `t=` und `X-Token` beide in einer Anfrage und sind verschieden, wird mit HTTP 403 abgewiesen, auch wenn einer der beiden Werte stimmt.
+  - Ohne gesetztes Stromkennwort bleibt alles frei abrufbar wie bisher.
+- **Einstellungen sichern und zurückspielen: gemeinsames Sicherungsmodul 1.2.9 statt 1.2.3.** Für den Anwender ändert sich:
+  - Einträge in `cam.json`, die dieses Plugin nicht kennt (etwa aus einer Bearbeitung von Hand), fallen beim Zurückspielen weiter weg, werden jetzt aber mit ihrem Namen genannt, nie mit ihrem Wert. Bis 1.9.42 fielen sie still weg.
+  - Jeder unbekannte Name wird genau einmal genannt.
+  - Sicherungen aller früheren Fassungen mit Kopf (1.9.23 bis 1.9.42) werden weiter angenommen; gemessen mit allen Vorfassungen unter PHP 7.4 und 8.4.
+- **Knopf „Dokumentation“:** `plugin.cfg` nennt jetzt `WEBSITE=` mit dem GitHub-Repository; LoxBerry zeigt die Adresse bei der Installation als Knopf.
+- **Darstellung:** Die Felder der gemeinsamen Module (Sicherung, Sprachansagen) bekommen die Klasse `.sm-feld` aus der Hausvorlage; bis 1.9.42 war sie in der Oberfläche nicht definiert.
 
 ## Neu in 1.9.42
 
@@ -524,7 +537,8 @@ Token HTTP 403 und `SELFTEST;OK=0;ERR=TOKEN`.
 | `…/e.php?t=<Auslöse-Token>` | **ja²** | kurzer Auslöser für Geräte mit knappem Adressfeld |
 
 ¹ Lesend, deshalb ohne Aktionstoken. Ist in den Einstellungen ein **Stromkennwort**
-hinterlegt, verlangen diese Aufrufe zusätzlich `&t=<Kennwort>`. Bis 1.9.18 galt das
+hinterlegt, verlangen diese Aufrufe zusätzlich `&t=<Kennwort>` oder seit 1.9.43 die
+Kopfzeile `X-Token: <Kennwort>` (beide zugleich nur mit demselben Wert). Bis 1.9.18 galt das
 für `?letztes=1` **nicht** — am 06.09.2026 an der Anlage gemessen: `?bild=…`
 antwortete mit HTTP 403, `?letztes=1` mit HTTP 200 und dem aktuellen Bild.
 
