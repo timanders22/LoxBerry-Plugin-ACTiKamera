@@ -136,7 +136,8 @@ if (function_exists('cam_upgrade_laeuft') && cam_upgrade_laeuft()) {
        Hinweis als nacktes Textstueck im Browser. */
     $ac_rahmen = class_exists('LBWeb', false);
     if ($ac_rahmen) {
-        LBWeb::lbheader('ACTi Kamera', 'https://wiki.loxberry.de', 'help.html');
+        require_once __DIR__ . '/fassung.php';   // Fassung im Titel: gemeinsames Stueck fassung.php (21.11.2026)
+        LBWeb::lbheader(plugin_kopftitel('ACTi Kamera', __DIR__), 'https://wiki.loxberry.de', 'help.html');
     } else {
         echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>ACTi Kamera</title></head><body>';
     }
@@ -910,7 +911,8 @@ $ac_bt1 = $ac_stok !== '' ? '?t=' . rawurlencode($ac_stok) : '';
    zweite Argument stiesse ausserdem den Autolader an. */
 $ac_rahmen = class_exists('LBWeb', false);
 if ($ac_rahmen) {
-    LBWeb::lbheader('ACTi Kamera', 'https://wiki.loxberry.de', 'help.html');
+    require_once __DIR__ . '/fassung.php';   // Fassung im Titel: gemeinsames Stueck fassung.php (21.11.2026)
+    LBWeb::lbheader(plugin_kopftitel('ACTi Kamera', __DIR__), 'https://wiki.loxberry.de', 'help.html');
 } else {
     echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>ACTi Kamera</title></head><body>';
 }
