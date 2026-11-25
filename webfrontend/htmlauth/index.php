@@ -261,6 +261,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mqtt'])) {
        Zurueckspielen: cam_thema_pruefen(). */
     $ac_mt = trim(ac_post('mqtt_topic'));
     $ac_mg = cam_thema_pruefen($ac_mt);
+    if ($ac_mg !== '' && $ac_mt === $ac_m_alt_praefix && hb_bereich($ac_mt) !== ''
+        && $ac_mg === sprintf(cam_t('HAUSBEREICH.SICH_W'), hb_bereich($ac_mt))) {   // 1.9.48: nur NEUE Eingaben: ein schon gespeichertes Praefix sperrt das Speichern
+        $ac_mg = '';     // des Reiters nicht (Regeln/07; Bauart Einspeisebremse 0.9.25)
+    }
     if ($ac_mt === '') {
         $ac_err = cam_t('MQTT.FEHLER_TOPIC') . ' ' . cam_t('TEXT.EINGABEN_ZURUECK');
         $ac_eingaben = cam_eingaben_sammeln('mqtt', array('mqtt_topic'), cam_config());
@@ -390,6 +394,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ptestnow'])) {
 /* Der HTTP-Lesezweig fuer Loxone (seit 1.9.32, E-E12): eigenes Formular im
    Reiter Einbindung, Abschnitt "Bestehende Anlagen". */
 /* 1.9.35: Sprachansagen, eigenes Formular, eigene Datei. Die Testansage spricht immer. */
+/* 1.9.48: Testmeldung an SignalBot (Knopf unter den Sprachansagen) - wie die Testansage darunter. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['meld_test'])) {
+    list($ac_at, $ac_ag) = cam_meld_test();
+    if ($ac_at) { $ac_saved = true; $ac_note = cam_t('SIGNALMELDUNG.T_OK'); } else { $ac_err = $ac_ag; }
+    $ac_tab = 'tab-settings';
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ansage_test'])) {
     list($ac_at, $ac_ag) = cam_ansage_test();
     if ($ac_at) { $ac_saved = true; $ac_note = cam_t('ANSAGEPLUGIN.M_TEST_OK'); } else { $ac_err = cam_t('ANSAGEPLUGIN.M_TEST_FEHL') . ' ' . $ac_ag; }
